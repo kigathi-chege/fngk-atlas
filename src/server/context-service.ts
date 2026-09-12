@@ -5,7 +5,9 @@ import { FileService } from '../files/file-service.js';
 import { DirectTransport } from '../transports/direct.js';
 import type { FileTransport } from '../transports/file-transport.js';
 import { FngkTerminalCommandExecutor } from '../transports/terminal-command.js';
+import type { CommandExecutor } from '../transports/terminal-command.js';
 import { TerminalFileTransport } from '../transports/terminal-file.js';
+import { DirectCommandExecutor } from '../transports/direct-command.js';
 
 function deviceTarget(device: NamespaceDevice): string { return typeof device.ref === 'string' ? device.ref : `device:${device.id}`; }
 async function matchingEvent(emitter: NodeJS.EventEmitter, predicate: (event: TerminalEvent) => boolean, timeoutMs = 5_000): Promise<TerminalEvent> {
@@ -48,6 +50,8 @@ export class EffectiveContextService {
     this.#remote.set(contextId, route); return route;
   }
   async files(contextId: string): Promise<FileService> { return new FileService([await this.route(contextId)]); }
+  async commandExecutor(contextId: string): Promise<CommandExecutor> { const route = await this.route(contextId); if (route instanceof TerminalFileTransport) return route.executor; if (route instanceof DirectTransport) return new DirectCommandExecutor(); throw Object.assign(new Error('This context has no command route.'), { code: 'route_unavailable' }); }
+  async commandPath(contextId: string, logicalPath: string): Promise<string> { const route = await this.route(contextId); return route instanceof DirectTransport ? route.resolve(logicalPath) : logicalPath; }
   activeTerminals() { return [...this.#remote.entries()].map(([contextId, route]) => ({ contextId, route: this.#evidence(route), sessionId: route.executor instanceof FngkTerminalCommandExecutor ? route.executor.session.sessionId : undefined })); }
   release(contextId: string, stop = false): boolean {
     const route = this.#remote.get(contextId); if (!route) return false;

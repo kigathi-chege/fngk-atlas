@@ -60,14 +60,14 @@ describe('Atlas FNGK-native server', () => {
 
   it('browses, conflict-checks, saves, and scans the process-visible machine context', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'fngk-atlas-local-context-'));
-    await import('node:fs/promises').then(async fs => { await fs.mkdir(path.join(directory, 'repo', '.git'), { recursive: true }); await fs.writeFile(path.join(directory, 'repo', 'package.json'), '{"name":"local"}'); await fs.writeFile(path.join(directory, 'repo', 'index.ts'), 'export const local = true;'); });
+    await import('node:fs/promises').then(async fs => { await fs.mkdir(path.join(directory, 'repo', '.git'), { recursive: true }); await fs.mkdir(path.join(directory, 'repo', 'coverage'), { recursive: true }); await fs.writeFile(path.join(directory, 'repo', 'package.json'), '{"name":"local","scripts":{"coverage":"vitest --coverage"}}'); await fs.writeFile(path.join(directory, 'repo', 'index.ts'), 'export function local(){return true;}'); await fs.writeFile(path.join(directory, 'repo', 'coverage', 'lcov.info'), 'SF:index.ts\nDA:1,1\nend_of_record\n'); });
     const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture }), dbPath: path.join(directory, 'atlas.db'), localRoot: directory });
     cleanups.push(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
     const listed = await app.inject({ method: 'GET', url: '/api/files?contextId=local&path=/' });
     expect(listed.json()).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ name: 'repo', type: 'directory' })]), route: expect.objectContaining({ kind: 'direct' }) });
     const opened = (await app.inject({ method: 'GET', url: '/api/files/content?contextId=local&path=/repo/index.ts' })).json();
-    expect(opened.text).toContain('local = true');
-    const saved = await app.inject({ method: 'PUT', url: '/api/files/content', payload: { contextId: 'local', path: '/repo/index.ts', contentBase64: Buffer.from('export const local = false;').toString('base64'), expectedFingerprint: opened.fingerprint } });
+    expect(opened.text).toContain('return true');
+    const saved = await app.inject({ method: 'PUT', url: '/api/files/content', payload: { contextId: 'local', path: '/repo/index.ts', contentBase64: Buffer.from('export function local(){return false;}').toString('base64'), expectedFingerprint: opened.fingerprint } });
     expect(saved.statusCode).toBe(200);
     expect((await app.inject({ method: 'PUT', url: '/api/files/content', payload: { contextId: 'local', path: '/repo/index.ts', contentBase64: Buffer.from('stale').toString('base64'), expectedFingerprint: opened.fingerprint } })).statusCode).toBe(409);
 
@@ -76,5 +76,15 @@ describe('Atlas FNGK-native server', () => {
     expect(batches.flatMap(batch => batch.entities ?? [])).toContainEqual(expect.objectContaining({ type: 'repository', path: '/repo' }));
     const evidence = (await app.inject({ method: 'GET', url: '/api/discovery/entities?contextId=local' })).json();
     expect(evidence.entities).toContainEqual(expect.objectContaining({ type: 'package', path: '/repo/package.json' }));
+    const analysisSocket = new WebSocket(address.replace(/^http/, 'ws') + '/api/analysis/repository?contextId=local&path=/repo'), analysisMessages: any[] = [];
+    analysisSocket.on('message', raw => analysisMessages.push(JSON.parse(raw.toString()))); await once(analysisSocket, 'close');
+    expect(analysisMessages).toContainEqual(expect.objectContaining({ type: 'analysis_complete', index: expect.objectContaining({ summary: expect.objectContaining({ functions: 1 }) }), coverage: '/repo/coverage/lcov.info' }));
+    expect((await app.inject({ method: 'GET', url: '/api/coverage/commands?contextId=local&repositoryPath=/repo' })).json().commands).toContainEqual(expect.objectContaining({ command: 'npm run coverage', producesCoverage: true }));
+    const coverage = await app.inject({ method: 'POST', url: '/api/coverage/ingest', payload: { contextId: 'local', repositoryPath: '/repo', revision: 'abc' } });
+    expect(coverage.json()).toMatchObject({ evidence: { format: 'lcov', revision: 'abc' }, summary: { functions: 0 } });
+    const refreshed = await app.inject({ method: 'POST', url: '/api/coverage/refresh', payload: { contextId: 'local', repositoryPath: '/repo', command: 'true' } });
+    expect(refreshed.json()).toMatchObject({ run: { status: 'succeeded' }, coverage: { artifact: '/repo/coverage/lcov.info', verified: true } });
+    const graph = (await app.inject({ method: 'GET', url: '/api/graph' })).json();
+    expect(graph.nodes.find((node: any) => node.name === 'local')).toMatchObject({ coverage: { fraction: 1, stale: false }, crap: 1 });
   });
 });

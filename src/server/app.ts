@@ -14,6 +14,12 @@ import type { TerminalInput } from '../fngk/protocol.js';
 import { EffectiveContextService } from './context-service.js';
 import { HostDiscovery } from '../discovery/host-discovery.js';
 import { EvidenceStore } from '../store/evidence-store.js';
+import { CoverageService } from '../coverage/service.js';
+import { coverageCommands } from '../coverage/commands.js';
+import { posixQuote } from '../transports/posix.js';
+import { correlateRuntime } from '../correlation/runtime-code.js';
+import { analyzeRepository } from '../analysis/repository-analyzer.js';
+import { redactCommandLine } from '../discovery/redaction.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const terminalInputs = new Set(['input', 'command', 'resize', 'interrupt', 'mode', 'control_request', 'control_resolve', 'nested_approval_resolve', 'detach', 'stop']);
@@ -111,8 +117,49 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
         if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'discovery_batch', scanId: scan.id, ...batch, route: routeEvidence(route) }));
       }
       evidence.completeScan(scan.id, { partial });
+      if (activeIndex) {
+        const runtimeEdges = correlateRuntime(activeIndex, evidence.entities(contextId));
+        activeIndex = { ...activeIndex, edges: [...new Map([...activeIndex.edges, ...runtimeEdges].map((edge: any) => [edge.id, edge])).values()] };
+        store.saveIndex(activeIndex);
+      }
       if (socket.readyState === socket.OPEN) socket.close(1000);
     })().catch(error => { if (socket.readyState === socket.OPEN) { socket.send(JSON.stringify({ type: 'error', code: (error as { code?: string }).code ?? 'discovery_failed', message: (error as Error).message })); socket.close(1011); } });
+  });
+  app.get('/api/analysis/repository', { websocket: true }, (socket, request) => {
+    const query = request.query as { contextId?: string; path?: string }, contextId = query.contextId ?? 'local';
+    if (!query.path) { socket.send(JSON.stringify({ type: 'error', code: 'repository_path_required' })); socket.close(1008); return; }
+    const repositoryPath = query.path;
+    const controller = new AbortController(); socket.once('close', () => controller.abort());
+    void (async () => {
+      const revision = await revisionFor(contextId, repositoryPath), files = await contexts.files(contextId);
+      for await (const batch of analyzeRepository({ contextId, path: repositoryPath, revision }, files, controller.signal)) {
+        if (batch.complete) {
+          const covered = await new CoverageService(files).ingest({ contextId, repositoryPath, index: batch.index, revision });
+          const runtimeEdges = correlateRuntime(covered.index, evidence.entities(contextId));
+          activeIndex = { ...covered.index, edges: [...new Map([...covered.index.edges, ...runtimeEdges].map((edge: any) => [edge.id, edge])).values()] };
+          store.saveIndex(activeIndex);
+          if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'analysis_complete', index: { id: activeIndex.id, root: activeIndex.root, revision: activeIndex.revision, summary: activeIndex.summary }, coverage: covered.artifact }));
+        } else if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'analysis_batch', nodes: batch.nodes, edges: batch.edges }));
+      }
+      if (socket.readyState === socket.OPEN) socket.close(1000);
+    })().catch(error => { if (socket.readyState === socket.OPEN) { socket.send(JSON.stringify({ type: 'error', code: (error as { code?: string }).code ?? 'analysis_failed', message: (error as Error).message })); socket.close(1011); } });
+  });
+
+  const revisionFor = async (contextId: string, repositoryPath: string) => { try { const commandPath = await contexts.commandPath(contextId, repositoryPath), result = await (await contexts.commandExecutor(contextId)).execute(`git -C ${posixQuote(commandPath)} rev-parse HEAD`); return result.exitCode === 0 ? result.output.toString('utf8').trim().split(/\r?\n/).at(-1) : undefined; } catch { return undefined; } };
+  app.get('/api/coverage/commands', async (request, reply) => {
+    const query = request.query as { contextId?: string; repositoryPath?: string }; if (!query.repositoryPath) return reply.code(400).send({ error: 'repository_path_required' });
+    try { const opened = await (await contexts.files(query.contextId ?? 'local')).read({ contextId: query.contextId ?? 'local', path: path.posix.join(query.repositoryPath, 'package.json') }); return { commands: coverageCommands(opened.text ? JSON.parse(opened.text) : {}) }; }
+    catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
+  });
+  app.post('/api/coverage/ingest', async (request, reply) => {
+    if (!activeIndex) return reply.code(404).send({ error: 'no_active_index' }); const body = request.body as { contextId?: string; repositoryPath?: string; revision?: string }, contextId = body.contextId ?? 'local'; if (!body.repositoryPath) return reply.code(400).send({ error: 'repository_path_required' });
+    try { const revision = body.revision ?? await revisionFor(contextId, body.repositoryPath), result = await new CoverageService(await contexts.files(contextId)).ingest({ contextId, repositoryPath: body.repositoryPath, index: activeIndex, revision }); activeIndex = result.index; store.saveIndex(activeIndex); return { artifact: result.artifact, evidence: result.evidence ? { format: result.evidence.format, source: result.evidence.source, revision: result.evidence.revision, collectedAt: result.evidence.collectedAt, files: Object.keys(result.evidence.files).length } : null, revision, summary: { functions: activeIndex.nodes.filter((node: any) => node.type === 'function' && node.coverage && !node.coverage.stale).length } }; }
+    catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
+  });
+  app.post('/api/coverage/refresh', async (request, reply) => {
+    if (!activeIndex) return reply.code(404).send({ error: 'no_active_index' }); const body = request.body as { contextId?: string; repositoryPath?: string; command?: string }, contextId = body.contextId ?? 'local', command = String(body.command ?? '').trim(); if (!body.repositoryPath || !command || command.length > 16_000) return reply.code(400).send({ error: 'invalid_coverage_run' });
+    try { const started = Date.now(), commandPath = await contexts.commandPath(contextId, body.repositoryPath), result = await (await contexts.commandExecutor(contextId)).execute(`cd ${posixQuote(commandPath)} && ${command}`, { timeoutMs: 30 * 60_000 }); const revision = await revisionFor(contextId, body.repositoryPath), coverage = await new CoverageService(await contexts.files(contextId)).ingest({ contextId, repositoryPath: body.repositoryPath, index: activeIndex, revision, revisionVerified: result.exitCode === 0 }); activeIndex = coverage.index; store.saveIndex(activeIndex); const run = { id: randomUUID(), symbolId: `coverage:${contextId}:${body.repositoryPath}`, mode: 'coverage', status: result.exitCode === 0 ? 'succeeded' : 'failed', durationMs: Date.now() - started, summary: { command: redactCommandLine(command), exitCode: result.exitCode, artifact: coverage.artifact, revision } }; store.saveRun(run); return { run, output: result.output.toString('utf8'), coverage: { artifact: coverage.artifact, revision, verified: result.exitCode === 0 } }; }
+    catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
   });
 
   app.get('/api/fngk/terminals', { websocket: true }, (socket, request) => {

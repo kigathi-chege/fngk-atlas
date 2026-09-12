@@ -1,12 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { CommandExecutor } from '../transports/terminal-command.js';
 import type { DiscoveredEntity } from './host-discovery.js';
+import { redactCommandLine } from './redaction.js';
 
 const id = (context: string, type: string, name: string) => createHash('sha256').update(`${context}\0${type}\0${name}`).digest('hex').slice(0, 32);
-const redactCommand = (value: string) => value
-  .replace(/((?:--?|\/)(?:token|password|passwd|secret|credential|cookie|authorization)(?:=|\s+))[^\s]+/gi, '$1[redacted]')
-  .replace(/((?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|COOKIE|AUTHORIZATION)=)[^\s]+/g, '$1[redacted]')
-  .replace(/([a-z][a-z0-9+.-]*:\/\/[^:\s/@]+:)[^@\s]+@/gi, '$1[redacted]@');
 
 export class RuntimeDiscovery {
   constructor(readonly executor: CommandExecutor) {}
@@ -16,7 +13,7 @@ export class RuntimeDiscovery {
     for (const line of (await attempt(`ps -eo pid=,ppid=,user=,comm=,args=`)).split(/\r?\n/)) {
       const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s*(.*)$/); if (!match) continue;
       const [, pid, ppid, user, executable, command] = match;
-      entities.push({ id: id(contextId, 'process', pid), contextId, type: 'process', name: executable, path: '', metadata: metadata({ pid: Number(pid), ppid: Number(ppid), user, executable, command: redactCommand(command) }) });
+      entities.push({ id: id(contextId, 'process', pid), contextId, type: 'process', name: executable, path: '', metadata: metadata({ pid: Number(pid), ppid: Number(ppid), user, executable, command: redactCommandLine(command) }) });
     }
     for (const line of (await attempt(`systemctl list-units --type=service --all --no-legend --no-pager`)).split(/\r?\n/)) {
       const fields = line.trim().split(/\s+/); if (!fields[0]?.endsWith('.service')) continue;
