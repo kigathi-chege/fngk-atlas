@@ -42,4 +42,5 @@ export class Store {
   latestIndex() { const row=this.db.prepare("SELECT graph_json graphJson FROM indexes WHERE graph_json<>'{}' ORDER BY updated_at DESC LIMIT 1").get();if(!row)return null;try{return JSON.parse(row.graphJson)}catch{return null} }
   saveRun(value) { this.db.prepare('INSERT INTO runs VALUES(?,?,?,?,?,?,?)').run(value.id,value.symbolId,value.mode,value.status,value.durationMs??null,JSON.stringify(value.summary??{}),new Date().toISOString()); }
   runs(limit=30) { return this.db.prepare('SELECT id,symbol_id symbolId,mode,status,duration_ms durationMs,summary_json summaryJson,created_at createdAt FROM runs ORDER BY created_at DESC LIMIT ?').all(limit).map(r=>({...r,summary:JSON.parse(r.summaryJson)})); }
+  close() { this.db.close(); }
 }

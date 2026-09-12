@@ -14,6 +14,7 @@ export interface TerminalSpawnOptions {
 export class TerminalSession extends EventEmitter {
   readonly process: ChildProcessWithoutNullStreams;
   readonly args: readonly string[];
+  sessionId?: string;
   #closed = false;
   #stderr = '';
 
@@ -26,6 +27,10 @@ export class TerminalSession extends EventEmitter {
     lines.on('line', line => this.#receive(line));
     this.process.stderr.on('data', chunk => {
       this.#stderr = (this.#stderr + chunk.toString('utf8')).slice(-64 * 1024);
+    });
+    this.process.stdin.on('error', error => {
+      if ((error as NodeJS.ErrnoException).code === 'EPIPE') { this.#closed = true; return; }
+      this.emit('error', Object.assign(new Error(redact(error.message)), { code: 'input_error' }));
     });
     this.process.on('error', error => this.emit('error', Object.assign(new Error(redact(error.message)), { code: error.name === 'AbortError' ? 'cancelled' : 'process_error' })));
     this.process.on('close', (code, signal) => {
@@ -49,6 +54,7 @@ export class TerminalSession extends EventEmitter {
       this.process.kill();
       return;
     }
+    if (event.type === 'ready' && typeof event.sessionId === 'string') this.sessionId = event.sessionId;
     this.emit('event', event);
     this.emit(event.type, event);
   }

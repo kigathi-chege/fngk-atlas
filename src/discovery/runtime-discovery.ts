@@ -1,0 +1,34 @@
+import { createHash } from 'node:crypto';
+import type { CommandExecutor } from '../transports/terminal-command.js';
+import type { DiscoveredEntity } from './host-discovery.js';
+
+const id = (context: string, type: string, name: string) => createHash('sha256').update(`${context}\0${type}\0${name}`).digest('hex').slice(0, 32);
+const redactCommand = (value: string) => value
+  .replace(/((?:--?|\/)(?:token|password|passwd|secret|credential|cookie|authorization)(?:=|\s+))[^\s]+/gi, '$1[redacted]')
+  .replace(/((?:TOKEN|PASSWORD|PASSWD|SECRET|CREDENTIAL|COOKIE|AUTHORIZATION)=)[^\s]+/g, '$1[redacted]')
+  .replace(/([a-z][a-z0-9+.-]*:\/\/[^:\s/@]+:)[^@\s]+@/gi, '$1[redacted]@');
+
+export class RuntimeDiscovery {
+  constructor(readonly executor: CommandExecutor) {}
+  async scan(contextId: string, routeId: string, signal?: AbortSignal): Promise<DiscoveredEntity[]> {
+    const entities: DiscoveredEntity[] = [], metadata = (value: Record<string, unknown>) => ({ ...value, routeId });
+    const attempt = async (command: string) => { if (signal?.aborted) throw Object.assign(new Error('Discovery cancelled.'), { code: 'cancelled' }); try { const result = await this.executor.execute(command, { timeoutMs: 10_000, signal }); return result.exitCode === 0 ? result.output.toString('utf8') : ''; } catch (error) { if (signal?.aborted) throw error; return ''; } };
+    for (const line of (await attempt(`ps -eo pid=,ppid=,user=,comm=,args=`)).split(/\r?\n/)) {
+      const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s*(.*)$/); if (!match) continue;
+      const [, pid, ppid, user, executable, command] = match;
+      entities.push({ id: id(contextId, 'process', pid), contextId, type: 'process', name: executable, path: '', metadata: metadata({ pid: Number(pid), ppid: Number(ppid), user, executable, command: redactCommand(command) }) });
+    }
+    for (const line of (await attempt(`systemctl list-units --type=service --all --no-legend --no-pager`)).split(/\r?\n/)) {
+      const fields = line.trim().split(/\s+/); if (!fields[0]?.endsWith('.service')) continue;
+      entities.push({ id: id(contextId, 'service', fields[0]), contextId, type: 'service', name: fields[0], path: '', metadata: metadata({ load: fields[1], active: fields[2], state: fields[3], description: fields.slice(4).join(' ') }) });
+    }
+    for (const line of (await attempt(`docker ps --no-trunc --format '{{json .}}'`)).split(/\r?\n/)) {
+      try { const value = JSON.parse(line); if (!value.ID) continue; entities.push({ id: id(contextId, 'container', value.ID), contextId, type: 'container', name: value.Names || value.ID, path: '', metadata: metadata({ containerId: value.ID, image: value.Image, status: value.Status }) }); } catch {}
+    }
+    for (const line of (await attempt(`ss -H -lntup`)).split(/\r?\n/)) {
+      const fields = line.trim().split(/\s+/); if (fields.length < 5) continue; const address = fields[4]; if (!address?.includes(':')) continue;
+      const pid = line.match(/pid=(\d+)/)?.[1]; entities.push({ id: id(contextId, 'port', `${fields[0]}:${address}`), contextId, type: 'port', name: address, path: '', metadata: metadata({ protocol: fields[0], state: fields[1], pid: pid ? Number(pid) : undefined }) });
+    }
+    return entities;
+  }
+}

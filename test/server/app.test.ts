@@ -57,4 +57,24 @@ describe('Atlas FNGK-native server', () => {
       expect.objectContaining({ type: 'complete', context: expect.objectContaining({ compatible: true }) }),
     ]);
   });
+
+  it('browses, conflict-checks, saves, and scans the process-visible machine context', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'fngk-atlas-local-context-'));
+    await import('node:fs/promises').then(async fs => { await fs.mkdir(path.join(directory, 'repo', '.git'), { recursive: true }); await fs.writeFile(path.join(directory, 'repo', 'package.json'), '{"name":"local"}'); await fs.writeFile(path.join(directory, 'repo', 'index.ts'), 'export const local = true;'); });
+    const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture }), dbPath: path.join(directory, 'atlas.db'), localRoot: directory });
+    cleanups.push(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
+    const listed = await app.inject({ method: 'GET', url: '/api/files?contextId=local&path=/' });
+    expect(listed.json()).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ name: 'repo', type: 'directory' })]), route: expect.objectContaining({ kind: 'direct' }) });
+    const opened = (await app.inject({ method: 'GET', url: '/api/files/content?contextId=local&path=/repo/index.ts' })).json();
+    expect(opened.text).toContain('local = true');
+    const saved = await app.inject({ method: 'PUT', url: '/api/files/content', payload: { contextId: 'local', path: '/repo/index.ts', contentBase64: Buffer.from('export const local = false;').toString('base64'), expectedFingerprint: opened.fingerprint } });
+    expect(saved.statusCode).toBe(200);
+    expect((await app.inject({ method: 'PUT', url: '/api/files/content', payload: { contextId: 'local', path: '/repo/index.ts', contentBase64: Buffer.from('stale').toString('base64'), expectedFingerprint: opened.fingerprint } })).statusCode).toBe(409);
+
+    const address = await app.listen({ host: '127.0.0.1', port: 0 }), socket = new WebSocket(address.replace(/^http/, 'ws') + '/api/discovery/scan?contextId=local'), batches: any[] = [];
+    socket.on('message', raw => batches.push(JSON.parse(raw.toString()))); await once(socket, 'close');
+    expect(batches.flatMap(batch => batch.entities ?? [])).toContainEqual(expect.objectContaining({ type: 'repository', path: '/repo' }));
+    const evidence = (await app.inject({ method: 'GET', url: '/api/discovery/entities?contextId=local' })).json();
+    expect(evidence.entities).toContainEqual(expect.objectContaining({ type: 'package', path: '/repo/package.json' }));
+  });
 });

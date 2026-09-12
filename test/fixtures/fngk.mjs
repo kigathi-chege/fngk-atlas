@@ -29,7 +29,11 @@ if (args[0] === 'version') {
   lines.on('line', line => {
     const message = JSON.parse(line);
     if (message.type === 'command') {
+      const frame = message.command.match(/__ATLAS_BEGIN_([A-Za-z0-9_]+)__/i)?.[1];
+      if (frame) process.stdout.write(JSON.stringify({ type: 'output', protocolVersion: 'fngk.terminal.v1', bodyBase64: Buffer.from(`noise\n__ATLAS_BEGIN_${frame}__\nframed payload\n__ATLAS_END_${frame}__:0\nprompt`).toString('base64') }) + '\n');
       process.stdout.write(JSON.stringify({ type: 'command_state', protocolVersion: 'fngk.terminal.v1', requestId: message.requestId, status: 'succeeded', exitCode: 0 }) + '\n');
+    } else if (message.type === 'mode') {
+      process.stdout.write(JSON.stringify({ type: 'collaboration', protocolVersion: 'fngk.terminal.v1', eventType: 'mode', mode: message.mode, requestId: message.requestId }) + '\n');
     } else if (message.type === 'detach') {
       process.stdout.write(JSON.stringify({ type: 'detached', protocolVersion: 'fngk.terminal.v1', requestId: message.requestId }) + '\n');
       process.exit(0);
