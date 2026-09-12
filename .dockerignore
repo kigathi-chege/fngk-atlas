@@ -1,0 +1,7 @@
+node_modules
+.atlas
+output
+.playwright-cli
+*.db
+*.db-wal
+*.db-shm

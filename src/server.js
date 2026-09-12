@@ -1,0 +1,28 @@
+import Fastify from 'fastify';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
+import { analyze } from './analyzer.js';
+import { Store } from './store.js';
+import { FngkConnections } from './fngk.js';
+import { runFunction } from './sandbox.js';
+import { observeLocalProcesses } from './runtime.js';
+
+const here=path.dirname(fileURLToPath(import.meta.url));const root=path.resolve(here,'..');
+const port=Number(process.env.ATLAS_PORT)||4317;const host=process.env.ATLAS_HOST||(process.env.DOCKER_CONTAINER==='1'?'0.0.0.0':'127.0.0.1');
+const store=new Store(process.env.ATLAS_DB||path.join(root,'.atlas','atlas.db'));const fngk=new FngkConnections(store);let activeIndex=store.latestIndex();
+const app=Fastify({logger:true,bodyLimit:2<<20});
+app.addHook('onSend',async(_req,reply,payload)=>{reply.header('X-Content-Type-Options','nosniff').header('X-Frame-Options','DENY').header('Referrer-Policy','no-referrer').header('Content-Security-Policy',"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'");return payload});
+app.get('/api/health',async()=>({ok:true,version:'0.1.0',activeIndex:activeIndex?.summary??null,fngk:fngk.active}));
+app.get('/api/state',async()=>({deployments:store.deployments(),activeDeployment:fngk.active,index:activeIndex?{id:activeIndex.id,root:activeIndex.root,summary:activeIndex.summary}:null,runs:store.runs()}));
+app.post('/api/index',async(req,reply)=>{const target=String(req.body?.root??'');if(!path.isAbsolute(target))return reply.code(400).send({error:'root_must_be_absolute'});try{activeIndex=await observeLocalProcesses(await analyze(target,{maxFiles:Number(req.body?.maxFiles)||6000}));store.saveIndex(activeIndex);return {id:activeIndex.id,root:activeIndex.root,summary:activeIndex.summary};}catch(error){return reply.code(400).send({error:'analysis_failed',message:error.message})}});
+app.get('/api/graph',async(req,reply)=>{if(!activeIndex)return reply.code(404).send({error:'no_active_index'});const type=String(req.query?.type??'');const query=String(req.query?.q??'').toLowerCase();const parent=String(req.query?.parent??'');let nodes=activeIndex.nodes;if(type)nodes=nodes.filter(n=>n.type===type);if(parent)nodes=nodes.filter(n=>n.parent===parent||n.id===parent);if(query)nodes=nodes.filter(n=>`${n.label} ${n.path??''} ${n.qualifiedName??''}`.toLowerCase().includes(query));const limit=Math.min(Number(req.query?.limit)||2500,10000);nodes=nodes.slice(0,limit);const ids=new Set(nodes.map(n=>n.id));return {index:{id:activeIndex.id,root:activeIndex.root,summary:activeIndex.summary},nodes,edges:activeIndex.edges.filter(e=>ids.has(e.source)&&ids.has(e.target)),total:activeIndex.nodes.length,layout:store.layout(activeIndex.id)};});
+app.get('/api/nodes/:id',async(req,reply)=>{const node=activeIndex?.nodes.find(n=>n.id===req.params.id);if(!node)return reply.code(404).send({error:'node_not_found'});const incoming=activeIndex.edges.filter(e=>e.target===node.id).slice(0,100),outgoing=activeIndex.edges.filter(e=>e.source===node.id).slice(0,100);return {node,incoming,outgoing};});
+app.post('/api/layout',async(req,reply)=>{if(!activeIndex)return reply.code(404).send({error:'no_active_index'});const positions=Array.isArray(req.body?.positions)?req.body.positions.filter(p=>typeof p.id==='string'&&Number.isFinite(p.x)&&Number.isFinite(p.y)).slice(0,10000):[];store.saveLayout(activeIndex.id,positions);return {saved:positions.length};});
+app.post('/api/run',async(req,reply)=>{if(!activeIndex)return reply.code(404).send({error:'no_active_index'});if(req.body?.consent!==true)return reply.code(409).send({error:'operation_consent_required'});try{const run=await runFunction(activeIndex,String(req.body.symbolId),req.body);store.saveRun({...run,summary:{truncated:run.truncated,exitCode:run.exitCode}});return run;}catch(error){const run={id:randomUUID(),symbolId:String(req.body?.symbolId??''),mode:'disposable',status:'unavailable',summary:{message:error.message}};store.saveRun(run);return reply.code(409).send({error:'run_unavailable',message:error.message,run});}});
+app.post('/api/fngk/connect',async(req,reply)=>{try{const connection=fngk.configure(req.body??{});const graph=await fngk.bootstrapAll();return {connection,graph};}catch(error){return reply.code(error.statusCode??400).send({error:'fngk_connection_failed',message:error.message,detail:error.detail})}});
+app.get('/api/fngk/bootstrap',async(req,reply)=>{try{return req.query?.all==='1'?await fngk.bootstrapAll():await fngk.bootstrap(req.query?.cursor)}catch(error){return reply.code(error.statusCode??502).send({error:'fngk_request_failed',message:error.message})}});
+const assets=new Map([['/', ['public/index.html','text/html; charset=utf-8']],['/app.js',['public/app.js','text/javascript; charset=utf-8']],['/styles.css',['public/styles.css','text/css; charset=utf-8']],['/table.css',['public/table.css','text/css; charset=utf-8']],['/vendor/cytoscape.js',['node_modules/cytoscape/dist/cytoscape.min.js','text/javascript; charset=utf-8']]]);
+for(const [url,[file,type]] of assets)app.get(url,async(_req,reply)=>reply.type(type).send(await readFile(path.join(root,file))));
+await app.listen({host,port});
