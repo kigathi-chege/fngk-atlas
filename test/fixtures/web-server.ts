@@ -1,0 +1,11 @@
+import path from 'node:path';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { createApp } from '../../src/server/app.js';
+import { FngkProcessClient } from '../../src/fngk/process-client.js';
+const root = path.resolve('.');
+const browserRoot='/tmp/fngk-atlas-browser-root',dbPath='/tmp/fngk-atlas-browser.db';await rm(browserRoot,{recursive:true,force:true});await rm(dbPath,{force:true});await mkdir(browserRoot,{recursive:true});await writeFile(path.join(browserRoot,'package.json'),'\n{\n  "name": "fngk-atlas",\n  "scripts": { "test": "vitest" }\n}\n');
+await writeFile(path.join(browserRoot,'binary.dat'),Buffer.from([0,1,2,255]));
+const app = await createApp({ root, localRoot: browserRoot, dbPath, fngk: new FngkProcessClient({ binary: path.resolve('test/fixtures/fngk.mjs') }) });
+await app.listen({ host: '127.0.0.1', port: 4318 });
+const close = async () => { await app.close();await rm(browserRoot,{recursive:true,force:true});await rm(dbPath,{force:true});process.exit(0); };
+process.once('SIGTERM', close); process.once('SIGINT', close);

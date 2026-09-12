@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
-import { readFile } from 'node:fs/promises';
+import staticFiles from '@fastify/static';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -20,6 +21,7 @@ import { posixQuote } from '../transports/posix.js';
 import { correlateRuntime } from '../correlation/runtime-code.js';
 import { analyzeRepository } from '../analysis/repository-analyzer.js';
 import { redactCommandLine } from '../discovery/redaction.js';
+import { buildGraphLens, type GraphLens } from '../web/lib/graph-model.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const terminalInputs = new Set(['input', 'command', 'resize', 'interrupt', 'mode', 'control_request', 'control_resolve', 'nested_approval_resolve', 'detach', 'stop']);
@@ -215,16 +217,18 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
     catch (error) { return reply.code(400).send({ error: 'analysis_failed', message: (error as Error).message }); }
   });
   app.get('/api/graph', async (request, reply) => {
-    if (!activeIndex) return reply.code(404).send({ error: 'no_active_index' });
-    const queryValue = request.query as { type?: string; q?: string; parent?: string; limit?: string };
+    const queryValue = request.query as { type?: string; q?: string; parent?: string; limit?: string; lens?: GraphLens; root?: string; layers?: string; budget?: string; contextId?: string };
     const type = String(queryValue.type ?? ''), query = String(queryValue.q ?? '').toLowerCase(), parent = String(queryValue.parent ?? '');
-    let nodes = activeIndex.nodes;
+    const indexContext=activeIndex?.contextId??'local',contextId=queryValue.contextId??indexContext,selectedIndex=activeIndex&&indexContext===contextId?activeIndex:undefined,baseIndex=selectedIndex??{id:`runtime:${contextId}`,root:'/',contextId,revision:undefined,summary:{files:0,functions:0,packages:0},nodes:[],edges:[]},runtimeNodes=evidence.entities(contextId),runtimeEdges=evidence.relationships(contextId).map(value=>({id:value.id,source:value.sourceId,target:value.targetId,type:value.type,evidence:value.evidence,observedAt:value.observedAt}));
+    let worldNodes:any[]=[],worldEdges:any[]=[];if(queryValue.lens==='world')try{const snapshot=await contexts.contexts(),profileId=`profile:${snapshot.state.profile??'default'}`;worldNodes.push({id:profileId,type:'profile',label:snapshot.state.profile??'default'});for(const context of snapshot.contexts){const node={...context,type:context.kind==='fngk-device'?'device':'context',label:context.name};worldNodes.push(node);worldEdges.push({id:`context:${profileId}:${context.id}`,source:profileId,target:context.id,type:'contains'});}for(const connection of snapshot.state.namespace?.connections??[]){worldNodes.push({...connection,type:'connection',label:connection.name??connection.id});worldEdges.push({id:`connection:${profileId}:${connection.id}`,source:profileId,target:connection.id,type:'contains'});}}catch{}
+    let nodes = [...new Map([...baseIndex.nodes,...runtimeNodes,...worldNodes].map((node:any)=>[node.id,node])).values()],allEdges=[...new Map([...baseIndex.edges,...runtimeEdges,...worldEdges].map((edge:any)=>[edge.id,edge])).values()];const totalNodes=nodes.length;
     if (type) nodes = nodes.filter((node: any) => node.type === type);
     if (parent) nodes = nodes.filter((node: any) => node.parent === parent || node.id === parent);
     if (query) nodes = nodes.filter((node: any) => `${node.label} ${node.path ?? ''} ${node.qualifiedName ?? ''}`.toLowerCase().includes(query));
     nodes = nodes.slice(0, Math.min(Number(queryValue.limit) || 2500, 10000));
-    const ids = new Set(nodes.map((node: any) => node.id));
-    return { index: { id: activeIndex.id, root: activeIndex.root, summary: activeIndex.summary }, nodes, edges: activeIndex.edges.filter((edge: any) => ids.has(edge.source) && ids.has(edge.target)), total: activeIndex.nodes.length, layout: store.layout(activeIndex.id) };
+    const ids = new Set(nodes.map((node: any) => node.id)); let edges = allEdges.filter((edge: any) => ids.has(edge.source) && ids.has(edge.target));
+    const unbounded={nodes,edges};if(queryValue.lens){const lens=buildGraphLens(unbounded,{lens:queryValue.lens,root:queryValue.root,budget:Math.min(500,Math.max(1,Number(queryValue.budget)||90)),layers:queryValue.layers?new Set(queryValue.layers.split(',').filter(Boolean)):undefined});nodes=lens.nodes;edges=lens.edges;}
+    return { index: { id: baseIndex.id, root: baseIndex.root, contextId: baseIndex.contextId ?? contextId, revision: baseIndex.revision, summary: baseIndex.summary }, nodes, edges, total: totalNodes, counts: { visibleNodes:nodes.length,visibleEdges:edges.length,totalNodes }, breadcrumbs: queryValue.root ? [queryValue.root] : [], layout: selectedIndex ? store.layout(selectedIndex.id) : [] };
   });
   app.get('/api/nodes/:id', async (request, reply) => {
     const id = (request.params as { id: string }).id, node = activeIndex?.nodes.find((item: any) => item.id === id);
@@ -244,7 +248,8 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
     catch (error) { const run = { id: randomUUID(), symbolId: String(body?.symbolId ?? ''), mode: 'disposable', status: 'unavailable', summary: { message: (error as Error).message } }; store.saveRun(run); return reply.code(409).send({ error: 'run_unavailable', message: (error as Error).message, run }); }
   });
 
-  const assets = new Map<string, [string, string]>([['/', ['public/index.html', 'text/html; charset=utf-8']], ['/app.js', ['public/app.js', 'text/javascript; charset=utf-8']], ['/styles.css', ['public/styles.css', 'text/css; charset=utf-8']], ['/table.css', ['public/table.css', 'text/css; charset=utf-8']], ['/vendor/cytoscape.js', ['node_modules/cytoscape/dist/cytoscape.min.js', 'text/javascript; charset=utf-8']]]);
-  for (const [url, [file, type]] of assets) app.get(url, async (_request, reply) => reply.type(type).send(await readFile(path.join(root, file))));
+  const webRoot = path.join(root, 'web-dist');
+  if (existsSync(webRoot)) await app.register(staticFiles, { root: webRoot, wildcard: true });
+  else app.get('/', async (_request, reply) => reply.code(503).type('text/plain').send('Atlas web assets are not built. Run npm run build.'));
   return app;
 }

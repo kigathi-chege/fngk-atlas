@@ -28,6 +28,8 @@ describe('Atlas FNGK-native server', () => {
 
     const namespace = await app.inject({ method: 'GET', url: '/api/fngk/namespace?profile=work' });
     expect(namespace.json()).toMatchObject({ protocolVersion: 'fngk.namespace.v1', profile: { name: 'work' } });
+    const world = await app.inject({ method: 'GET', url: '/api/graph?lens=world&contextId=local' });
+    expect(world.statusCode).toBe(200);expect(world.json().nodes).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'profile' }),expect.objectContaining({ type: 'device', label: 'kigathi' })]));
     expect((await app.inject({ method: 'POST', url: '/api/fngk/connect', payload: { session: 'never-accept-this' } })).statusCode).toBe(404);
   });
 
@@ -86,5 +88,13 @@ describe('Atlas FNGK-native server', () => {
     expect(refreshed.json()).toMatchObject({ run: { status: 'succeeded' }, coverage: { artifact: '/repo/coverage/lcov.info', verified: true } });
     const graph = (await app.inject({ method: 'GET', url: '/api/graph' })).json();
     expect(graph.nodes.find((node: any) => node.name === 'local')).toMatchObject({ coverage: { fraction: 1, stale: false }, crap: 1 });
+    const lens = (await app.inject({ method: 'GET', url: '/api/graph?lens=code&budget=2&layers=contains,calls' })).json();
+    expect(lens).toMatchObject({ counts: { visibleNodes: 3, totalNodes: expect.any(Number) }, breadcrumbs: [] });
+    expect(lens.nodes).toContainEqual(expect.objectContaining({ type: 'aggregate' }));
+    const machine = (await app.inject({ method: 'GET', url: '/api/graph?lens=machine&budget=500&contextId=local' })).json();
+    expect(machine.nodes).toContainEqual(expect.objectContaining({ type: 'process', metadata: expect.objectContaining({ pid: expect.any(Number) }) }));
+    const otherContext = (await app.inject({ method: 'GET', url: '/api/graph?lens=code&contextId=device:other' })).json();
+    expect(otherContext.index.contextId).toBe('device:other');
+    expect(otherContext.nodes.some((node: any) => node.type === 'function')).toBe(false);
   });
 });
