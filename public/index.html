@@ -12,7 +12,7 @@
   <header>
     <div class="brand"><span class="mark">Σ</span><span>FNGK <i>/</i> Atlas</span></div>
     <nav><button class="tab active" data-view="map">Dependency map</button><button class="tab" data-view="functions">Functions</button><button class="tab" data-view="runs">Runs</button></nav>
-    <div class="header-actions"><span id="connectionBadge" class="badge muted"><b></b> local analysis</span><button id="connectButton" class="button subtle">Connect FNGK</button></div>
+    <div class="header-actions"><span id="connectionBadge" class="badge muted"><b></b> discovering FNGK</span><button id="connectButton" class="button subtle">Refresh FNGK</button></div>
   </header>
   <main>
     <aside class="left-panel">
@@ -35,7 +35,7 @@
         <div class="legend"><span><i class="dot package"></i> package</span><span><i class="dot module"></i> module</span><span><i class="dot function"></i> function</span><span><i class="line-call"></i> call</span></div>
         <button id="saveLayout" class="icon-button" title="Save node positions">Save layout</button>
       </div>
-      <div id="mapView" class="view active"><div id="cy"></div><div id="emptyState" class="empty"><span class="empty-mark">Σ</span><h2>Interrogate a system</h2><p>Index a code root or connect FNGK to map devices, packages, modules, functions, calls, and complexity.</p></div></div>
+      <div id="mapView" class="view active"><div id="cy"></div><div id="emptyState" class="empty"><span class="empty-mark">Σ</span><h2>Interrogate a system</h2><p>Atlas discovers the installed FNGK context and maps its Devices alongside packages, modules, functions, calls, and complexity.</p></div></div>
       <div id="functionsView" class="view"><div class="table-head"><h2>Function inventory</h2><div id="functionCount"></div></div><div class="table-scroll"><table><thead><tr><th>Function</th><th>Module</th><th>Args</th><th>Lines</th><th>Complexity</th><th>Execution</th></tr></thead><tbody id="functionRows"></tbody></table></div></div>
       <div id="runsView" class="view"><div class="table-head"><h2>Run history</h2><div>Metadata persists; raw output is ephemeral</div></div><div id="runCards" class="run-cards"></div></div>
     </section>
@@ -45,17 +45,6 @@
   </main>
   <footer><span id="footerStatus"><b class="pulse"></b> Atlas ready</span><span>drag nodes · double-click to expand/collapse · <kbd>/</kbd> search</span></footer>
 
-  <dialog id="connectDialog">
-    <form method="dialog" id="connectForm">
-      <div class="dialog-title"><div><span>FNGK DEPLOYMENT</span><h2>Connect live topology</h2></div><button value="cancel" class="close">×</button></div>
-      <label>Name<input name="name" value="Signal"></label>
-      <label>Base URL<input name="baseUrl" value="https://signal.nipate.africa" required></label>
-      <label>Team ID<input name="teamId" value="4b58bb17-95b2-401f-88bf-61edd84c475d" required></label>
-      <label>Ephemeral session value<input name="session" type="password" placeholder="Value after __Host-signal_session=" autocomplete="off"></label>
-      <p>The session remains in server memory only. Operator-scoped credentials can use the same connection endpoint.</p>
-      <div id="connectError" class="error"></div><div class="dialog-actions"><button value="cancel" class="button subtle">Cancel</button><button value="default" id="connectSubmit" class="button primary">Connect</button></div>
-    </form>
-  </dialog>
   <dialog id="runDialog">
     <form method="dialog" id="runForm">
       <div class="dialog-title"><div><span>DISPOSABLE LABORATORY</span><h2 id="runTitle">Run function</h2></div><button value="cancel" class="close">×</button></div>

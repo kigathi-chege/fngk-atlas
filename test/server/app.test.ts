@@ -1,0 +1,60 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { once } from 'node:events';
+import WebSocket from 'ws';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createApp } from '../../src/server/app.js';
+import { FngkProcessClient } from '../../src/fngk/process-client.js';
+
+const fixture = path.resolve('test/fixtures/fngk.mjs');
+const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => { while (cleanups.length) await cleanups.pop()?.(); });
+
+async function harness() {
+  const directory = await mkdtemp(path.join(tmpdir(), 'fngk-atlas-server-'));
+  const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture }), dbPath: path.join(directory, 'atlas.db') });
+  cleanups.push(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
+  return app;
+}
+
+describe('Atlas FNGK-native server', () => {
+  it('exposes process context and namespace without accepting credentials', async () => {
+    const app = await harness();
+    const context = await app.inject({ method: 'GET', url: '/api/fngk/context?profile=work' });
+    expect(context.statusCode).toBe(200);
+    expect(context.json()).toMatchObject({ installed: true, compatible: true, profile: 'work' });
+    expect(context.body).not.toMatch(/credential|cookie|operator-secret/);
+
+    const namespace = await app.inject({ method: 'GET', url: '/api/fngk/namespace?profile=work' });
+    expect(namespace.json()).toMatchObject({ protocolVersion: 'fngk.namespace.v1', profile: { name: 'work' } });
+    expect((await app.inject({ method: 'POST', url: '/api/fngk/connect', payload: { session: 'never-accept-this' } })).statusCode).toBe(404);
+  });
+
+  it('relays a terminal as WebSocket JSONL events', async () => {
+    const app = await harness();
+    const address = await app.listen({ host: '127.0.0.1', port: 0 });
+    const socket = new WebSocket(address.replace(/^http/, 'ws') + '/api/fngk/terminals?target=kigathi&new=1');
+    const messages: any[] = [];
+    socket.on('message', raw => messages.push(JSON.parse(raw.toString())));
+    while (!messages.some(message => message.type === 'ready')) await once(socket, 'message');
+    socket.send(JSON.stringify({ type: 'command', requestId: 'test-1', command: 'npm test' }));
+    while (!messages.some(message => message.type === 'command_state')) await once(socket, 'message');
+    expect(messages).toContainEqual(expect.objectContaining({ type: 'command_state', requestId: 'test-1', status: 'succeeded' }));
+    socket.send(JSON.stringify({ type: 'detach', requestId: 'done' }));
+    await once(socket, 'close');
+  });
+
+  it('requires explicit confirmation and streams a guided FNGK update', async () => {
+    const app = await harness();
+    expect((await app.inject({ method: 'POST', url: '/api/fngk/update', payload: {} })).statusCode).toBe(409);
+    const response = await app.inject({ method: 'POST', url: '/api/fngk/update', payload: { confirm: true } });
+    expect(response.statusCode).toBe(200);
+    const events = response.body.trim().split('\n').map(line => JSON.parse(line));
+    expect(events).toEqual([
+      expect.objectContaining({ type: 'output', line: 'downloaded' }),
+      expect.objectContaining({ type: 'output', line: 'installed' }),
+      expect.objectContaining({ type: 'complete', context: expect.objectContaining({ compatible: true }) }),
+    ]);
+  });
+});

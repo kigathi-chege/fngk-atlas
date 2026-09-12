@@ -2,11 +2,14 @@
 
 FNGK Atlas is a local, interactive program observatory. It maps repositories, packages, modules, functions, calls, dependency manifests, local processes, and live FNGK resources without editing the inspected project.
 
+Atlas uses the installed `fngk` process and its current profile. It never asks for or stores a Signal session cookie, operator credential, team ID, or deployment URL. This branch requires an FNGK build that supports `fngk status --json` and `fngk <target> --stdio-json`.
+
 ## Run
 
 ```bash
 cd /workspace/fngk-atlas
 npm install
+npm run build
 npm start
 ```
 
@@ -31,9 +34,9 @@ Or use `docker compose up --build`, then open <http://localhost:4317> on the hos
 
 Double-click a module to add or remove its functions from the dependency map. The Functions tab retains the complete loaded inventory and sorts complexity hotspots first.
 
-## FNGK connection
+## FNGK process context
 
-The Connect dialog accepts the value of a valid `__Host-signal_session` cookie. It is held only in the Node process and is not stored in SQLite, browser storage, logs, or deployment metadata. The local service requests FNGK summary and cursor-paged graph data, then adds deployments, devices, adapters, and resources to the map.
+Atlas discovers the executable from `FNGK_BIN` or `PATH`, calls the versioned secret-free namespace command, and starts normal FNGK terminals through the JSONL mode. Authentication, terminal tickets, and profile storage remain inside FNGK. If the installed CLI is incompatible, Atlas exposes a confirmed, streamed update operation and probes again after installation.
 
 ## Execution boundary
 

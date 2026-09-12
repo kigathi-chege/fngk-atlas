@@ -8,10 +8,7 @@ export class Store {
     this.db = new DatabaseSync(file);
     this.db.exec(`
       PRAGMA journal_mode=WAL;
-      CREATE TABLE IF NOT EXISTS deployments (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL,
-        team_id TEXT NOT NULL, auth_kind TEXT NOT NULL, updated_at TEXT NOT NULL
-      );
+      DROP TABLE IF EXISTS deployments;
       CREATE TABLE IF NOT EXISTS layouts (
         graph_id TEXT NOT NULL, node_id TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL,
         updated_at TEXT NOT NULL, PRIMARY KEY(graph_id,node_id)
@@ -32,13 +29,6 @@ export class Store {
     const indexColumns=this.db.prepare('PRAGMA table_info(indexes)').all().map(column=>column.name);
     if(!indexColumns.includes('graph_json'))this.db.exec("ALTER TABLE indexes ADD COLUMN graph_json TEXT NOT NULL DEFAULT '{}' ");
   }
-  saveDeployment(value) {
-    this.db.prepare(`INSERT INTO deployments VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
-      name=excluded.name,base_url=excluded.base_url,team_id=excluded.team_id,
-      auth_kind=excluded.auth_kind,updated_at=excluded.updated_at`).run(
-      value.id, value.name, value.baseUrl, value.teamId, value.authKind, new Date().toISOString());
-  }
-  deployments() { return this.db.prepare('SELECT id,name,base_url baseUrl,team_id teamId,auth_kind authKind,updated_at updatedAt FROM deployments ORDER BY updated_at DESC').all(); }
   saveLayout(graphId, positions) {
     const insert = this.db.prepare(`INSERT INTO layouts VALUES(?,?,?,?,?) ON CONFLICT(graph_id,node_id) DO UPDATE SET x=excluded.x,y=excluded.y,updated_at=excluded.updated_at`);
     this.db.exec('BEGIN');

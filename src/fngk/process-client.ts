@@ -1,0 +1,145 @@
+import { spawn } from 'node:child_process';
+import { NAMESPACE_PROTOCOL, TERMINAL_PROTOCOL, type NamespaceSnapshot } from './protocol.js';
+import { parseNamespace } from './namespace.js';
+import { TerminalSession } from './terminal-session.js';
+import { redact } from './redaction.js';
+
+export interface FngkProcessClientOptions {
+  binary?: string;
+  timeoutMs?: number;
+  env?: NodeJS.ProcessEnv;
+}
+
+export interface FngkContextState {
+  binary: string;
+  installed: boolean;
+  compatible: boolean;
+  version?: string;
+  profile?: string;
+  namespaceProtocol?: string;
+  terminalProtocol?: string;
+  daemon: 'reachable' | 'unknown';
+  login: 'authenticated' | 'required' | 'unknown';
+  reason?: string;
+  namespace?: NamespaceSnapshot;
+}
+
+export class FngkProcessError extends Error {
+  constructor(readonly code: string, message: string, readonly exitCode?: number | null) {
+    super(redact(message));
+    this.name = 'FngkProcessError';
+  }
+}
+
+export class FngkProcessClient {
+  readonly binary: string;
+  readonly timeoutMs: number;
+  readonly env: NodeJS.ProcessEnv;
+
+  constructor(options: FngkProcessClientOptions = {}) {
+    this.binary = options.binary ?? process.env.FNGK_BIN ?? 'fngk';
+    this.timeoutMs = options.timeoutMs ?? 15_000;
+    this.env = { ...process.env, ...options.env };
+  }
+
+  async #run(args: string[], signal?: AbortSignal): Promise<string> {
+    return await new Promise((resolve, reject) => {
+      const child = spawn(this.binary, args, { env: this.env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '', stderr = '', settled = false;
+      const finish = (error?: FngkProcessError) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
+        if (error) reject(error); else resolve(stdout);
+      };
+      const cancel = () => { child.kill('SIGTERM'); finish(new FngkProcessError('cancelled', 'FNGK operation was cancelled.')); };
+      const timer = setTimeout(() => { child.kill('SIGTERM'); finish(new FngkProcessError('timeout', `FNGK operation timed out after ${this.timeoutMs}ms.`)); }, this.timeoutMs);
+      timer.unref();
+      if (signal?.aborted) cancel(); else signal?.addEventListener('abort', cancel, { once: true });
+      child.stdout.on('data', chunk => {
+        stdout += chunk.toString('utf8');
+        if (stdout.length > 4 * 1024 * 1024) { child.kill('SIGTERM'); finish(new FngkProcessError('output_limit', 'FNGK output exceeded 4 MiB.')); }
+      });
+      child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString('utf8')).slice(-64 * 1024); });
+      child.on('error', error => finish(new FngkProcessError((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'binary_missing' : 'process_error', error.message)));
+      child.on('close', code => {
+        if (code === 0) return finish();
+        const normalized = stderr.toLowerCase();
+        const failure = normalized.includes('authentication_required') || normalized.includes('authentication required') ? 'authentication_required'
+          : normalized.includes('daemon') && (normalized.includes('unavailable') || normalized.includes('not running')) ? 'daemon_unavailable'
+            : 'process_failed';
+        finish(new FngkProcessError(failure, stderr || `FNGK exited with code ${code}.`, code));
+      });
+    });
+  }
+
+  async namespace(profile?: string, signal?: AbortSignal): Promise<NamespaceSnapshot> {
+    const args = ['status', '--json'];
+    if (profile) args.push('--profile', profile);
+    try { return parseNamespace((await this.#run(args, signal)).trim()); }
+    catch (error) {
+      if (error instanceof FngkProcessError) throw error;
+      const value = error as { code?: string; message?: string };
+      throw new FngkProcessError(value.code ?? 'invalid_namespace', value.message ?? 'FNGK returned an invalid namespace document.');
+    }
+  }
+
+  async probe(profile?: string, signal?: AbortSignal): Promise<FngkContextState> {
+    let version: string;
+    try {
+      const raw = await this.#run(['version'], signal);
+      version = raw.match(/v?(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)/)?.[1] ?? raw.trim();
+    } catch (error) {
+      const reason = error instanceof FngkProcessError ? error.code : 'probe_failed';
+      return { binary: this.binary, installed: reason !== 'binary_missing', compatible: false, daemon: 'unknown', login: 'unknown', reason };
+    }
+    try {
+      const namespace = await this.namespace(profile, signal);
+      return { binary: this.binary, installed: true, compatible: true, version, profile: namespace.profile.name, namespaceProtocol: NAMESPACE_PROTOCOL, terminalProtocol: TERMINAL_PROTOCOL, daemon: 'reachable', login: 'authenticated', namespace };
+    } catch (error) {
+      const reason = error instanceof FngkProcessError ? error.code : String((error as { code?: string }).code ?? 'namespace_failed');
+      return { binary: this.binary, installed: true, compatible: false, version, profile, daemon: 'unknown', login: reason === 'authentication_required' ? 'required' : 'unknown', reason };
+    }
+  }
+
+  openTerminal(target: string, options: { newSession?: boolean; sessionId?: string; profile?: string; signal?: AbortSignal } = {}): TerminalSession {
+    const args = [target];
+    if (options.newSession) args.push('--new');
+    if (options.sessionId) args.push('--session', options.sessionId);
+    if (options.profile) args.push('--profile', options.profile);
+    args.push('--stdio-json');
+    return new TerminalSession({ binary: this.binary, args, env: this.env, signal: options.signal });
+  }
+
+  async update(onOutput: (line: string) => void, signal?: AbortSignal): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(this.binary, ['update'], { env: this.env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let settled = false, stderr = '';
+      const finish = (error?: FngkProcessError) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
+        if (error) reject(error); else resolve();
+      };
+      const cancel = () => { child.kill('SIGTERM'); finish(new FngkProcessError('cancelled', 'FNGK update was cancelled.')); };
+      const timer = setTimeout(() => { child.kill('SIGTERM'); finish(new FngkProcessError('timeout', `FNGK update timed out after ${this.timeoutMs}ms.`)); }, Math.max(this.timeoutMs, 120_000));
+      timer.unref();
+      if (signal?.aborted) cancel(); else signal?.addEventListener('abort', cancel, { once: true });
+      for (const stream of [child.stdout, child.stderr]) {
+        const lines = stream.setEncoding('utf8');
+        let buffered = '';
+        lines.on('data', chunk => {
+          if (stream === child.stderr) stderr = (stderr + chunk).slice(-64 * 1024);
+          buffered += chunk;
+          const parts = buffered.split(/\r?\n/); buffered = parts.pop() ?? '';
+          for (const line of parts) if (line) onOutput(redact(line));
+        });
+        lines.on('end', () => { if (buffered) onOutput(redact(buffered)); });
+      }
+      child.on('error', error => finish(new FngkProcessError((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'binary_missing' : 'process_error', error.message)));
+      child.on('close', code => code === 0 ? finish() : finish(new FngkProcessError('process_failed', stderr || `FNGK update exited with code ${code}.`, code)));
+    });
+  }
+}
