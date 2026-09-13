@@ -31,6 +31,6 @@ export function createWorkbenchState(initial: Partial<WorkbenchSnapshot> = {}) {
 export type WorkbenchState = ReturnType<typeof createWorkbenchState>;
 
 export function chooseContext(contexts: Array<{ id: string; kind?: string; online?: boolean }>, snapshot: Pick<WorkbenchSnapshot, 'contextId' | 'contextExplicit'>): string {
-  if (snapshot.contextExplicit && contexts.some(context => context.id === snapshot.contextId)) return snapshot.contextId;
+  if (snapshot.contextExplicit && contexts.some(context => context.id === snapshot.contextId && (context.kind !== 'fngk-device' || context.online === true))) return snapshot.contextId;
   return contexts.find(context => context.kind === 'fngk-device' && context.online)?.id ?? contexts.find(context => context.id === 'local')?.id ?? contexts[0]?.id ?? 'local';
 }

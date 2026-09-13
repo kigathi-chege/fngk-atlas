@@ -5,7 +5,7 @@ test.setTimeout(45_000);
 test('renders contextual search and safe filesystem actions in the FNGK Atlas workbench',async({page})=>{
   const errors:string[]=[],terminalSockets:string[]=[];page.on('console',message=>{if(message.type()==='error')errors.push(message.text())});page.on('pageerror',error=>errors.push(error.message));page.on('websocket',socket=>{if(socket.url().includes('/api/fngk/terminals'))terminalSockets.push(socket.url())});
   await page.goto('/');await expect(page.getByText('FNGK Atlas',{exact:true}).first()).toBeVisible();await expect(page.locator('.dv-dockview')).toHaveCount(1);
-  await expect(page.getByRole('navigation',{name:'Atlas activity'})).toBeVisible();await expect(page.getByRole('navigation',{name:'Pinned and workspace roots'})).toBeVisible();
+  await expect(page.getByRole('navigation',{name:'Atlas activity'})).toBeVisible();await expect(page.getByRole('navigation',{name:'Pinned, workspace, and minimized panels'})).toBeVisible();
   await page.getByRole('button',{name:'Search'}).first().click();await expect(page.getByLabel('Search Atlas')).toBeFocused();
   await expect(page.locator('.context-rail')).toBeVisible();await expect(page.getByText('Architecture',{exact:true}).first()).toBeVisible();await expect(page.getByText('Functions & coverage',{exact:true}).first()).toBeVisible();await expect(page.getByText('Filesystem',{exact:true}).first()).toBeVisible();await page.locator('.context-rail').getByRole('button',{name:'Atlas process host'}).click();
   await expect(page.getByRole('button',{name:/package\.json/})).toBeVisible();
@@ -34,11 +34,11 @@ test('renders contextual search and safe filesystem actions in the FNGK Atlas wo
   const minimizeAtlas=page.getByRole('button',{name:'Minimize Atlas'});if(await minimizeAtlas.count())await minimizeAtlas.click();
   await expect(page.getByLabel('Restore Atlas panels')).toBeVisible();
   await expect(page.getByRole('navigation',{name:'Atlas activity'})).toBeVisible();
-  await expect(page.getByRole('navigation',{name:'Pinned and workspace roots'})).toBeVisible();
+  await expect(page.getByRole('navigation',{name:'Pinned, workspace, and minimized panels'})).toBeVisible();
   await page.getByRole('button',{name:'Open filesystem'}).click();
   await expect(page.getByText('Filesystem',{exact:true}).first()).toBeVisible();
   await page.locator('.tree-list').click({button:'right',position:{x:240,y:220}});await expect(page.getByRole('menuitem',{name:'Pin current folder'})).toBeVisible();await expect(page.getByRole('menuitem',{name:'Add workspace root'})).toBeVisible();await page.keyboard.press('Escape');await expect(page.getByRole('menuitem',{name:'Pin current folder'})).toHaveCount(0);
-  const filesystemTab=page.getByRole('tab',{name:'Filesystem',exact:true});await filesystemTab.click({button:'right'});await page.getByRole('menuitem',{name:'Minimize'}).click();await expect(page.getByRole('button',{name:'Restore Filesystem'})).toBeVisible();await page.getByRole('button',{name:'Restore Filesystem'}).click();await expect(page.getByText('Filesystem',{exact:true}).first()).toBeVisible();expect(await page.evaluate(()=>document.querySelector('.tree-explorer')?.closest('.dv-groupview')!==document.querySelector('.graph-panel')?.closest('.dv-groupview'))).toBe(true);await page.getByRole('tab',{name:'Filesystem',exact:true}).click({button:'right'});await page.getByRole('menuitem',{name:'Float'}).click();await expect(page.locator('.dv-floating-overlay-host .dv-resize-container')).toBeVisible();
+  const filesystemTab=page.getByRole('tab',{name:'Filesystem',exact:true});await filesystemTab.click({button:'right'});await page.getByRole('menuitem',{name:'Minimize'}).click();const restoredFilesystem=page.getByRole('button',{name:'Restore Filesystem'});await expect(restoredFilesystem).toBeVisible();await expect(restoredFilesystem.locator('xpath=ancestor::nav')).toHaveAttribute('aria-label','Pinned, workspace, and minimized panels');await restoredFilesystem.click();await expect(page.getByText('Filesystem',{exact:true}).first()).toBeVisible();expect(await page.evaluate(()=>document.querySelector('.tree-explorer')?.closest('.dv-groupview')!==document.querySelector('.graph-panel')?.closest('.dv-groupview'))).toBe(true);await page.getByRole('tab',{name:'Filesystem',exact:true}).click({button:'right'});await page.getByRole('menuitem',{name:'Float'}).click();await expect(page.locator('.dv-floating-overlay-host .dv-resize-container')).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -58,7 +58,7 @@ test('keeps the persistent shell polished and reachable at desktop and narrow wi
   await page.goto('/');
   await page.locator('.context-rail').getByRole('button',{name:'Atlas process host'}).click();
   const unified=page.getByLabel('Search Atlas');await expect(unified).toBeVisible();await unified.fill('package');await expect(page.getByRole('listbox',{name:'Unified search results'})).toBeVisible();await expect(page.getByRole('option',{name:/package\.json/}).first()).toBeVisible();await page.keyboard.press('Escape');await page.locator('.atlas-shell').click({position:{x:400,y:400}});await page.keyboard.press('Control+k');await expect(unified).toBeFocused();await page.keyboard.press('Escape');
-  const geometry=await page.evaluate(()=>{const left=document.querySelector('.context-sidebar')?.closest('.dv-groupview')?.getBoundingClientRect(),right=document.querySelector('.tree-explorer')?.closest('.dv-groupview')?.getBoundingClientRect(),center=document.querySelector('.graph-panel')?.closest('.dv-groupview')?.getBoundingClientRect(),sash=document.querySelector('.dv-sash');return {left:left?.width??0,right:right?.width??0,center:center?.width??0,grip:sash?getComputedStyle(sash,'::after').content:''}});expect(Math.abs(geometry.left-geometry.right)).toBeLessThanOrEqual(8);expect(geometry.center).toBeGreaterThan(geometry.left*1.5);expect(geometry.grip).toContain('•••');
+  const geometry=await page.evaluate(()=>{const left=document.querySelector('.context-sidebar')?.closest('.dv-groupview')?.getBoundingClientRect(),right=document.querySelector('.tree-explorer')?.closest('.dv-groupview')?.getBoundingClientRect(),center=document.querySelector('.graph-panel')?.closest('.dv-groupview')?.getBoundingClientRect(),sash=document.querySelector('.dv-sash'),view=document.querySelector('.dockview-spaced .dv-view'),group=document.querySelector('.dockview-spaced .dv-groupview'),tab=document.querySelector('.atlas-tab');return {left:left?.width??0,right:right?.width??0,center:center?.width??0,grip:sash?getComputedStyle(sash,'::after').content:'',sashBackground:sash?getComputedStyle(sash).backgroundColor:'',viewPadding:view?getComputedStyle(view).padding:'',groupRadius:group?getComputedStyle(group).borderRadius:'',tabPadding:tab?getComputedStyle(tab).padding:'',tabRadius:tab?getComputedStyle(tab).borderRadius:''}});expect(Math.abs(geometry.left-geometry.right)).toBeLessThanOrEqual(8);expect(geometry.center).toBeGreaterThan(geometry.left*1.5);expect(geometry.grip).toContain('•••');expect(geometry.sashBackground).toBe('rgba(0, 0, 0, 0)');expect(geometry.viewPadding).toBe('6px');expect(geometry.groupRadius).toBe('8px');expect(geometry.tabPadding).toBe('0px 8px');expect(geometry.tabRadius).toBe('6px');
   await page.keyboard.press('Control+Shift+p');
   const palette=page.getByRole('dialog',{name:'Command palette'});
   await expect(palette).toBeVisible();
@@ -68,7 +68,7 @@ test('keeps the persistent shell polished and reachable at desktop and narrow wi
   await page.keyboard.press('Escape');
   await page.setViewportSize({width:620,height:760});
   await expect(page.getByRole('navigation',{name:'Atlas activity'})).toBeVisible();
-  await expect(page.getByRole('navigation',{name:'Pinned and workspace roots'})).toBeVisible();
+  await expect(page.getByRole('navigation',{name:'Pinned, workspace, and minimized panels'})).toBeVisible();
   await expect(page.locator('.context-sidebar')).toBeHidden();
   await expect(page.locator('.tree-explorer')).toBeHidden();
   expect(await page.locator('.graph-panel').evaluate(element=>element.closest('.dv-groupview')?.getBoundingClientRect().width??0)).toBeGreaterThan(300);

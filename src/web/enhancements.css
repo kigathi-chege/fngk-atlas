@@ -60,3 +60,20 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .terminal-panel .terminal-rail-item>.session-select{width:100%;place-items:initial}
 
 @media(max-width:760px){.atlas-command-menu>.unified-search{padding:0 5px}.unified-search-box select,.unified-search-box kbd,.title-brand{display:none}.unified-search-popover{left:5px;right:5px}.unified-search-popover em{display:none}.unified-search-popover [role=option]{grid-template-columns:55px minmax(0,1fr)}.terminal-panel .terminal-rail{width:145px;max-width:35vw}.terminal-panel header .terminal-counts{display:none}}
+
+/* The workbench canvas owns all spacing. Sashes remain hit targets, but never draw
+   divider rules through the gutters. */
+.atlas-shell>.workbench{padding:6px;background:var(--atlas-bg)}
+.dockview-spaced .dv-view-container>.dv-view{padding:6px}
+.dockview-spaced .dv-groupview{border-radius:8px!important}
+.dockview-spaced .dv-sash{background:transparent!important;border-color:transparent!important}
+.dockview-spaced .atlas-tab{padding:0 8px!important;border-radius:6px!important}
+
+.pinned-roots-rail .rail-fill{flex:1;min-height:4px}
+.pinned-roots-rail .minimized-tray{position:static;z-index:auto;left:auto;right:auto;bottom:auto;width:100%;min-height:0;display:flex;flex-direction:column;gap:4px;padding:0;border:0;background:transparent;box-shadow:none;backdrop-filter:none}
+.pinned-roots-rail .minimized-tray>button,.pinned-roots-rail .minimized-overflow>button{width:38px;height:38px;min-height:38px;display:grid;grid-template-rows:18px 10px;place-items:center;padding:2px;border:1px solid transparent;background:#101821;color:var(--atlas-muted)}
+.pinned-roots-rail .minimized-tray>button:hover,.pinned-roots-rail .minimized-overflow>button:hover{border-color:var(--atlas-border-strong);color:var(--atlas-text)}
+.pinned-roots-rail .minimized-tray span{width:34px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:7px}
+.minimized-overflow{position:relative}.minimized-overflow i{position:absolute;right:2px;top:2px;min-width:12px;padding:1px 3px;border-radius:7px;background:var(--atlas-accent);color:#111;font:700 7px/1.3 ui-monospace;font-style:normal}
+.minimized-overflow>[role=menu]{position:absolute;right:43px;bottom:0;z-index:1700;width:190px;padding:4px;border:1px solid var(--atlas-border-strong);border-radius:6px;background:var(--atlas-surface-1);box-shadow:var(--atlas-shadow-popover)}
+.minimized-overflow>[role=menu]>button{width:100%;height:30px;display:flex;align-items:center;gap:7px;padding:0 8px;border:0;background:transparent;text-align:left}.minimized-overflow>[role=menu]>button:hover{background:var(--atlas-surface-3)}

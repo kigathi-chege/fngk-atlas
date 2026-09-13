@@ -3,7 +3,6 @@
   import { createDockview, type GroupPanelPartInitParameters, type IContentRenderer, type ITabRenderer, type TabPartInitParameters } from 'dockview';
   import { writable } from 'svelte/store';
   import PanelHost from './PanelHost.svelte';
-  import MinimizedTray from './MinimizedTray.svelte';
   import SaveAsDialog from './SaveAsDialog.svelte';
   import {PanelRegistry,type AtlasPanelDescriptor} from '../lib/panel-registry.js';
   import {atlasBuffers,type AtlasBuffer} from '../lib/buffer-store.js';
@@ -43,14 +42,14 @@
       dock.addPanel({id:'atlas.inspector',title:'Inspector',component:'details',position:{referencePanel:files,direction:'below'}});
       const metrics=dock.addPanel({id:'atlas.metrics',title:'Functions & coverage',component:'metrics',position:{referencePanel:graph,direction:'below'}});
       dock.addPanel({id:'atlas.activity',title:'Activity & runs',component:'output',position:{referencePanel:metrics}});
-      metrics.api.group.api.setSize({height:300});setTimeout(()=>{navigator.api.group.api.setSize({width:320});files.api.group.api.setSize({width:320})},50);files.api.setActive();metrics.api.setActive();graph.api.setActive();
+      metrics.api.group.api.setSize({height:300});setTimeout(()=>{navigator.api.group.api.setSize({width:320});files.api.group.api.setSize({width:332})},50);files.api.setActive();metrics.api.setActive();graph.api.setActive();
     };
     if(!restored){dock.clear();seed();}
     for(const panel of [...dock.panels]){const params=panel.api.getParameters<{bufferId?:string}>();if(params.bufferId&&!atlasBuffers.get(params.bufferId)){dock.removePanel(panel);continue}remember(panel)}
     try{const savedMinimized=JSON.parse(localStorage.getItem('atlas.minimized-panels.v1')??'[]');if(Array.isArray(savedMinimized))for(const descriptor of savedMinimized){if(descriptor?.params?.bufferId&&!atlasBuffers.get(descriptor.params.bufferId))continue;panelRegistry.remember(descriptor);panelRegistry.minimize(descriptor.id)}}catch{}
     const syncEmpty=()=>{empty=dock.panels.length===0;}; syncEmpty();
     const persist=()=>{if(narrowMode)return;const value={version:2,layout:dock.toJSON()};state.setLayout(value);localStorage.setItem('atlas.workbench.v2',JSON.stringify(value));};
-    const updateMinimized=()=>{minimized=panelRegistry.all().filter(value=>value.minimized&&!responsiveMinimized.has(value.id));localStorage.setItem('atlas.minimized-panels.v1',JSON.stringify(minimized))};updateMinimized();
+    const updateMinimized=()=>{minimized=panelRegistry.all().filter(value=>value.minimized&&!responsiveMinimized.has(value.id));localStorage.setItem('atlas.minimized-panels.v1',JSON.stringify(minimized));window.dispatchEvent(new CustomEvent('atlas:minimized-panels',{detail:minimized}))};updateMinimized();
     const layout=dock.onDidLayoutChange(persist),removed=dock.onDidRemovePanel((panel:any)=>{const wasMinimized=minimizing.delete(panel.id),params=panel.api.getParameters() as {bufferId?:string};if(!wasMinimized){dirtyPanels.delete(panel.id);panelRegistry.forget(panel.id);if(params.bufferId)atlasBuffers.remove(params.bufferId)}if(panel.id==='atlas.navigator'&&dock.panels.length>0&&!wasMinimized){const graph=dock.getPanel('atlas.graph')??dock.panels[0];const added=dock.addPanel({id:'atlas.navigator',title:'Atlas',component:'navigator',position:graph?{referencePanel:graph,direction:'left'}:undefined});remember(added);}updateMinimized();syncEmpty();persist();});
     const restorePanel=(id:string)=>{const descriptor=panelRegistry.restore(id);if(!descriptor)return;let panel=dock.getPanel(id);if(!panel){const reference=dock.getPanel('atlas.graph')??dock.panels[0];panel=dock.addPanel({id:descriptor.id,title:descriptor.title,component:descriptor.kind,tabComponent:descriptor.kind==='file'?'guarded-file':undefined,params:descriptor.params,renderer:['file','terminal'].includes(descriptor.kind)?'always':undefined,position:reference?{referencePanel:reference}:undefined});}panel.api.setActive();updateMinimized();syncEmpty();};
     const adaptNarrowLayout=()=>{const narrow=window.innerWidth<=700;if(narrow===narrowMode)return;if(narrow){narrowMode=true;for(const id of ['atlas.navigator','atlas.filesystem','atlas.inspector']){const panel=dock.getPanel(id);if(!panel)continue;responsiveMinimized.add(id);minimizePanel(panel)}updateMinimized();return}for(const id of responsiveMinimized)restorePanel(id);responsiveMinimized.clear();narrowMode=false;updateMinimized();persist()};
@@ -80,7 +79,6 @@
 
 <div class="workbench">
   <div class="root-dock dockview-spaced" bind:this={host}></div>
-  <MinimizedTray items={minimized} onrestore={(id)=>host&&(host as any).__atlasRestorePanel?.(id)} onforget={(id)=>host&&(host as any).__atlasForgetPanel?.(id)}/>
   {#if empty}<section class="dock-empty-recovery" aria-label="Restore Atlas panels"><strong>Atlas workspace is empty</strong><p>Restore a panel to continue working.</p><div><button onclick={()=>window.dispatchEvent(new Event('atlas:focus-search'))}>Search</button><button onclick={()=>window.dispatchEvent(new Event('atlas:focus-files'))}>Filesystem</button><button onclick={()=>window.dispatchEvent(new Event('atlas:open-terminal'))}>Terminal</button><button onclick={()=>window.dispatchEvent(new Event('atlas:shortcuts'))}>Command palette</button></div></section>{/if}
   {#if saveAsBuffer}<SaveAsDialog buffer={saveAsBuffer} roots={roots.forContext(saveAsBuffer.contextId)} oncancel={cancelSaveAs} onsave={(path)=>window.dispatchEvent(new CustomEvent('atlas:save-buffer-as',{detail:{bufferId:saveAsBuffer!.id,path}}))}/>{/if}
   {#if pendingClose}<div class="atlas-dialog-backdrop" role="presentation"><div class="atlas-dialog" role="dialog" aria-modal="true" aria-labelledby="close-title"><h2 id="close-title">Discard changes?</h2><p>{pendingClose.title} has unsaved changes.</p><div><button onclick={()=>pendingClose=null}>Keep editing</button><button class="danger" onclick={()=>{const panel=pendingClose!;pendingClose=null;dirtyPanels.delete(panel.api.id);panel.api.close();}}>Discard</button></div></div></div>{/if}
