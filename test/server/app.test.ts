@@ -120,6 +120,9 @@ describe('Atlas FNGK-native server', () => {
 
     expect((await app.inject({method:'POST',url:'/api/files',payload:{contextId:'local',path:'/repo/new',type:'directory'}})).statusCode).toBe(201);
     expect((await app.inject({method:'POST',url:'/api/files',payload:{contextId:'local',path:'/repo/new/readme.txt',type:'file',contentBase64:Buffer.from('Atlas searchable content').toString('base64')}})).statusCode).toBe(201);
+    const firstSave=await app.inject({method:'POST',url:'/api/files/content',payload:{contextId:'local',path:'/repo/new/from-buffer.ts',contentBase64:Buffer.from('export const first = true;').toString('base64'),createOnly:true}});expect(firstSave.statusCode).toBe(201);expect(firstSave.json()).toMatchObject({fingerprint:expect.any(String),operation:{type:'file.create.content'}});
+    const conflictingSave=await app.inject({method:'POST',url:'/api/files/content',payload:{contextId:'local',path:'/repo/new/from-buffer.ts',contentBase64:Buffer.from('overwritten').toString('base64'),createOnly:true}});expect(conflictingSave.statusCode).toBe(409);
+    expect((await app.inject({method:'GET',url:'/api/files/content?contextId=local&path=/repo/new/from-buffer.ts'})).json().text).toBe('export const first = true;');
     const searched=(await app.inject({method:'GET',url:'/api/files/search?contextId=local&path=/repo&query=searchable&mode=all'})).json();
     expect(searched.matches).toContainEqual(expect.objectContaining({path:'/repo/new/readme.txt',line:1}));
     expect((await app.inject({method:'PATCH',url:'/api/files',payload:{contextId:'local',path:'/repo/new/readme.txt',destination:'/repo/new/renamed.txt'}})).statusCode).toBe(200);
