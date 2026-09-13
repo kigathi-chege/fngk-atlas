@@ -44,4 +44,6 @@ npm run start:host
 
 Open <http://127.0.0.1:4317>. The footer must say **FNGK connected**, and the context list must contain the authorized Devices. A fresh Atlas state selects the first online FNGK Device; selecting **Atlas process host** is an explicit switch to direct local access.
 
+After updating Atlas source, stop and rerun `npm run start:host`; the already-running Node process does not reload server changes. Existing repository indexes remain selectable, but remap repositories once after this release to remove previously indexed build bundles and add test/data-flow evidence.
+
 Container deployment is possible only when the FNGK executable, the correct user's profile, and a working network route to the profile's Signal origin are deliberately provided. Host-side launch is the canonical path because it naturally inherits all three.

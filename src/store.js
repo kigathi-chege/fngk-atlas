@@ -28,6 +28,8 @@ export class Store {
     `);
     const indexColumns=this.db.prepare('PRAGMA table_info(indexes)').all().map(column=>column.name);
     if(!indexColumns.includes('graph_json'))this.db.exec("ALTER TABLE indexes ADD COLUMN graph_json TEXT NOT NULL DEFAULT '{}' ");
+    if(!indexColumns.includes('context_id'))this.db.exec("ALTER TABLE indexes ADD COLUMN context_id TEXT NOT NULL DEFAULT 'local'");
+    if(!indexColumns.includes('revision'))this.db.exec('ALTER TABLE indexes ADD COLUMN revision TEXT');
   }
   saveLayout(graphId, positions) {
     const insert = this.db.prepare(`INSERT INTO layouts VALUES(?,?,?,?,?) ON CONFLICT(graph_id,node_id) DO UPDATE SET x=excluded.x,y=excluded.y,updated_at=excluded.updated_at`);
@@ -37,9 +39,11 @@ export class Store {
   }
   layout(graphId) { return this.db.prepare('SELECT node_id id,x,y FROM layouts WHERE graph_id=?').all(graphId); }
   saveIndex(value) {
-    this.db.prepare(`INSERT INTO indexes(id,root,fingerprint,summary_json,updated_at,graph_json) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET root=excluded.root,fingerprint=excluded.fingerprint,summary_json=excluded.summary_json,updated_at=excluded.updated_at,graph_json=excluded.graph_json`).run(value.id,value.root,value.fingerprint,JSON.stringify(value.summary),new Date().toISOString(),JSON.stringify(value));
+    this.db.prepare(`INSERT INTO indexes(id,root,fingerprint,summary_json,updated_at,graph_json,context_id,revision) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET root=excluded.root,fingerprint=excluded.fingerprint,summary_json=excluded.summary_json,updated_at=excluded.updated_at,graph_json=excluded.graph_json,context_id=excluded.context_id,revision=excluded.revision`).run(value.id,value.root,value.fingerprint,JSON.stringify(value.summary),new Date().toISOString(),JSON.stringify(value),value.contextId??'local',value.revision??null);
   }
-  latestIndex() { const row=this.db.prepare("SELECT graph_json graphJson FROM indexes WHERE graph_json<>'{}' ORDER BY updated_at DESC LIMIT 1").get();if(!row)return null;try{return JSON.parse(row.graphJson)}catch{return null} }
+  index(id) { const row=this.db.prepare("SELECT graph_json graphJson FROM indexes WHERE id=? AND graph_json<>'{}'").get(id);if(!row)return null;try{return JSON.parse(row.graphJson)}catch{return null} }
+  latestIndex(contextId) { const row=contextId?this.db.prepare("SELECT graph_json graphJson FROM indexes WHERE context_id=? AND graph_json<>'{}' ORDER BY updated_at DESC LIMIT 1").get(contextId):this.db.prepare("SELECT graph_json graphJson FROM indexes WHERE graph_json<>'{}' ORDER BY updated_at DESC LIMIT 1").get();if(!row)return null;try{return JSON.parse(row.graphJson)}catch{return null} }
+  indexes(contextId) { const rows=contextId?this.db.prepare("SELECT id,root,context_id contextId,revision,summary_json summaryJson,updated_at updatedAt FROM indexes WHERE context_id=? ORDER BY updated_at DESC").all(contextId):this.db.prepare("SELECT id,root,context_id contextId,revision,summary_json summaryJson,updated_at updatedAt FROM indexes ORDER BY updated_at DESC").all();return rows.map(row=>({...row,summary:JSON.parse(row.summaryJson)})); }
   saveRun(value) { this.db.prepare('INSERT INTO runs VALUES(?,?,?,?,?,?,?)').run(value.id,value.symbolId,value.mode,value.status,value.durationMs??null,JSON.stringify(value.summary??{}),new Date().toISOString()); }
   runs(limit=30) { return this.db.prepare('SELECT id,symbol_id symbolId,mode,status,duration_ms durationMs,summary_json summaryJson,created_at createdAt FROM runs ORDER BY created_at DESC LIMIT ?').all(limit).map(r=>({...r,summary:JSON.parse(r.summaryJson)})); }
   close() { this.db.close(); }

@@ -5,7 +5,7 @@ export interface WorkbenchSnapshot {
   connection: { phase: 'checking' | 'connected' | 'authentication-required' | 'unavailable'; message: string; profile?: string; version?: string };
   selection?: Selection;
   activity: string[];
-  layout?: { central?: unknown; bottom?: unknown };
+  layout?: { version?: number; layout?: unknown; central?: unknown; bottom?: unknown };
 }
 
 export function createWorkbenchState(initial: Partial<WorkbenchSnapshot> = {}) {

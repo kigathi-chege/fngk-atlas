@@ -58,6 +58,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   const contexts = new EffectiveContextService(fngk, { localRoot: options.localRoot });
   const evidence = new EvidenceStore(options.dbPath ?? process.env.ATLAS_DB ?? path.join(root, '.atlas', 'atlas.db'));
   let activeIndex = store.latestIndex();
+  const resolveIndex = (indexId?: string, contextId?: string) => indexId ? store.index(indexId) : contextId ? store.latestIndex(contextId) : activeIndex;
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 << 20 });
   await app.register(websocket);
   app.addHook('onClose', async () => { contexts.close(); evidence.close(); store.close(); });
@@ -71,6 +72,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   });
 
   app.get('/api/health', async () => ({ ok: true, version: '0.2.0', activeIndex: activeIndex?.summary ?? null }));
+  app.get('/api/indexes', async (request) => ({ items: store.indexes(String((request.query as { contextId?: string }).contextId ?? '') || undefined) }));
   app.get('/favicon.ico', async (_request, reply) => reply.code(204).send());
   app.get('/api/fngk/context', async (request, reply) => {
     const profile = String((request.query as { profile?: string }).profile ?? '') || undefined;
@@ -120,10 +122,11 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
         if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'discovery_batch', scanId: scan.id, ...batch, route: routeEvidence(route) }));
       }
       evidence.completeScan(scan.id, { partial });
-      if (activeIndex) {
-        const runtimeEdges = correlateRuntime(activeIndex, evidence.entities(contextId));
-        activeIndex = { ...activeIndex, edges: [...new Map([...activeIndex.edges, ...runtimeEdges].map((edge: any) => [edge.id, edge])).values()] };
-        store.saveIndex(activeIndex);
+      const contextIndex = resolveIndex(undefined, contextId);
+      if (contextIndex) {
+        const runtimeEdges = correlateRuntime(contextIndex, evidence.entities(contextId));
+        const updated = { ...contextIndex, edges: [...new Map([...contextIndex.edges, ...runtimeEdges].map((edge: any) => [edge.id, edge])).values()] };
+        store.saveIndex(updated); if (activeIndex?.id === updated.id) activeIndex = updated;
       }
       if (socket.readyState === socket.OPEN) socket.close(1000);
     })().catch(error => { if (socket.readyState === socket.OPEN) { socket.send(JSON.stringify({ type: 'error', code: (error as { code?: string }).code ?? 'discovery_failed', message: (error as Error).message })); socket.close(1011); } });
@@ -155,13 +158,13 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
     catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
   });
   app.post('/api/coverage/ingest', async (request, reply) => {
-    if (!activeIndex) return reply.code(404).send({ error: 'no_active_index' }); const body = request.body as { contextId?: string; repositoryPath?: string; revision?: string }, contextId = body.contextId ?? 'local'; if (!body.repositoryPath) return reply.code(400).send({ error: 'repository_path_required' });
-    try { const revision = body.revision ?? await revisionFor(contextId, body.repositoryPath), result = await new CoverageService(await contexts.files(contextId)).ingest({ contextId, repositoryPath: body.repositoryPath, index: activeIndex, revision }); activeIndex = result.index; store.saveIndex(activeIndex); return { artifact: result.artifact, evidence: result.evidence ? { format: result.evidence.format, source: result.evidence.source, revision: result.evidence.revision, collectedAt: result.evidence.collectedAt, files: Object.keys(result.evidence.files).length } : null, revision, summary: { functions: activeIndex.nodes.filter((node: any) => node.type === 'function' && node.coverage && !node.coverage.stale).length } }; }
+    const body = request.body as { contextId?: string; repositoryPath?: string; revision?: string; indexId?:string }, contextId = body.contextId ?? 'local',index=resolveIndex(body.indexId,contextId);if(!index)return reply.code(404).send({error:'no_index_for_context'}); if (!body.repositoryPath) return reply.code(400).send({ error: 'repository_path_required' });
+    try { const revision = body.revision ?? await revisionFor(contextId, body.repositoryPath), result = await new CoverageService(await contexts.files(contextId)).ingest({ contextId, repositoryPath: body.repositoryPath, index, revision }); store.saveIndex(result.index);if(activeIndex?.id===result.index.id)activeIndex=result.index; return { artifact: result.artifact, evidence: result.evidence ? { format: result.evidence.format, source: result.evidence.source, revision: result.evidence.revision, collectedAt: result.evidence.collectedAt, files: Object.keys(result.evidence.files).length } : null, revision, summary: { functions: result.index.nodes.filter((node: any) => node.type === 'function' && node.coverage && !node.coverage.stale).length } }; }
     catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
   });
   app.post('/api/coverage/refresh', async (request, reply) => {
-    if (!activeIndex) return reply.code(404).send({ error: 'no_active_index' }); const body = request.body as { contextId?: string; repositoryPath?: string; command?: string }, contextId = body.contextId ?? 'local', command = String(body.command ?? '').trim(); if (!body.repositoryPath || !command || command.length > 16_000) return reply.code(400).send({ error: 'invalid_coverage_run' });
-    try { const started = Date.now(), commandPath = await contexts.commandPath(contextId, body.repositoryPath), result = await (await contexts.commandExecutor(contextId)).execute(`cd ${posixQuote(commandPath)} && ${command}`, { timeoutMs: 30 * 60_000 }); const revision = await revisionFor(contextId, body.repositoryPath), coverage = await new CoverageService(await contexts.files(contextId)).ingest({ contextId, repositoryPath: body.repositoryPath, index: activeIndex, revision, revisionVerified: result.exitCode === 0 }); activeIndex = coverage.index; store.saveIndex(activeIndex); const run = { id: randomUUID(), symbolId: `coverage:${contextId}:${body.repositoryPath}`, mode: 'coverage', status: result.exitCode === 0 ? 'succeeded' : 'failed', durationMs: Date.now() - started, summary: { command: redactCommandLine(command), exitCode: result.exitCode, artifact: coverage.artifact, revision } }; store.saveRun(run); return { run, output: result.output.toString('utf8'), coverage: { artifact: coverage.artifact, revision, verified: result.exitCode === 0 } }; }
+    const body = request.body as { contextId?: string; repositoryPath?: string; command?: string;indexId?:string }, contextId = body.contextId ?? 'local', command = String(body.command ?? '').trim(),index=resolveIndex(body.indexId,contextId);if(!index)return reply.code(404).send({error:'no_index_for_context'}); if (!body.repositoryPath || !command || command.length > 16_000) return reply.code(400).send({ error: 'invalid_coverage_run' });
+    try { const started = Date.now(), commandPath = await contexts.commandPath(contextId, body.repositoryPath), result = await (await contexts.commandExecutor(contextId)).execute(`cd ${posixQuote(commandPath)} && ${command}`, { timeoutMs: 30 * 60_000 }); const revision = await revisionFor(contextId, body.repositoryPath), coverage = await new CoverageService(await contexts.files(contextId)).ingest({ contextId, repositoryPath: body.repositoryPath, index, revision, revisionVerified: result.exitCode === 0 }); store.saveIndex(coverage.index);if(activeIndex?.id===coverage.index.id)activeIndex=coverage.index; const run = { id: randomUUID(), symbolId: `coverage:${contextId}:${body.repositoryPath}`, mode: 'coverage', status: result.exitCode === 0 ? 'succeeded' : 'failed', durationMs: Date.now() - started, summary: { command: redactCommandLine(command), exitCode: result.exitCode, artifact: coverage.artifact, revision } }; store.saveRun(run); return { run, output: result.output.toString('utf8'), coverage: { artifact: coverage.artifact, revision, verified: result.exitCode === 0 } }; }
     catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
   });
 
@@ -209,7 +212,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
     } finally { reply.raw.end(); }
   });
 
-  app.get('/api/state', async () => ({ fngk: await fngk.probe(), index: activeIndex ? { id: activeIndex.id, root: activeIndex.root, summary: activeIndex.summary } : null, runs: store.runs() }));
+  app.get('/api/state', async (request) => { const contextId=String((request.query as {contextId?:string}).contextId??'')||undefined,index=resolveIndex(undefined,contextId);return { fngk: await fngk.probe(), index: index ? { id:index.id,root:index.root,contextId:index.contextId,revision:index.revision,summary:index.summary } : null, indexes:store.indexes(contextId), runs: store.runs() }; });
   app.post('/api/index', async (request, reply) => {
     const body = request.body as { root?: string; maxFiles?: number };
     const target = String(body?.root ?? '');
@@ -218,23 +221,23 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
     catch (error) { return reply.code(400).send({ error: 'analysis_failed', message: (error as Error).message }); }
   });
   app.get('/api/graph', async (request, reply) => {
-    const queryValue = request.query as { type?: string; q?: string; parent?: string; limit?: string; lens?: GraphLens; root?: string; layers?: string; budget?: string; contextId?: string };
+    const queryValue = request.query as { type?: string; q?: string; parent?: string; limit?: string; lens?: GraphLens; root?: string; layers?: string; budget?: string; contextId?: string; indexId?: string };
     const type = String(queryValue.type ?? ''), query = String(queryValue.q ?? '').toLowerCase(), parent = String(queryValue.parent ?? '');
-    const indexContext=activeIndex?.contextId??'local',contextId=queryValue.contextId??indexContext,selectedIndex=activeIndex&&indexContext===contextId?activeIndex:undefined,baseIndex=selectedIndex??{id:`runtime:${contextId}`,root:'/',contextId,revision:undefined,summary:{files:0,functions:0,packages:0},nodes:[],edges:[]},runtimeNodes=evidence.entities(contextId),runtimeEdges=evidence.relationships(contextId).map(value=>({id:value.id,source:value.sourceId,target:value.targetId,type:value.type,evidence:value.evidence,observedAt:value.observedAt}));
-    let worldNodes:any[]=[],worldEdges:any[]=[];if(queryValue.lens==='world')try{const snapshot=await contexts.contexts(),profileId=`profile:${snapshot.state.profile??'default'}`;worldNodes.push({id:profileId,type:'profile',label:snapshot.state.profile??'default'});for(const context of snapshot.contexts){const node={...context,type:context.kind==='fngk-device'?'device':'context',label:context.name};worldNodes.push(node);worldEdges.push({id:`context:${profileId}:${context.id}`,source:profileId,target:context.id,type:'contains'});}for(const connection of snapshot.state.namespace?.connections??[]){worldNodes.push({...connection,type:'connection',label:connection.name??connection.id});worldEdges.push({id:`connection:${profileId}:${connection.id}`,source:profileId,target:connection.id,type:'contains'});}}catch{}
-    let nodes = [...new Map([...baseIndex.nodes,...runtimeNodes,...worldNodes].map((node:any)=>[node.id,node])).values()],allEdges=[...new Map([...baseIndex.edges,...runtimeEdges,...worldEdges].map((edge:any)=>[edge.id,edge])).values()];const totalNodes=nodes.length;
+    const requestedIndex=resolveIndex(queryValue.indexId,queryValue.contextId),indexContext=requestedIndex?.contextId??queryValue.contextId??activeIndex?.contextId??'local',contextId=queryValue.contextId??indexContext,selectedIndex=requestedIndex&&indexContext===contextId?requestedIndex:undefined,baseIndex=selectedIndex??{id:`runtime:${contextId}`,root:'/',contextId,revision:undefined,summary:{files:0,functions:0,packages:0},nodes:[],edges:[]},runtimeNodes=evidence.entities(contextId),runtimeEdges=evidence.relationships(contextId).map(value=>({id:value.id,source:value.sourceId,target:value.targetId,type:value.type,evidence:value.evidence,observedAt:value.observedAt}));
+    let worldNodes:any[]=[],worldEdges:any[]=[],graphErrors:Array<{code:string;message:string}>=[];if(queryValue.lens==='world')try{const snapshot=await contexts.contexts(),profileId=`profile:${snapshot.state.profile??'default'}`;worldNodes.push({id:profileId,type:'profile',label:snapshot.state.profile??'default'});for(const context of snapshot.contexts){const node={...context,type:context.kind==='fngk-device'?'device':'context',label:context.name};worldNodes.push(node);worldEdges.push({id:`context:${profileId}:${context.id}`,source:profileId,target:context.id,type:'contains'});}for(const connection of snapshot.state.namespace?.connections??[]){worldNodes.push({...connection,type:'connection',label:connection.name??connection.id});worldEdges.push({id:`connection:${profileId}:${connection.id}`,source:profileId,target:connection.id,type:'contains'});}}catch(value){graphErrors.push({code:'namespace_unavailable',message:(value as Error).message});}
+    const generatedPath=(value:unknown)=>typeof value==='string'&&/(^|\/)(?:web-dist|dist|build|coverage|node_modules|\.svelte-kit)(\/|$)|\.min\.[cm]?js$/i.test(value);
+    let nodes = [...new Map([...baseIndex.nodes,...runtimeNodes,...worldNodes].map((node:any)=>[node.id,node])).values()].filter((node:any)=>!generatedPath(node.path)),allEdges=[...new Map([...baseIndex.edges,...runtimeEdges,...worldEdges].map((edge:any)=>[edge.id,edge])).values()];const totalNodes=nodes.length;
     if (type) nodes = nodes.filter((node: any) => node.type === type);
     if (parent) nodes = nodes.filter((node: any) => node.parent === parent || node.id === parent);
     if (query) nodes = nodes.filter((node: any) => `${node.label} ${node.path ?? ''} ${node.qualifiedName ?? ''}`.toLowerCase().includes(query));
-    nodes = nodes.slice(0, Math.min(Number(queryValue.limit) || 2500, 10000));
-    const ids = new Set(nodes.map((node: any) => node.id)); let edges = allEdges.filter((edge: any) => ids.has(edge.source) && ids.has(edge.target));
-    const unbounded={nodes,edges};if(queryValue.lens){const lens=buildGraphLens(unbounded,{lens:queryValue.lens,root:queryValue.root,budget:Math.min(500,Math.max(1,Number(queryValue.budget)||90)),layers:queryValue.layers?new Set(queryValue.layers.split(',').filter(Boolean)):undefined});nodes=lens.nodes;edges=lens.edges;}
-    return { index: { id: baseIndex.id, root: baseIndex.root, contextId: baseIndex.contextId ?? contextId, revision: baseIndex.revision, summary: baseIndex.summary }, nodes, edges, total: totalNodes, counts: { visibleNodes:nodes.length,visibleEdges:edges.length,totalNodes }, breadcrumbs: queryValue.root ? [queryValue.root] : [], layout: selectedIndex ? store.layout(selectedIndex.id) : [] };
+    const allMatchingIds = new Set(nodes.map((node: any) => node.id)); let edges = allEdges.filter((edge: any) => allMatchingIds.has(edge.source) && allMatchingIds.has(edge.target));
+    if(queryValue.lens){const lens=buildGraphLens({nodes,edges},{lens:queryValue.lens,root:queryValue.root,budget:Math.min(500,Math.max(1,Number(queryValue.budget)||90)),layers:queryValue.layers?new Set(queryValue.layers.split(',').filter(Boolean)):undefined});nodes=lens.nodes;edges=lens.edges;}else{nodes=nodes.slice(0,Math.min(Number(queryValue.limit)||2500,10000));const ids=new Set(nodes.map((node:any)=>node.id));edges=edges.filter((edge:any)=>ids.has(edge.source)&&ids.has(edge.target));}
+    return { index: { id: baseIndex.id, root: baseIndex.root, contextId: baseIndex.contextId ?? contextId, revision: baseIndex.revision, summary: baseIndex.summary }, nodes, edges, total: totalNodes, counts: { visibleNodes:nodes.length,visibleEdges:edges.length,totalNodes }, breadcrumbs: queryValue.root ? [queryValue.root] : [], layout: selectedIndex ? store.layout(selectedIndex.id) : [], errors:graphErrors };
   });
   app.get('/api/nodes/:id', async (request, reply) => {
-    const id = (request.params as { id: string }).id, node = activeIndex?.nodes.find((item: any) => item.id === id);
+    const id = (request.params as { id: string }).id, query=request.query as {indexId?:string;contextId?:string},index=resolveIndex(query.indexId,query.contextId),node = index?.nodes.find((item: any) => item.id === id);
     if (!node) return reply.code(404).send({ error: 'node_not_found' });
-    return { node, incoming: activeIndex.edges.filter((edge: any) => edge.target === node.id).slice(0, 100), outgoing: activeIndex.edges.filter((edge: any) => edge.source === node.id).slice(0, 100) };
+    return { node, incoming: index.edges.filter((edge: any) => edge.target === node.id).slice(0, 100), outgoing: index.edges.filter((edge: any) => edge.source === node.id).slice(0, 100) };
   });
   app.post('/api/layout', async (request, reply) => {
     if (!activeIndex) return reply.code(404).send({ error: 'no_active_index' });
@@ -242,10 +245,22 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
     store.saveLayout(activeIndex.id, positions); return { saved: positions.length };
   });
   app.post('/api/run', async (request, reply) => {
-    if (!activeIndex) return reply.code(404).send({ error: 'no_active_index' });
     const body = request.body as any;
+    const index=resolveIndex(body?.indexId,body?.contextId);
+    if (!index) return reply.code(404).send({ error: 'no_index_for_context' });
     if (body?.consent !== true) return reply.code(409).send({ error: 'operation_consent_required' });
-    try { const run = await runFunction(activeIndex, String(body.symbolId), body); store.saveRun({ ...run, summary: { truncated: run.truncated, exitCode: run.exitCode } }); return run; }
+    try {
+      let run:any;
+      if((index.contextId??'local')==='local')run=await runFunction(index,String(body.symbolId),body);
+      else {
+        const fn=index.nodes.find((node:any)=>node.id===String(body.symbolId)&&node.type==='function'),extension=path.posix.extname(fn?.path??'');
+        if(!fn)throw new Error('Function was not found in the selected repository index.');
+        if(!['.js','.mjs','.cjs'].includes(extension)||fn.exported!==true)throw new Error('Remote execution is available only for exported JavaScript functions with serializable arguments. Run the containing test or open a terminal for this symbol instead.');
+        const source=path.posix.join(index.root,fn.path),script="import {pathToFileURL} from 'node:url';const [source,name,raw]=process.argv.slice(1);const mod=await import(pathToFileURL(source));if(typeof mod[name]!=='function')throw new Error('Symbol is not an exported function');console.log(JSON.stringify({returnValue:await mod[name](...JSON.parse(raw))},null,2));",command=`cd ${posixQuote(await contexts.commandPath(index.contextId,index.root))} && node --input-type=module -e ${posixQuote(script)} ${posixQuote(source)} ${posixQuote(fn.name)} ${posixQuote(JSON.stringify(body.args??[]))}`,started=Date.now(),result=await (await contexts.commandExecutor(index.contextId)).execute(command,{timeoutMs:Math.min(30_000,Math.max(100,Number(body.timeoutMs)||5_000))});
+        run={id:randomUUID(),symbolId:fn.id,mode:'fngk-terminal',status:result.exitCode===0?'completed':'failed',exitCode:result.exitCode,stdout:result.output.toString('utf8'),stderr:'',truncated:false,durationMs:Date.now()-started,evidence:{classification:'executed',contextId:index.contextId,route:'fngk-terminal',revision:index.revision??null}};
+      }
+      store.saveRun({ ...run, summary: { truncated: run.truncated, exitCode: run.exitCode, evidence:run.evidence } }); return run;
+    }
     catch (error) { const run = { id: randomUUID(), symbolId: String(body?.symbolId ?? ''), mode: 'disposable', status: 'unavailable', summary: { message: (error as Error).message } }; store.saveRun(run); return reply.code(409).send({ error: 'run_unavailable', message: (error as Error).message, run }); }
   });
 

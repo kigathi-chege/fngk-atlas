@@ -34,9 +34,9 @@ Or use `docker compose up --build`, then open <http://localhost:4317> on the hos
 - npm, Composer, Go module, and Python manifests become package/dependency nodes.
 - `/proc` observations associate visible local processes with an indexed repository and record the evidence source separately from static facts.
 
-The Svelte workbench uses independent Dockview areas for graph/editor/metrics documents and terminal/activity panels. The right explorer always represents the selected effective filesystem and labels the route, identity, and privilege. Single-click files reuse a preview tab; double-click or the first edit pins it. Saves are fingerprint-checked and surface host conflicts instead of overwriting them.
+The Svelte workbench uses one persisted Dockview layout. Navigator, architecture/editor space, filesystem/inspector, and functions/coverage/activity/terminal are independently resizable groups. The terminal is created only when requested and immediately attaches to the selected online Device. The filesystem always represents the selected effective context and labels its route, identity, and privilege. Single-click files reuse a preview tab; editing pins it. Saves are fingerprint-checked and surface host conflicts instead of overwriting them.
 
-World, Machine, Code, Function, and Execution lenses apply deterministic node budgets and collapse import cycles. Double-click a source-backed node to open its exact span. The metrics view reports complexity, verified coverage, and CRAP without inventing values for missing or stale reports.
+World, Machine, Code, Function, and Execution lenses apply deterministic node budgets and collapse import cycles. Code overview starts at repository/package/module level; double-click drills into a node, while source-backed selections open exact spans. Switchable layers cover containment, package dependencies, imports, calls, inferred HTTP/events/SQL, declared flows, runtime/process links, ports, and coverage. Optional `.atlas/flows.json` nodes and edges supplement conservative inference. The Evidence group exposes function size/complexity, verified coverage, CRAP, problems, and recorded runs without inventing values for missing or stale reports.
 
 ## FNGK process context
 
@@ -44,7 +44,7 @@ Atlas discovers the executable from `FNGK_BIN` or `PATH`, calls the versioned se
 
 ## Execution boundary
 
-Eligible exported JavaScript functions run through an external harness using Node's permission model. The indexed tree is read-only, writes are limited to a temporary directory, and network and child-process access are denied. Every run requires explicit consent. Python and other runtime execution remains unavailable until a disposable container provider is configured; Atlas never silently falls back to an unsandboxed run.
+Eligible exported JavaScript functions run locally through an external harness using Node's permission model, or on a remote indexed Device through its existing FNGK terminal context. Remote execution creates no helper files and records context, route, revision, output, exit status, and duration. Every run requires explicit consent. Python and other runtime execution remains unavailable until a disposable container provider is configured; Atlas never silently falls back to an unsandboxed run.
 
 Atlas labels process association, sampled/observed evidence, and Atlas-initiated runs as different facts. A running process is never presented as proof that every contained function is executing.
 

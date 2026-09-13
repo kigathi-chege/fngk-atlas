@@ -1,0 +1,6 @@
+import {afterEach,describe,expect,it} from 'vitest';import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';import {Store} from '../../src/store.js';
+const directories:string[]=[];afterEach(async()=>{while(directories.length)await rm(directories.pop()!,{recursive:true,force:true})});
+
+describe('repository index store',()=>{
+  it('keeps independently selectable indexes for every context',async()=>{const directory=await mkdtemp(path.join(tmpdir(),'atlas-index-store-'));directories.push(directory);const store=new Store(path.join(directory,'atlas.db'));const index=(id:string,contextId:string,root:string)=>({id,contextId,root,revision:`rev-${id}`,fingerprint:id,summary:{files:1,functions:1,packages:1},nodes:[],edges:[]});store.saveIndex(index('local-index','local','/local'));store.saveIndex(index('device-index','device:one','/remote'));expect(store.latestIndex('local')).toMatchObject({id:'local-index',contextId:'local'});expect(store.latestIndex('device:one')).toMatchObject({id:'device-index',root:'/remote'});expect(store.indexes().map((value:any)=>value.id).sort()).toEqual(['device-index','local-index']);expect(store.index('local-index')).toMatchObject({revision:'rev-local-index'});store.close();});
+});
