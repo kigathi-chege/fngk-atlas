@@ -3,6 +3,7 @@ import {expect,test} from '@playwright/test';
 test('renders contextual search and safe filesystem actions in the FNGK Atlas workbench',async({page})=>{
   const errors:string[]=[];page.on('console',message=>{if(message.type()==='error')errors.push(message.text())});page.on('pageerror',error=>errors.push(error.message));
   await page.goto('/');await expect(page.getByText('FNGK Atlas',{exact:true}).first()).toBeVisible();await expect(page.locator('.dv-dockview')).toHaveCount(1);
+  await page.getByRole('button',{name:'Search'}).first().click();await expect(page.getByLabel('Search selected context')).toBeFocused();
   await expect(page.locator('.context-rail')).toBeVisible();await expect(page.getByText('Architecture',{exact:true}).first()).toBeVisible();await expect(page.getByText('Functions & coverage',{exact:true}).first()).toBeVisible();await expect(page.getByText('Filesystem',{exact:true}).first()).toBeVisible();await page.locator('.context-rail').getByRole('button',{name:'Atlas process host'}).click();
   await expect(page.getByRole('button',{name:/package\.json/})).toBeVisible();
   await page.getByLabel('Search filesystem').fill('package');await expect(page.getByText('/package.json',{exact:true})).toBeVisible();await page.getByLabel('Search filesystem').fill('');
