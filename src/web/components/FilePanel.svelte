@@ -4,6 +4,10 @@
   import { EditorView, keymap } from '@codemirror/view';
   import { defaultKeymap } from '@codemirror/commands';
   import { javascript } from '@codemirror/lang-javascript';
+  import { css } from '@codemirror/lang-css';
+  import { json } from '@codemirror/lang-json';
+  import { html } from '@codemirror/lang-html';
+  import { markdown } from '@codemirror/lang-markdown';
   import { api } from '../lib/api.js';
   export let params: { contextId?:string; path?:string; line?:number; panelId?:string } = {};
   let host:HTMLDivElement; let view:EditorView|undefined; let fingerprint=''; let status='Opening…'; let dirty=false;let announcedDirty=false;let saving=false;let disposed=false;
