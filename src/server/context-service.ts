@@ -28,7 +28,7 @@ export class EffectiveContextService {
   }
   async contexts() {
     const state = await this.fngk.probe();
-    const local = { id: 'local', name: 'Atlas process host', kind: 'local', online: true, routes: [this.#evidence(this.direct)] };
+    const local = { id: 'local', name: 'Atlas process host', kind: 'local', online: true, root: this.direct.root, routes: [this.#evidence(this.direct)] };
     const devices = (state.namespace?.devices ?? []).map(device => ({ id: `device:${device.id}`, name: device.name, kind: 'fngk-device', online: device.online ?? false, device, routes: this.#remote.has(`device:${device.id}`) ? [this.#evidence(this.#remote.get(`device:${device.id}`)!)] : [] }));
     return { state, contexts: [local, ...devices] };
   }
