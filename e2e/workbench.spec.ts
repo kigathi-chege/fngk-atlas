@@ -3,9 +3,11 @@ import {expect,test} from '@playwright/test';
 test('renders contextual search and safe filesystem actions in the FNGK Atlas workbench',async({page})=>{
   const errors:string[]=[],terminalSockets:string[]=[];page.on('console',message=>{if(message.type()==='error')errors.push(message.text())});page.on('pageerror',error=>errors.push(error.message));page.on('websocket',socket=>{if(socket.url().includes('/api/fngk/terminals'))terminalSockets.push(socket.url())});
   await page.goto('/');await expect(page.getByText('FNGK Atlas',{exact:true}).first()).toBeVisible();await expect(page.locator('.dv-dockview')).toHaveCount(1);
+  await expect(page.getByRole('navigation',{name:'Atlas activity'})).toBeVisible();await expect(page.getByRole('navigation',{name:'Pinned and workspace roots'})).toBeVisible();
   await page.getByRole('button',{name:'Search'}).first().click();await expect(page.getByLabel('Search selected context')).toBeFocused();
   await expect(page.locator('.context-rail')).toBeVisible();await expect(page.getByText('Architecture',{exact:true}).first()).toBeVisible();await expect(page.getByText('Functions & coverage',{exact:true}).first()).toBeVisible();await expect(page.getByText('Filesystem',{exact:true}).first()).toBeVisible();await page.locator('.context-rail').getByRole('button',{name:'Atlas process host'}).click();
   await expect(page.getByRole('button',{name:/package\.json/})).toBeVisible();
+  await page.getByRole('button',{name:/src/}).click({button:'right'});await page.getByRole('menuitem',{name:'Pin folder'}).click();const pinnedRoot=page.getByRole('button',{name:'Pinned /src'});await expect(pinnedRoot).toBeVisible();await pinnedRoot.click();await expect(page.getByRole('button',{name:/main\.ts/})).toBeVisible();await page.getByRole('button',{name:'Open filesystem'}).click();await expect(page.getByRole('button',{name:/package\.json/})).toBeVisible();
   await page.getByLabel('Search filesystem').fill('package');await expect(page.getByText('/package.json',{exact:true})).toBeVisible();await page.getByLabel('Search filesystem').fill('');
   const binary=page.locator('.tree-row',{hasText:'binary.dat'});await binary.click({button:'right'});await page.getByRole('menuitem',{name:'Move to trash'}).click();await page.getByRole('button',{name:'Move to trash'}).click();await expect(page.locator('.trash-notice')).toContainText('Restore');await page.locator('.trash-notice').getByRole('button',{name:'Restore'}).click();await expect(page.locator('.trash-notice')).toHaveCount(0);
   await page.getByRole('button',{name:/package\.json/}).click();
@@ -18,5 +20,15 @@ test('renders contextual search and safe filesystem actions in the FNGK Atlas wo
   await page.reload();await expect(page.locator('.dv-dockview')).toHaveCount(1);await expect(page.getByText('Filesystem',{exact:true}).first()).toBeVisible();
   await page.locator('.context-rail').getByRole('button',{name:'Atlas process host'}).click();await page.route('**/api/files/search?**',async route=>{await new Promise(resolve=>setTimeout(resolve,350));await route.fulfill({contentType:'application/json',body:JSON.stringify({matches:[{path:'/stale-file.txt',type:'file'}]})});});await page.getByLabel('Search filesystem').fill('stale');await page.locator('.context-rail').getByRole('button',{name:/kigathi/}).click();await page.waitForTimeout(600);await expect(page.getByText('/stale-file.txt',{exact:true})).toHaveCount(0);
   await page.route('**/api/search?**',async route=>{await new Promise(resolve=>setTimeout(resolve,350));await route.fulfill({contentType:'application/json',body:JSON.stringify({items:[{entityId:'stale',type:'function',label:'stale indexed result',path:'src/stale.ts',contextId:'local',repositoryRoot:'/safe-root'}]})});});await page.locator('.context-rail').getByRole('button',{name:'Atlas process host'}).click();await page.getByLabel('Search selected context').fill('stale');await page.locator('.context-rail').getByRole('button',{name:/kigathi/}).click();await page.waitForTimeout(600);await expect(page.getByText('stale indexed result',{exact:true})).toHaveCount(0);
+  for(let index=0;index<20;index++){
+    const tabs=page.locator('.dv-tab').filter({hasNotText:/^Atlas$/});if(!await tabs.count())break;
+    await tabs.first().locator('.dv-default-tab-action,.atlas-file-tab-close').first().click({force:true});
+  }
+  const atlasTab=page.locator('.dv-tab').filter({hasText:/^Atlas$/}).first();if(await atlasTab.count())await atlasTab.locator('.dv-default-tab-action').click({force:true});
+  await expect(page.getByLabel('Restore Atlas panels')).toBeVisible();
+  await expect(page.getByRole('navigation',{name:'Atlas activity'})).toBeVisible();
+  await expect(page.getByRole('navigation',{name:'Pinned and workspace roots'})).toBeVisible();
+  await page.getByRole('button',{name:'Open filesystem'}).click();
+  await expect(page.getByText('Filesystem',{exact:true}).first()).toBeVisible();
   expect(errors).toEqual([]);
 });
