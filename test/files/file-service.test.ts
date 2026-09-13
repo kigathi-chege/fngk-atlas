@@ -47,6 +47,47 @@ describe('logical filesystem', () => {
     expect(await files.read({ contextId: 'host', path: '/large.txt' })).toMatchObject({ tooLarge: true, bytes: 5, content: undefined, text: undefined });
   });
 
+  it('searches names and contents and performs conflict-safe filesystem mutations', async () => {
+    const { root, files } = await harness();
+    await files.createDirectory({ contextId: 'host', path: '/src' });
+    await files.createFile({ contextId: 'host', path: '/src/alpha.ts' }, Buffer.from('export const atlasNeedle = 1'));
+    expect(await files.search({ contextId: 'host', path: '/' }, 'atlasNeedle')).toMatchObject({ matches: [expect.objectContaining({ path: '/src/alpha.ts', line: 1 })] });
+    await files.move({ contextId: 'host', path: '/src/alpha.ts' }, '/src/beta.ts');
+    expect(await readFile(path.join(root, 'src', 'beta.ts'), 'utf8')).toContain('atlasNeedle');
+    await files.remove({ contextId: 'host', path: '/src/beta.ts' });
+    await expect(readFile(path.join(root, 'src', 'beta.ts'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refuses destructive mutations against the logical root', async () => {
+    const { files } = await harness();
+    await expect(files.remove({ contextId: 'host', path: '/' })).rejects.toMatchObject({ code: 'protected_path' });
+    await expect(files.remove({ contextId: 'host', path: '//' })).rejects.toMatchObject({ code: 'protected_path' });
+    await expect(files.move({ contextId: 'host', path: '/' }, '/renamed')).rejects.toMatchObject({ code: 'protected_path' });
+  });
+
+  it('bounds and cancels file searches without retaining file contents', async () => {
+    const { files } = await harness();
+    const controller = new AbortController(); controller.abort();
+    await expect(files.search({ contextId: 'host', path: '/' }, 'needle', { signal: controller.signal })).rejects.toMatchObject({ code: 'cancelled' });
+  });
+
+  it('trashes and restores paths when the effective route supports recovery', async () => {
+    const { root, files } = await harness();
+    await files.createFile({ contextId: 'host', path: '/recover.txt' }, Buffer.from('recover me'));
+    const trashed = await files.trash({ contextId: 'host', path: '/recover.txt' });
+    expect(trashed).toMatchObject({ restoreAvailable: true, route: { kind: 'direct' } });
+    await expect(readFile(path.join(root, 'recover.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await files.restore({ contextId: 'host', path: trashed.restorePath! });
+    await expect(readFile(path.join(root, 'recover.txt'), 'utf8')).resolves.toBe('recover me');
+  });
+
+  it('does not expose the recovery vault to destructive user operations', async () => {
+    const { files } = await harness();
+    await files.createFile({ contextId: 'host', path: '/recover.txt' });
+    await files.trash({ contextId: 'host', path: '/recover.txt' });
+    await expect(files.remove({ contextId: 'host', path: '/.atlas-trash' })).rejects.toMatchObject({ code: 'protected_path' });
+  });
+
   it('falls through a failed structured adapter to effective terminal authority', async () => {
     const { root } = await harness(); await writeFile(path.join(root, 'visible.txt'), 'terminal-visible');
     const direct = new DirectTransport({ id: 'backing', contextId: 'remote', root });

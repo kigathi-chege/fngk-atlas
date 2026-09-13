@@ -1,4 +1,4 @@
-export type Operation = 'list' | 'stat' | 'read' | 'write' | 'execute' | 'processes' | 'containers';
+export type Operation = 'list' | 'stat' | 'read' | 'write' | 'search' | 'create' | 'move' | 'trash' | 'restore' | 'delete' | 'execute' | 'processes' | 'containers';
 export type RouteKind = 'direct' | 'adapter' | 'terminal';
 
 export interface AccessTarget { contextId: string; path?: string; resourceId?: string }

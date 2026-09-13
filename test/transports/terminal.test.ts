@@ -48,4 +48,21 @@ describe('terminal-backed effective access', () => {
     expect(await files.list({ contextId: 'remote', path: '/root' })).toMatchObject({ items: [expect.objectContaining({ name: 'a.txt', type: 'file' })] });
     expect(commands.every(command => !command.includes('.atlas-') && !command.includes('mktemp'))).toBe(true);
   });
+
+  it('quotes shell-sensitive paths for bounded terminal filesystem operations', async () => {
+    const commands: string[] = [];
+    const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.alloc(0), exitCode: 0 }; } };
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
+    await transport.createDirectory("/tmp/atlas it's safe");
+    expect(commands).toEqual([`mkdir -- '/tmp/atlas it'"'"'s safe'`]);
+  });
+
+  it('bounds terminal content search before invoking grep', async () => {
+    const commands: string[] = [];
+    const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.alloc(0), exitCode: 0 }; } };
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
+    await transport.search('/srv/atlas', 'needle', { mode: 'content', maxEntries: 12, maxDepth: 3, maxFileBytes: 2048 });
+    expect(commands[0]).toContain("find '/srv/atlas' -xdev -mindepth 1 -maxdepth 3 -type f -size -2048c -print0 | head -z -n 12 | xargs -0 -r grep");
+    expect(commands[0]).not.toContain('grep -R');
+  });
 });

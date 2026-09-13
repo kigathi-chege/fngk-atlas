@@ -96,5 +96,19 @@ describe('Atlas FNGK-native server', () => {
     const otherContext = (await app.inject({ method: 'GET', url: '/api/graph?lens=code&contextId=device:other' })).json();
     expect(otherContext.index.contextId).toBe('device:other');
     expect(otherContext.nodes.some((node: any) => node.type === 'function')).toBe(false);
+
+    expect((await app.inject({method:'POST',url:'/api/files',payload:{contextId:'local',path:'/repo/new',type:'directory'}})).statusCode).toBe(201);
+    expect((await app.inject({method:'POST',url:'/api/files',payload:{contextId:'local',path:'/repo/new/readme.txt',type:'file',contentBase64:Buffer.from('Atlas searchable content').toString('base64')}})).statusCode).toBe(201);
+    const searched=(await app.inject({method:'GET',url:'/api/files/search?contextId=local&path=/repo&query=searchable&mode=all'})).json();
+    expect(searched.matches).toContainEqual(expect.objectContaining({path:'/repo/new/readme.txt',line:1}));
+    expect((await app.inject({method:'PATCH',url:'/api/files',payload:{contextId:'local',path:'/repo/new/readme.txt',destination:'/repo/new/renamed.txt'}})).statusCode).toBe(200);
+    const trashed=await app.inject({method:'DELETE',url:'/api/files',payload:{contextId:'local',path:'/repo/new/renamed.txt'}});
+    expect(trashed.json()).toMatchObject({permanent:false,restoreAvailable:true,restorePath:expect.stringMatching(/^\/\.atlas-trash\//),route:expect.objectContaining({kind:'direct'})});
+    expect((await app.inject({method:'POST',url:'/api/files/restore',payload:{contextId:'local',path:trashed.json().restorePath}})).statusCode).toBe(200);
+    expect((await app.inject({method:'DELETE',url:'/api/files',payload:{contextId:'local',path:'/repo/new/renamed.txt',permanent:true,confirm:true}})).statusCode).toBe(200);
+    expect((await app.inject({method:'DELETE',url:'/api/files',payload:{contextId:'local',path:'/repo',permanent:true}})).statusCode).toBe(409);
+    expect((await app.inject({method:'DELETE',url:'/api/files',payload:{contextId:'local',path:'//',permanent:true,confirm:true}})).statusCode).toBe(400);
+    const indexedSearch=(await app.inject({method:'GET',url:'/api/search?contextId=local&q=local'})).json();
+    expect(indexedSearch.items).toContainEqual(expect.objectContaining({type:'function'}));
   });
 });

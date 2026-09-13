@@ -11,6 +11,7 @@ describe('evidence store', () => {
     expect(store.entities('host')).toEqual([expect.objectContaining({ id: 'repo-1', metadata: { token: '[redacted]' } })]);
     expect(store.relationships('host')).toEqual([expect.objectContaining({ sourceId: 'host', targetId: 'repo-1' })]);
     expect(JSON.stringify(store.entities('host'))).not.toContain('must-not-store');
+    expect(store.search('host','signal')).toContainEqual(expect.objectContaining({entityId:'repo-1',type:'repository'}));
     const replacement = store.beginScan({ contextId: 'host', routeId: 'terminal-1' });
     store.putEntities(replacement.id, [{ id: 'repo-2', contextId: 'host', type: 'repository', name: 'atlas', path: '/srv/atlas' }]);
     store.completeScan(replacement.id, { partial: false });

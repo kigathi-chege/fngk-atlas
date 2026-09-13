@@ -41,7 +41,7 @@ function processError(error: unknown): { statusCode: number; body: Record<string
   }
   const value = error as { code?: string; message?: string };
   const code = value.code ?? 'internal_error';
-  const statusCode = code === 'context_not_found' ? 404 : code === 'device_offline' || code === 'route_unavailable' ? 409 : code === 'invalid_path' || code === 'path_escape' ? 400 : code === 'cancelled' ? 499 : 500;
+  const statusCode = code === 'context_not_found' ? 404 : code === 'device_offline' || code === 'route_unavailable' || code === 'file_conflict' ? 409 : code === 'invalid_path' || code === 'path_escape' || code === 'protected_path' ? 400 : code === 'cancelled' ? 499 : 500;
   return { statusCode, body: { error: code, message: value.message ?? 'Unexpected error.' } };
 }
 
@@ -91,7 +91,8 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   app.get('/api/contexts/terminals', async () => ({ items: contexts.activeTerminals() }));
   app.post('/api/contexts/:id/release', async (request, reply) => { const id = decodeURIComponent((request.params as { id: string }).id), body = request.body as { stop?: boolean; confirm?: boolean } | undefined, stop = body?.stop === true; if (stop && body?.confirm !== true) return reply.code(409).send({ error: 'confirmation_required' }); const released=contexts.release(id, stop); if(released)evidence.invalidateContext(id,stop?'terminal_stopped':'terminal_disconnected'); return { released, contextId: id, stopped: stop }; });
 
-  const routeEvidence = (route: { id: string; kind: string; deviceId?: string; effectiveIdentity: string; privilege: string; observedAt: string }) => ({ id: route.id, kind: route.kind, deviceId: route.deviceId, effectiveIdentity: route.effectiveIdentity, privilege: route.privilege, observedAt: route.observedAt });
+  const routeEvidence = (route: { id: string; kind: string; deviceId?: string; effectiveIdentity: string; privilege: string; observedAt: string; operations?: string[] }) => ({ id: route.id, kind: route.kind, deviceId: route.deviceId, effectiveIdentity: route.effectiveIdentity, privilege: route.privilege, observedAt: route.observedAt, operations: route.operations ?? [] });
+  const operationEvidence = (type: string, contextId: string, route: { id: string; kind: string; effectiveIdentity: string; privilege: string; observedAt: string; operations?: string[] }) => ({ id: randomUUID(), type, contextId, route: routeEvidence(route), recordedAt: new Date().toISOString() });
   app.get('/api/files', async (request, reply) => {
     const query = request.query as { contextId?: string; path?: string; cursor?: string; limit?: string };
     try { const page = await (await contexts.files(query.contextId ?? 'local')).list({ contextId: query.contextId ?? 'local', path: query.path ?? '/' }, { cursor: query.cursor, limit: Number(query.limit) || 100 }); return { ...page, route: routeEvidence(page.route) }; }
@@ -108,6 +109,35 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
     if (!body.path || typeof body.contentBase64 !== 'string' || !body.expectedFingerprint) return reply.code(400).send({ error: 'invalid_write' });
     try { const value = await (await contexts.files(body.contextId ?? 'local')).write({ contextId: body.contextId ?? 'local', path: body.path }, Buffer.from(body.contentBase64, 'base64'), body.expectedFingerprint); return { ...value, route: routeEvidence(value.route) }; }
     catch (error) { const value = error as { code?: string }; if (value.code === 'file_conflict') return reply.code(409).send({ error: value.code, message: (error as Error).message }); const result = processError(error); return reply.code(result.statusCode).send(result.body); }
+  });
+  app.get('/api/files/stat', async (request, reply) => {
+    const query=request.query as {contextId?:string;path?:string};if(!query.path)return reply.code(400).send({error:'path_required'});
+    try{const service=await contexts.files(query.contextId??'local'),route=service.resolver.resolve({contextId:query.contextId??'local',path:query.path},'stat')[0] as any;if(!route)throw Object.assign(new Error('No route can stat this path.'),{code:'route_unavailable'});const value=await route.stat(query.path);return {path:query.path,size:Number(value.size),mode:Number(value.mode),route:routeEvidence(route)}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
+  });
+  app.get('/api/files/search', async (request, reply) => {
+    const query=request.query as {contextId?:string;path?:string;query?:string;mode?:'name'|'content'|'all';limit?:string;maxEntries?:string;maxDepth?:string};if(!query.query?.trim())return {matches:[],route:null};
+    const contextId=query.contextId??'local';
+    try{const value=await (await contexts.files(contextId)).search({contextId,path:query.path??'/'},query.query,{mode:query.mode??'all',limit:Number(query.limit)||200,maxEntries:Number(query.maxEntries)||5_000,maxDepth:Number(query.maxDepth)||12,signal:requestSignal(request)});return {...value,route:routeEvidence(value.route),operation:operationEvidence('file.search',contextId,value.route)}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
+  });
+  app.post('/api/files', async (request, reply) => {
+    const body=request.body as {contextId?:string;path?:string;type?:'file'|'directory';contentBase64?:string};if(!body.path||!['file','directory'].includes(String(body.type)))return reply.code(400).send({error:'invalid_create'});
+    try{const contextId=body.contextId??'local',service=await contexts.files(contextId),target={contextId,path:body.path},value=body.type==='directory'?await service.createDirectory(target):await service.createFile(target,Buffer.from(body.contentBase64??'','base64'));return reply.code(201).send({...value,route:routeEvidence(value.route),operation:operationEvidence(`file.create.${body.type}`,contextId,value.route)})}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
+  });
+  app.patch('/api/files', async (request, reply) => {
+    const body=request.body as {contextId?:string;path?:string;destination?:string};if(!body.path||!body.destination)return reply.code(400).send({error:'invalid_move'});
+    try{const contextId=body.contextId??'local',value=await (await contexts.files(contextId)).move({contextId,path:body.path},body.destination);return {...value,route:routeEvidence(value.route),operation:operationEvidence('file.move',contextId,value.route)}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
+  });
+  app.delete('/api/files', async (request, reply) => {
+    const body=request.body as {contextId?:string;path?:string;permanent?:boolean;confirm?:boolean};if(!body.path)return reply.code(400).send({error:'path_required'});if(body.permanent&&body.confirm!==true)return reply.code(409).send({error:'confirmation_required'});
+    try{const contextId=body.contextId??'local',service=await contexts.files(contextId),target={contextId,path:body.path},value=body.permanent?await service.remove(target):await service.trash(target);return {...value,permanent:Boolean(body.permanent),route:routeEvidence(value.route),operation:operationEvidence(body.permanent?'file.delete':'file.trash',contextId,value.route)}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
+  });
+  app.post('/api/files/restore', async (request, reply) => {
+    const body=request.body as {contextId?:string;path?:string};if(!body.path)return reply.code(400).send({error:'path_required'});
+    try{const contextId=body.contextId??'local',value=await (await contexts.files(contextId)).restore({contextId,path:body.path});return {...value,route:routeEvidence(value.route),operation:operationEvidence('file.restore',contextId,value.route)}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
+  });
+  app.get('/api/search', async (request) => {
+    const query=request.query as {contextId?:string;q?:string;limit?:string},contextId=String(query.contextId??'')||undefined,q=String(query.q??''),limit=Math.min(250,Math.max(1,Number(query.limit)||100));
+    const values=[...store.search(contextId,q,limit),...(contextId?evidence.search(contextId,q,limit):[])],seen=new Set<string>();return {items:values.filter((value:any)=>{const key=`${value.type}:${value.entityId}`;if(seen.has(key))return false;seen.add(key);return true}).slice(0,limit)};
   });
   app.get('/api/discovery/entities', async (request) => { const contextId = String((request.query as { contextId?: string }).contextId ?? 'local'); return { entities: evidence.entities(contextId), relationships: evidence.relationships(contextId) }; });
   app.get('/api/discovery/scan', { websocket: true }, (socket, request) => {
