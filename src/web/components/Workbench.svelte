@@ -9,6 +9,7 @@
   let centerHost: HTMLDivElement;
   let bottomHost: HTMLDivElement;
   let bottomVisible = false;
+  let pendingClose: { api: any; title: string } | null = null;
   const dirtyPanels = new Set<string>();
 
   class Renderer implements IContentRenderer {
@@ -44,7 +45,7 @@
       const update = (title: string) => { this.title.textContent = title; this.close.setAttribute('aria-label', `Close ${title}`); };
       update(parameters.title);
       this.titleSubscription = parameters.api.onDidTitleChange(event => update(event.title));
-      this.close.onclick = event => { event.stopPropagation(); if (!dirtyPanels.has(this.panelId) || window.confirm('Close this file and discard unsaved changes?')) { dirtyPanels.delete(this.panelId); parameters.api.close(); } };
+      this.close.onclick = event => { event.stopPropagation(); if (!dirtyPanels.has(this.panelId)) { parameters.api.close(); return; } window.dispatchEvent(new CustomEvent('atlas:confirm-close', { detail: { api: parameters.api, title: parameters.title } })); };
     }
     dispose() { this.titleSubscription?.dispose(); }
   }
@@ -91,9 +92,10 @@
     const beforeUnload = (event: BeforeUnloadEvent) => { if (dirtyPanels.size) event.preventDefault(); };
     const guardMiddleClick = (event: MouseEvent) => { const id = (event.target as HTMLElement).closest<HTMLElement>('[data-panel-id]')?.dataset.panelId; if (event.button === 1 && id && dirtyPanels.has(id)) { event.preventDefault(); event.stopImmediatePropagation(); } };
     const openTerminal = () => { bottomVisible = true; const panel = bottom.getPanel('atlas.terminal'); panel?.api.setActive(); };
-    window.addEventListener('atlas:open-file', openFile); window.addEventListener('atlas:file-dirty', dirtyFile); window.addEventListener('atlas:open-terminal', openTerminal); window.addEventListener('beforeunload', beforeUnload); centerHost.addEventListener('auxclick', guardMiddleClick, true);
-    return () => { window.removeEventListener('atlas:open-file', openFile); window.removeEventListener('atlas:file-dirty', dirtyFile); window.removeEventListener('atlas:open-terminal', openTerminal); window.removeEventListener('beforeunload', beforeUnload); centerHost.removeEventListener('auxclick', guardMiddleClick, true); a.dispose(); b.dispose(); removed.dispose(); center.dispose(); bottom.dispose(); };
+    const confirmClose = (event: Event) => { pendingClose = (event as CustomEvent<{ api: any; title: string }>).detail; };
+    window.addEventListener('atlas:open-file', openFile); window.addEventListener('atlas:file-dirty', dirtyFile); window.addEventListener('atlas:open-terminal', openTerminal); window.addEventListener('atlas:confirm-close', confirmClose); window.addEventListener('beforeunload', beforeUnload); centerHost.addEventListener('auxclick', guardMiddleClick, true);
+    return () => { window.removeEventListener('atlas:open-file', openFile); window.removeEventListener('atlas:file-dirty', dirtyFile); window.removeEventListener('atlas:open-terminal', openTerminal); window.removeEventListener('atlas:confirm-close', confirmClose); window.removeEventListener('beforeunload', beforeUnload); centerHost.removeEventListener('auxclick', guardMiddleClick, true); a.dispose(); b.dispose(); removed.dispose(); center.dispose(); bottom.dispose(); };
   });
 </script>
 
-<div class="workbench" class:terminal-open={bottomVisible}><header class="atlas-menu" aria-label="Application menu"><button title="File actions">File</button><button title="Edit actions">Edit</button><button title="Selection actions">Selection</button><button title="Find in files and symbols">Find</button><button title="Change visible panels">View</button><button title="Run tools and operations">Tools</button><button title="Atlas help and shortcuts">Help</button><span class="menu-spacer"></span><button class="menu-icon" title="Open terminal sessions" aria-label="Open terminal sessions" onclick={()=>window.dispatchEvent(new Event('atlas:open-terminal'))}>⌘</button></header><main class="workbench-main"><div class="center-dock" bind:this={centerHost}></div><div class:bottom-collapsed={!bottomVisible} class="bottom-dock" bind:this={bottomHost}></div></main></div>
+<div class="workbench" class:terminal-open={bottomVisible}><header class="atlas-menu" aria-label="Application menu"><button title="File actions">File</button><button title="Edit actions">Edit</button><button title="Selection actions">Selection</button><button title="Find in files and symbols">Find</button><button title="Change visible panels">View</button><button title="Run tools and operations">Tools</button><button title="Atlas help and shortcuts">Help</button><span class="menu-spacer"></span><button class="menu-icon" title="Open terminal sessions" aria-label="Open terminal sessions" onclick={()=>window.dispatchEvent(new Event('atlas:open-terminal'))}>⌘</button></header><main class="workbench-main"><div class="center-dock" bind:this={centerHost}></div><div class:bottom-collapsed={!bottomVisible} class="bottom-dock" bind:this={bottomHost}></div></main>{#if pendingClose}<div class="atlas-dialog-backdrop" role="presentation"><div class="atlas-dialog" role="dialog" aria-modal="true" aria-labelledby="close-title"><h2 id="close-title">Discard changes?</h2><p>{pendingClose.title} has unsaved changes.</p><div><button onclick={()=>pendingClose=null}>Keep editing</button><button class="danger" onclick={()=>{const panel=pendingClose!;pendingClose=null;dirtyPanels.delete(panel.api.id);panel.api.close();}}>Discard</button></div></div></div>{/if}</div>
