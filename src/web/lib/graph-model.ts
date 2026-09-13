@@ -6,7 +6,7 @@ const types: Record<GraphLens, Set<string>> = {
   machine: new Set(['device', 'filesystem', 'directory', 'repository', 'service', 'process', 'container', 'port']),
   code: new Set(['repository', 'package', 'module', 'function', 'external']),
   function: new Set(['function', 'test', 'module']),
-  execution: new Set(['function', 'test', 'command', 'terminal', 'process', 'output', 'coverage', 'file']),
+  execution: new Set(['repository', 'package', 'module', 'function', 'test', 'command', 'terminal', 'process', 'output', 'coverage', 'file']),
 };
 const key = (edge: any) => `${edge.source}\0${edge.target}\0${edge.type}`;
 

@@ -4,8 +4,8 @@ import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { redactFacts } from '../discovery/redaction.js';
 
-export interface EvidenceEntity { id: string; contextId: string; type: string; name: string; path?: string; metadata?: Record<string, unknown> }
-export interface EvidenceRelationship { id: string; contextId: string; type: string; sourceId: string; targetId: string; evidence?: Record<string, unknown> }
+export interface EvidenceEntity { id: string; contextId: string; type: string; name: string; path?: string; metadata?: Record<string, unknown>; stale?: boolean; staleReason?: string }
+export interface EvidenceRelationship { id: string; contextId: string; type: string; sourceId: string; targetId: string; evidence?: Record<string, unknown>; stale?: boolean; staleReason?: string }
 
 export class EvidenceStore {
   readonly db: DatabaseSync;
@@ -32,6 +32,10 @@ export class EvidenceStore {
         last_scan_id TEXT NOT NULL, observed_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS atlas_relationships_context ON atlas_relationships(context_id);
+      CREATE TABLE IF NOT EXISTS atlas_context_state(
+        context_id TEXT PRIMARY KEY, stale INTEGER NOT NULL DEFAULT 0,
+        reason TEXT, updated_at TEXT NOT NULL
+      );
     `);
   }
 
@@ -66,14 +70,18 @@ export class EvidenceStore {
       if (scan?.contextId) {
         this.db.prepare('DELETE FROM atlas_entities WHERE context_id=? AND last_scan_id<>?').run(scan.contextId, id);
         this.db.prepare('DELETE FROM atlas_relationships WHERE context_id=? AND last_scan_id<>?').run(scan.contextId, id);
+        this.db.prepare(`INSERT INTO atlas_context_state(context_id,stale,reason,updated_at) VALUES(?,0,NULL,?) ON CONFLICT(context_id) DO UPDATE SET stale=0,reason=NULL,updated_at=excluded.updated_at`).run(scan.contextId, new Date().toISOString());
       }
     }
   }
+  invalidateContext(contextId: string, reason: string): void {
+    this.db.prepare(`INSERT INTO atlas_context_state(context_id,stale,reason,updated_at) VALUES(?,1,?,?) ON CONFLICT(context_id) DO UPDATE SET stale=1,reason=excluded.reason,updated_at=excluded.updated_at`).run(contextId, reason, new Date().toISOString());
+  }
   entities(contextId: string): Array<EvidenceEntity & { observedAt: string }> {
-    return this.db.prepare(`SELECT id,context_id contextId,type,name,path,metadata_json metadataJson,observed_at observedAt FROM atlas_entities WHERE context_id=? ORDER BY type,path,id`).all(contextId).map((row: any) => ({ id: row.id, contextId: row.contextId, type: row.type, name: row.name, path: row.path ?? undefined, metadata: JSON.parse(row.metadataJson), observedAt: row.observedAt }));
+    return this.db.prepare(`SELECT e.id,e.context_id contextId,e.type,e.name,e.path,e.metadata_json metadataJson,e.observed_at observedAt,COALESCE(s.stale,0) stale,s.reason staleReason FROM atlas_entities e LEFT JOIN atlas_context_state s ON s.context_id=e.context_id WHERE e.context_id=? ORDER BY e.type,e.path,e.id`).all(contextId).map((row: any) => ({ id: row.id, contextId: row.contextId, type: row.type, name: row.name, path: row.path ?? undefined, metadata: JSON.parse(row.metadataJson), observedAt: row.observedAt, stale: Boolean(row.stale), staleReason: row.staleReason ?? undefined }));
   }
   relationships(contextId: string): Array<EvidenceRelationship & { observedAt: string }> {
-    return this.db.prepare(`SELECT id,context_id contextId,type,source_id sourceId,target_id targetId,evidence_json evidenceJson,observed_at observedAt FROM atlas_relationships WHERE context_id=? ORDER BY type,id`).all(contextId).map((row: any) => ({ id: row.id, contextId: row.contextId, type: row.type, sourceId: row.sourceId, targetId: row.targetId, evidence: JSON.parse(row.evidenceJson), observedAt: row.observedAt }));
+    return this.db.prepare(`SELECT r.id,r.context_id contextId,r.type,r.source_id sourceId,r.target_id targetId,r.evidence_json evidenceJson,r.observed_at observedAt,COALESCE(s.stale,0) stale,s.reason staleReason FROM atlas_relationships r LEFT JOIN atlas_context_state s ON s.context_id=r.context_id WHERE r.context_id=? ORDER BY r.type,r.id`).all(contextId).map((row: any) => ({ id: row.id, contextId: row.contextId, type: row.type, sourceId: row.sourceId, targetId: row.targetId, evidence: JSON.parse(row.evidenceJson), observedAt: row.observedAt, stale: Boolean(row.stale), staleReason: row.staleReason ?? undefined }));
   }
   close(): void { this.db.close(); }
 }

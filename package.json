@@ -9,9 +9,12 @@
     "build:server": "tsc -p tsconfig.json",
     "build:web": "vite build",
     "start": "node dist/server/index.js",
+    "start:host": "bash scripts/start-host.sh",
+    "build:fngk-head": "bash scripts/build-fngk-head.sh",
     "test": "npm run test:legacy && vitest run",
     "test:legacy": "node --test test/*.test.js",
     "test:e2e": "playwright test",
+    "test:live": "bash scripts/live-acceptance.sh",
     "check:web": "svelte-check --tsconfig ./tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

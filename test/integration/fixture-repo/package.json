@@ -1,0 +1,8 @@
+{
+  "name": "atlas-live-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "coverage": "node scripts/coverage.js"
+  }
+}

@@ -15,6 +15,8 @@ npm start
 
 Open <http://127.0.0.1:4317>. Set `ATLAS_PORT`, `ATLAS_HOST`, or `ATLAS_DB` to override the port, bind address, or metadata database. The normal non-container launch stays loopback-only; the included container image sets `DOCKER_CONTAINER=1` and listens on `0.0.0.0` inside the container.
 
+For a real installed FNGK context, follow [the host handoff](docs/host-handoff.md) and use `npm run start:host`. The launcher refuses to start when `fngk status --json` is unavailable or incompatible, preventing a container-local filesystem from being mistaken for an authenticated FNGK Device.
+
 From Docker, publish the service port to the host:
 
 ```bash
@@ -22,7 +24,7 @@ docker build -t fngk-atlas .
 docker run --rm -p 127.0.0.1:4317:4317 -v "$PWD/.atlas:/app/.atlas" fngk-atlas
 ```
 
-Or use `docker compose up --build`, then open <http://localhost:4317> on the host browser. Publishing a port is required; binding inside the container alone does not expose it to the host.
+Or use `docker compose up --build`, then open <http://localhost:4317> on the host browser. Publishing a port is required; binding inside the container alone does not expose it to the host. This generic container does **not** inherit a host FNGK login; the executable, profile, and network route must be mounted/configured explicitly if this non-canonical path is used.
 
 ## Analysis model
 

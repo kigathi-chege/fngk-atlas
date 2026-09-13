@@ -6,7 +6,7 @@ import { TerminalFileTransport } from '../transports/terminal-file.js';
 import { DirectCommandExecutor } from '../transports/direct-command.js';
 import { RuntimeDiscovery } from './runtime-discovery.js';
 
-export interface DiscoveryContext { id: string; route: FileTransport; deviceId?: string }
+export interface DiscoveryContext { id: string; route: FileTransport; deviceId?: string; root?: string }
 export interface DiscoveredEntity { id: string; contextId: string; type: string; name: string; path: string; metadata?: Record<string, unknown> }
 export interface DiscoveryBatch { entities: DiscoveredEntity[]; errors: Array<{ path: string; code: string }>; scanned: number; complete: boolean; partial: boolean }
 
@@ -24,10 +24,10 @@ export class HostDiscovery {
   }
 
   async *scan(context: DiscoveryContext, signal?: AbortSignal): AsyncIterable<DiscoveryBatch> {
-    const queue: Array<{ path: string; depth: number }> = [{ path: '/', depth: 0 }], pending: DiscoveredEntity[] = [], errors: Array<{ path: string; code: string }> = [];
+    const scanRoot = context.root ?? '/', queue: Array<{ path: string; depth: number }> = [{ path: scanRoot, depth: 0 }], pending: DiscoveredEntity[] = [], errors: Array<{ path: string; code: string }> = [];
     let scanned = 0, partial = false;
     if (signal?.aborted) throw Object.assign(new Error('Discovery cancelled.'), { code: 'cancelled' });
-    pending.push({ id: identifier(context.id, 'filesystem', '/'), contextId: context.id, type: 'filesystem', name: '/', path: '/', metadata: { routeId: context.route.id, effectiveIdentity: context.route.effectiveIdentity, privilege: context.route.privilege } });
+    pending.push({ id: identifier(context.id, 'filesystem', scanRoot), contextId: context.id, type: 'filesystem', name: scanRoot, path: scanRoot, metadata: { routeId: context.route.id, effectiveIdentity: context.route.effectiveIdentity, privilege: context.route.privilege } });
     const executor = context.route instanceof TerminalFileTransport ? context.route.executor : context.route instanceof DirectTransport ? new DirectCommandExecutor() : undefined;
     if (executor) pending.push(...await new RuntimeDiscovery(executor).scan(context.id, context.route.id, signal));
     while (pending.length >= this.batchSize) yield { entities: pending.splice(0, this.batchSize), errors: [], scanned, complete: false, partial };

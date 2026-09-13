@@ -17,6 +17,22 @@ describe('terminal-backed effective access', () => {
     terminal.detach('done'); await once(terminal, 'close');
   });
 
+  it('extracts framed output from a real PTY CRLF stream', async () => {
+    const terminal = new FngkProcessClient({ binary: fixture, env: { FNGK_FIXTURE_MODE: 'terminal-crlf' } }).openTerminal('device-1', { newSession: true });
+    await once(terminal, 'ready');
+    const result = await new FngkTerminalCommandExecutor(terminal).execute('printf payload');
+    expect(result).toEqual({ output: Buffer.from('framed payload'), exitCode: 0 });
+    terminal.detach('done'); await once(terminal, 'close');
+  });
+
+  it('waits for output that arrives after command completion', async () => {
+    const terminal = new FngkProcessClient({ binary: fixture, env: { FNGK_FIXTURE_MODE: 'terminal-reordered' } }).openTerminal('device-1', { newSession: true });
+    await once(terminal, 'ready');
+    const result = await new FngkTerminalCommandExecutor(terminal).execute('printf payload');
+    expect(result).toEqual({ output: Buffer.from('framed payload'), exitCode: 0 });
+    terminal.detach('done'); await once(terminal, 'close');
+  });
+
   it('uses read-only inline probes and provides terminal fallback outside adapter roots', async () => {
     const commands: string[] = [];
     const executor: CommandExecutor = { execute: async command => {

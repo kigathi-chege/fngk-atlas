@@ -44,4 +44,13 @@ describe('bounded host discovery', () => {
     const consume = async () => { for await (const _batch of discovery.scan({ id: 'host', route: new DirectTransport({ id: 'direct', contextId: 'host', root }) }, controller.signal)) {} };
     await expect(consume()).rejects.toMatchObject({ code: 'cancelled' });
   });
+
+  it('can bound a live scan to an explicit logical root', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'atlas-discovery-root-')); directories.push(root);
+    await mkdir(path.join(root, 'outside'), { recursive: true }); await mkdir(path.join(root, 'fixture', '.git'), { recursive: true });
+    await writeFile(path.join(root, 'outside', 'ignored.ts'), 'export const ignored=true'); await writeFile(path.join(root, 'fixture', 'package.json'), '{"name":"fixture"}');
+    const batches = []; for await (const batch of new HostDiscovery({ maxEntries: 20 }).scan({ id: 'host', route: new DirectTransport({ id: 'direct', contextId: 'host', root }), root: '/fixture' })) batches.push(batch);
+    const paths = batches.flatMap(batch => batch.entities).map(entity => entity.path);
+    expect(paths).toContain('/fixture/package.json'); expect(paths.some(value => value.includes('/outside'))).toBe(false);
+  });
 });

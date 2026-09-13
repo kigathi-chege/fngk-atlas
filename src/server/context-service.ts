@@ -45,7 +45,7 @@ export class EffectiveContextService {
     terminal.setMode('queue', 'atlas-context-mode'); await modeChanged;
     const executor = new FngkTerminalCommandExecutor(terminal);
     let identity = 'remote-shell', privilege: FileTransport['privilege'] = 'unknown';
-    try { const result = await executor.execute(`id -u; id -un`); const [uid, name] = result.output.toString('utf8').trim().split(/\r?\n/); identity = name ? `${name} (uid:${uid})` : `uid:${uid}`; privilege = uid === '0' ? 'root' : 'user'; } catch {}
+    try { const result = await executor.execute('id -u'); const uid = result.output.toString('utf8').trim(); if (/^\d+$/.test(uid)) { identity = `uid:${uid}`; privilege = uid === '0' ? 'root' : 'user'; } } catch {}
     const route = new TerminalFileTransport({ id: `terminal:${device.id}`, contextId, deviceId: device.id, identity, privilege, executor });
     this.#remote.set(contextId, route); return route;
   }

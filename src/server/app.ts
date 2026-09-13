@@ -57,7 +57,6 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   const fngk = options.fngk ?? new FngkProcessClient();
   const contexts = new EffectiveContextService(fngk, { localRoot: options.localRoot });
   const evidence = new EvidenceStore(options.dbPath ?? process.env.ATLAS_DB ?? path.join(root, '.atlas', 'atlas.db'));
-  const discovery = new HostDiscovery();
   let activeIndex = store.latestIndex();
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 << 20 });
   await app.register(websocket);
@@ -72,6 +71,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   });
 
   app.get('/api/health', async () => ({ ok: true, version: '0.2.0', activeIndex: activeIndex?.summary ?? null }));
+  app.get('/favicon.ico', async (_request, reply) => reply.code(204).send());
   app.get('/api/fngk/context', async (request, reply) => {
     const profile = String((request.query as { profile?: string }).profile ?? '') || undefined;
     const state = await fngk.probe(profile, requestSignal(request));
@@ -87,7 +87,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
     catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
   });
   app.get('/api/contexts/terminals', async () => ({ items: contexts.activeTerminals() }));
-  app.post('/api/contexts/:id/release', async (request, reply) => { const id = decodeURIComponent((request.params as { id: string }).id), body = request.body as { stop?: boolean; confirm?: boolean } | undefined, stop = body?.stop === true; if (stop && body?.confirm !== true) return reply.code(409).send({ error: 'confirmation_required' }); return { released: contexts.release(id, stop), contextId: id, stopped: stop }; });
+  app.post('/api/contexts/:id/release', async (request, reply) => { const id = decodeURIComponent((request.params as { id: string }).id), body = request.body as { stop?: boolean; confirm?: boolean } | undefined, stop = body?.stop === true; if (stop && body?.confirm !== true) return reply.code(409).send({ error: 'confirmation_required' }); const released=contexts.release(id, stop); if(released)evidence.invalidateContext(id,stop?'terminal_stopped':'terminal_disconnected'); return { released, contextId: id, stopped: stop }; });
 
   const routeEvidence = (route: { id: string; kind: string; deviceId?: string; effectiveIdentity: string; privilege: string; observedAt: string }) => ({ id: route.id, kind: route.kind, deviceId: route.deviceId, effectiveIdentity: route.effectiveIdentity, privilege: route.privilege, observedAt: route.observedAt });
   app.get('/api/files', async (request, reply) => {
@@ -109,12 +109,13 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   });
   app.get('/api/discovery/entities', async (request) => { const contextId = String((request.query as { contextId?: string }).contextId ?? 'local'); return { entities: evidence.entities(contextId), relationships: evidence.relationships(contextId) }; });
   app.get('/api/discovery/scan', { websocket: true }, (socket, request) => {
-    const contextId = String((request.query as { contextId?: string }).contextId ?? 'local');
+    const query=request.query as {contextId?:string;root?:string;maxEntries?:string;maxDepth?:string},contextId=String(query.contextId??'local'),root=String(query.root??'/');
     const controller = new AbortController(); socket.once('close', () => controller.abort());
     void (async () => {
       const route = await contexts.route(contextId), scan = evidence.beginScan({ contextId, routeId: route.id });
       let partial = false;
-      for await (const batch of discovery.scan({ id: contextId, route }, controller.signal)) {
+      const scanner=new HostDiscovery({maxEntries:Math.min(10_000,Math.max(1,Number(query.maxEntries)||10_000)),maxDepth:Math.min(32,Math.max(1,Number(query.maxDepth)||8))});
+      for await (const batch of scanner.scan({ id: contextId, route, root }, controller.signal)) {
         partial ||= batch.partial; evidence.putEntities(scan.id, batch.entities);
         if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'discovery_batch', scanId: scan.id, ...batch, route: routeEvidence(route) }));
       }

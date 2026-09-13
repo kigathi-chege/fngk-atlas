@@ -18,4 +18,11 @@ describe('bounded graph lenses', () => {
     const source = { nodes: [{ id: 'a', type: 'function' }, { id: 'b', type: 'function' }, { id: 'c', type: 'function' }, { id: 'unrelated', type: 'function' }], edges: [{ id: 'ab', source: 'a', target: 'b', type: 'calls' }, { id: 'bc', source: 'b', target: 'c', type: 'calls' }] };
     expect(buildGraphLens(source, { lens: 'function', root: 'b', budget: 20, layers: new Set(['calls']) }).nodes.map(node => node.id).sort()).toEqual(['a', 'b', 'c']);
   });
+
+  it('keeps process-to-module runtime evidence in the execution lens', () => {
+    const source = { nodes: [{ id: 'process', type: 'process' }, { id: 'module', type: 'module' }], edges: [{ id: 'loads', source: 'process', target: 'module', type: 'loads' }] };
+    const graph = buildGraphLens(source, { lens: 'execution', budget: 20, layers: new Set(['loads']) });
+    expect(graph.nodes.map(node => node.id).sort()).toEqual(['module', 'process']);
+    expect(graph.edges).toEqual([expect.objectContaining({ type: 'loads' })]);
+  });
 });

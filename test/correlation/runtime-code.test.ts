@@ -5,7 +5,8 @@ describe('runtime-to-code evidence', () => {
   it('links processes and ports only when paths or process identifiers provide evidence', () => {
     const index = { nodes: [
       { id: 'repo', type: 'repository', root: '/srv/signal', path: '/srv/signal' },
-      { id: 'module', type: 'module', parent: 'repo', path: 'src/server.ts' },
+      { id: 'package', type: 'package', parent: 'repo', path: '.' },
+      { id: 'module', type: 'module', parent: 'package', path: 'src/server.ts' },
     ] };
     const runtime = [
       { id: 'process:12', type: 'process', metadata: { pid: 12, cwd: '/srv/signal', command: 'node /srv/signal/src/server.ts' } },
