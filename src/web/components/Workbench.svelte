@@ -8,6 +8,7 @@
   export let state: WorkbenchState;
   let centerHost: HTMLDivElement;
   let bottomHost: HTMLDivElement;
+  let bottomVisible = false;
   const dirtyPanels = new Set<string>();
 
   class Renderer implements IContentRenderer {
@@ -63,8 +64,8 @@
       center.addPanel({ id: 'atlas.metrics', title: 'Metrics & coverage', component: 'metrics' });
       center.addPanel({ id: 'atlas.inspector', title: 'Inspector', component: 'details', position: { referencePanel: 'atlas.graph', direction: 'right' } });
       graph.api.setActive();
-      const terminal = bottom.addPanel({ id: 'atlas.terminal', title: 'Terminal', component: 'terminal', renderer: 'always' });
-      bottom.addPanel({ id: 'atlas.activity', title: 'Activity', component: 'output' }); terminal.api.setActive();
+      bottom.addPanel({ id: 'atlas.terminal', title: 'Terminal', component: 'terminal', renderer: 'always' });
+      bottom.addPanel({ id: 'atlas.activity', title: 'Activity', component: 'output' });
     }
     const persist = () => { const layout = { version: 1, central: center.toJSON(), bottom: bottom.toJSON() }; state.setLayout(layout); localStorage.setItem('atlas.workbench.v1', JSON.stringify(layout)); };
     const a = center.onDidLayoutChange(persist), b = bottom.onDidLayoutChange(persist), removed = center.onDidRemovePanel(panel => dirtyPanels.delete(panel.id));
@@ -89,9 +90,10 @@
     };
     const beforeUnload = (event: BeforeUnloadEvent) => { if (dirtyPanels.size) event.preventDefault(); };
     const guardMiddleClick = (event: MouseEvent) => { const id = (event.target as HTMLElement).closest<HTMLElement>('[data-panel-id]')?.dataset.panelId; if (event.button === 1 && id && dirtyPanels.has(id)) { event.preventDefault(); event.stopImmediatePropagation(); } };
-    window.addEventListener('atlas:open-file', openFile); window.addEventListener('atlas:file-dirty', dirtyFile); window.addEventListener('beforeunload', beforeUnload); centerHost.addEventListener('auxclick', guardMiddleClick, true);
-    return () => { window.removeEventListener('atlas:open-file', openFile); window.removeEventListener('atlas:file-dirty', dirtyFile); window.removeEventListener('beforeunload', beforeUnload); centerHost.removeEventListener('auxclick', guardMiddleClick, true); a.dispose(); b.dispose(); removed.dispose(); center.dispose(); bottom.dispose(); };
+    const openTerminal = () => { bottomVisible = true; const panel = bottom.getPanel('atlas.terminal'); panel?.api.setActive(); };
+    window.addEventListener('atlas:open-file', openFile); window.addEventListener('atlas:file-dirty', dirtyFile); window.addEventListener('atlas:open-terminal', openTerminal); window.addEventListener('beforeunload', beforeUnload); centerHost.addEventListener('auxclick', guardMiddleClick, true);
+    return () => { window.removeEventListener('atlas:open-file', openFile); window.removeEventListener('atlas:file-dirty', dirtyFile); window.removeEventListener('atlas:open-terminal', openTerminal); window.removeEventListener('beforeunload', beforeUnload); centerHost.removeEventListener('auxclick', guardMiddleClick, true); a.dispose(); b.dispose(); removed.dispose(); center.dispose(); bottom.dispose(); };
   });
 </script>
 
-<main class="workbench"><div class="center-dock" bind:this={centerHost}></div><div class="bottom-dock" bind:this={bottomHost}></div></main>
+<main class="workbench" class:terminal-open={bottomVisible}><div class="center-dock" bind:this={centerHost}></div><div class:bottom-collapsed={!bottomVisible} class="bottom-dock" bind:this={bottomHost}></div></main>
