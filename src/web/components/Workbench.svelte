@@ -96,4 +96,4 @@
   });
 </script>
 
-<main class="workbench" class:terminal-open={bottomVisible}><div class="center-dock" bind:this={centerHost}></div><div class:bottom-collapsed={!bottomVisible} class="bottom-dock" bind:this={bottomHost}></div></main>
+<div class="workbench" class:terminal-open={bottomVisible}><header class="atlas-menu" aria-label="Application menu"><button title="File actions">File</button><button title="Edit actions">Edit</button><button title="Selection actions">Selection</button><button title="Find in files and symbols">Find</button><button title="Change visible panels">View</button><button title="Run tools and operations">Tools</button><button title="Atlas help and shortcuts">Help</button><span class="menu-spacer"></span><button class="menu-icon" title="Open terminal sessions" aria-label="Open terminal sessions" onclick={()=>window.dispatchEvent(new Event('atlas:open-terminal'))}>⌘</button></header><main class="workbench-main"><div class="center-dock" bind:this={centerHost}></div><div class:bottom-collapsed={!bottomVisible} class="bottom-dock" bind:this={bottomHost}></div></main></div>
