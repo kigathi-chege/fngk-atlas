@@ -57,4 +57,9 @@ describe('FngkProcessClient', () => {
     const invoked=await client.invokeFileBinding('binding-1','filesystem.list',{path:'.',limit:20},{profile:'work'});
     expect(invoked.output).toMatchObject({input:{path:'.',limit:20},argv:['files','invoke','binding-1','filesystem.list','--json','--profile','work']});
   });
+
+  it('runs terminal lifecycle actions through the installed FNGK profile', async()=>{
+    const value=await new FngkProcessClient({binary:fixture}).sessionAction('session-1','rename',{profile:'work',title:'Build shell'});
+    expect(value).toMatchObject({protocolVersion:'fngk.session.v1',action:'rename',result:{id:'session-1',title:'Build shell'}});
+  });
 });

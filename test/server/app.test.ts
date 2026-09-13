@@ -28,6 +28,9 @@ describe('Atlas FNGK-native server', () => {
 
     const namespace = await app.inject({ method: 'GET', url: '/api/fngk/namespace?profile=work' });
     expect(namespace.json()).toMatchObject({ protocolVersion: 'fngk.namespace.v1', profile: { name: 'work' } });
+    expect((await app.inject({method:'GET',url:'/api/fngk/sessions?profile=work'})).json()).toMatchObject({profile:{name:'work'},sessions:[]});
+    expect((await app.inject({method:'POST',url:'/api/fngk/sessions/session-1/actions',payload:{action:'stop'}})).statusCode).toBe(409);
+    expect((await app.inject({method:'POST',url:'/api/fngk/sessions/session-1/actions',payload:{action:'rename',title:'Build shell',profile:'work'}})).json()).toMatchObject({protocolVersion:'fngk.session.v1',action:'rename'});
     const world = await app.inject({ method: 'GET', url: '/api/graph?lens=world&contextId=local' });
     expect(world.statusCode).toBe(200);expect(world.json().nodes).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'profile' }),expect.objectContaining({ type: 'device', label: 'kigathi' })]));
     expect((await app.inject({ method: 'POST', url: '/api/fngk/connect', payload: { session: 'never-accept-this' } })).statusCode).toBe(404);

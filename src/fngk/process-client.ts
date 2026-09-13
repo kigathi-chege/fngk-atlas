@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { FILES_PROTOCOL, NAMESPACE_PROTOCOL, TERMINAL_PROTOCOL, type NativeFileBindings, type NamespaceSnapshot } from './protocol.js';
+import { FILES_PROTOCOL, NAMESPACE_PROTOCOL, SESSION_PROTOCOL, TERMINAL_PROTOCOL, type NativeFileBindings, type NamespaceSnapshot } from './protocol.js';
 import { parseNamespace } from './namespace.js';
 import { TerminalSession } from './terminal-session.js';
 import { redact } from './redaction.js';
@@ -86,6 +86,11 @@ export class FngkProcessClient {
     const args=['files','invoke',bindingId,capability,'--json'];if(options.profile)args.push('--profile',options.profile);if(options.confirm)args.push('--yes');
     const value=JSON.parse((await this.#run(args,options.signal,JSON.stringify(input))).trim());
     if(value.protocolVersion!==FILES_PROTOCOL)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported Files protocol.');return value;
+  }
+
+  async sessionAction(sessionId:string,action:'rename'|'restart'|'stop'|'archive'|'restore',options:{profile?:string;title?:string;confirm?:boolean;signal?:AbortSignal}={}){
+    const args=['sessions',sessionId,action,'--json'];if(options.profile)args.push('--profile',options.profile);if(options.title)args.push('--title',options.title);if(options.confirm)args.push('--yes');
+    const value=JSON.parse((await this.#run(args,options.signal)).trim());if(value.protocolVersion!==SESSION_PROTOCOL)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported terminal session protocol.');return value;
   }
 
   async namespace(profile?: string, signal?: AbortSignal): Promise<NamespaceSnapshot> {
