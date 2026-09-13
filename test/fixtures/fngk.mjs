@@ -20,7 +20,12 @@ if (args[0] === 'version') {
       profile: { name: args[args.indexOf('--profile') + 1] ?? 'default' },
       devices: [{ id: 'device-1', name: 'kigathi', online: true }],
       connections: [],
-      sessions: [],
+      sessions: mode === 'session-list' ? [
+        { id: 'session-live', title: 'Live shell', status: 'active', deviceId: 'device-1', deviceName: 'kigathi' },
+        { id: 'session-detached', title: 'Detached shell', status: 'detached', deviceId: 'device-1', deviceName: 'kigathi' },
+        { id: 'session-archived', title: 'Archived shell', status: 'stopped', deviceId: 'device-1', deviceName: 'kigathi', archivedAt: '2026-09-12T11:00:00.000Z' },
+        { id: 'session-other', title: 'Other Device', status: 'active', deviceId: 'device-2', deviceName: 'remote' },
+      ] : [],
     }) + '\n');
   }
 } else if (args[0] === 'files' && args[1] !== 'invoke' && args.includes('--json')) {

@@ -1,7 +1,7 @@
 import {expect,test} from '@playwright/test';
 
 test('renders contextual search and safe filesystem actions in the FNGK Atlas workbench',async({page})=>{
-  const errors:string[]=[];page.on('console',message=>{if(message.type()==='error')errors.push(message.text())});page.on('pageerror',error=>errors.push(error.message));
+  const errors:string[]=[],terminalSockets:string[]=[];page.on('console',message=>{if(message.type()==='error')errors.push(message.text())});page.on('pageerror',error=>errors.push(error.message));page.on('websocket',socket=>{if(socket.url().includes('/api/fngk/terminals'))terminalSockets.push(socket.url())});
   await page.goto('/');await expect(page.getByText('FNGK Atlas',{exact:true}).first()).toBeVisible();await expect(page.locator('.dv-dockview')).toHaveCount(1);
   await page.getByRole('button',{name:'Search'}).first().click();await expect(page.getByLabel('Search selected context')).toBeFocused();
   await expect(page.locator('.context-rail')).toBeVisible();await expect(page.getByText('Architecture',{exact:true}).first()).toBeVisible();await expect(page.getByText('Functions & coverage',{exact:true}).first()).toBeVisible();await expect(page.getByText('Filesystem',{exact:true}).first()).toBeVisible();await page.locator('.context-rail').getByRole('button',{name:'Atlas process host'}).click();
@@ -12,6 +12,8 @@ test('renders contextual search and safe filesystem actions in the FNGK Atlas wo
   await expect(page.locator('.cm-editor')).toBeVisible();await expect(page.locator('.cm-content')).toContainText('fngk-atlas');await expect(page.locator('.cm-gutters')).toBeVisible();
   await page.locator('.cm-content').click();await expect(page.locator('.cm-cursor')).toBeVisible();
   await page.locator('.context-rail').getByRole('button',{name:/kigathi/}).click();await page.locator('.context-sidebar').getByRole('button',{name:'Open terminal',exact:true}).click();await expect(page.getByText('Terminal',{exact:true}).first()).toBeVisible();await expect(page.locator('.terminal-panel header')).toContainText('Live');await expect(page.getByRole('navigation',{name:'Terminal sessions'})).toBeVisible();await expect(page.getByRole('button',{name:'New terminal session'})).toBeVisible();
+  await page.evaluate(()=>window.dispatchEvent(new Event('atlas:open-terminal')));await page.evaluate(()=>window.dispatchEvent(new Event('atlas:open-terminal')));await expect(page.locator('.terminal-panel')).toHaveCount(1);expect(terminalSockets.filter(url=>url.includes('new=1'))).toHaveLength(0);
+  await page.getByRole('button',{name:'New terminal session'}).click();await expect.poll(()=>terminalSockets.filter(url=>url.includes('new=1')).length).toBe(1);await expect(page.locator('.terminal-panel')).toHaveCount(1);
   const separators=page.locator('.dv-sash');expect(await separators.count()).toBeGreaterThan(1);
   await page.reload();await expect(page.locator('.dv-dockview')).toHaveCount(1);await expect(page.getByText('Filesystem',{exact:true}).first()).toBeVisible();
   await page.locator('.context-rail').getByRole('button',{name:'Atlas process host'}).click();await page.route('**/api/files/search?**',async route=>{await new Promise(resolve=>setTimeout(resolve,350));await route.fulfill({contentType:'application/json',body:JSON.stringify({matches:[{path:'/stale-file.txt',type:'file'}]})});});await page.getByLabel('Search filesystem').fill('stale');await page.locator('.context-rail').getByRole('button',{name:/kigathi/}).click();await page.waitForTimeout(600);await expect(page.getByText('/stale-file.txt',{exact:true})).toHaveCount(0);

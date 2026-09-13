@@ -90,7 +90,15 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
     catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
   });
   app.get('/api/contexts/terminals', async () => ({ items: contexts.activeTerminals() }));
-  app.get('/api/fngk/sessions',async(request,reply)=>{const profile=String((request.query as {profile?:string}).profile??'')||undefined;try{const value=await fngk.namespace(profile,requestSignal(request));return {profile:value.profile,sessions:value.sessions}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.get('/api/fngk/sessions',async(request,reply)=>{
+    const query=request.query as {profile?:string;deviceId?:string},profile=String(query.profile??'')||undefined;
+    try{
+      const value=await fngk.namespace(profile,requestSignal(request));
+      const sessions=(value.sessions??[]).filter(session=>!query.deviceId||session.deviceId===query.deviceId);
+      const active=sessions.filter(session=>!session.archivedAt&&!['stopped','exited','failed'].includes(String(session.status??'').toLowerCase()));
+      return {profile:value.profile,sessions,counts:{total:sessions.length,active:active.length,live:active.filter(session=>['active','live','running','connected'].includes(String(session.status??'').toLowerCase())).length,detached:active.filter(session=>String(session.status??'').toLowerCase()==='detached').length,archived:sessions.filter(session=>Boolean(session.archivedAt)).length}};
+    }catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
+  });
   app.post('/api/fngk/sessions/:id/actions',async(request,reply)=>{const id=decodeURIComponent((request.params as {id:string}).id),body=request.body as {action?:'rename'|'restart'|'stop'|'archive'|'restore';profile?:string;title?:string;confirm?:boolean};if(!body.action||!['rename','restart','stop','archive','restore'].includes(body.action))return reply.code(400).send({error:'invalid_action'});if(['stop','archive'].includes(body.action)&&body.confirm!==true)return reply.code(409).send({error:'confirmation_required'});try{return await fngk.sessionAction(id,body.action,{profile:body.profile,title:body.title,confirm:body.confirm,signal:requestSignal(request)})}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
   app.post('/api/contexts/:id/release', async (request, reply) => { const id = decodeURIComponent((request.params as { id: string }).id), body = request.body as { stop?: boolean; confirm?: boolean } | undefined, stop = body?.stop === true; if (stop && body?.confirm !== true) return reply.code(409).send({ error: 'confirmation_required' }); const released=contexts.release(id, stop); if(released)evidence.invalidateContext(id,stop?'terminal_stopped':'terminal_disconnected'); return { released, contextId: id, stopped: stop }; });
 

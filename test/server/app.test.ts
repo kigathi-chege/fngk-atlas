@@ -50,6 +50,24 @@ describe('Atlas FNGK-native server', () => {
     await once(socket, 'close');
   });
 
+  it('scopes terminal sessions to one Device and reports lifecycle counts', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'fngk-atlas-sessions-'));
+    const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture, env: { FNGK_FIXTURE_MODE: 'session-list' } }), dbPath: path.join(directory, 'atlas.db') });
+    cleanups.push(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
+
+    const response = await app.inject({ method: 'GET', url: '/api/fngk/sessions?deviceId=device-1' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      sessions: [
+        { id: 'session-live', deviceId: 'device-1' },
+        { id: 'session-detached', deviceId: 'device-1' },
+        { id: 'session-archived', deviceId: 'device-1' },
+      ],
+      counts: { total: 3, active: 2, live: 1, detached: 1, archived: 1 },
+    });
+  });
+
   it('requires explicit confirmation and streams a guided FNGK update', async () => {
     const app = await harness();
     expect((await app.inject({ method: 'POST', url: '/api/fngk/update', payload: {} })).statusCode).toBe(409);
