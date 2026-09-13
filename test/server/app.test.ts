@@ -6,6 +6,7 @@ import WebSocket from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/server/app.js';
 import { FngkProcessClient } from '../../src/fngk/process-client.js';
+import {DbGateSupervisor} from '../../src/databases/sidecar.js';
 
 const fixture = path.resolve('test/fixtures/fngk.mjs');
 const cleanups: Array<() => Promise<void>> = [];
@@ -61,6 +62,14 @@ describe('Atlas FNGK-native server', () => {
       expect.objectContaining({ type: 'output', line: 'installed' }),
       expect.objectContaining({ type: 'complete', context: expect.objectContaining({ compatible: true }) }),
     ]);
+  });
+
+  it('proxies an isolated database sidecar without returning credentials',async()=>{
+    const directory=await mkdtemp(path.join(tmpdir(),'fngk-atlas-database-')),runtime=new DbGateSupervisor({command:process.execPath,args:[path.resolve('test/fixtures/dbgate-sidecar.mjs')],version:'7.2.3',uid:1000});
+    const app=await createApp({fngk:new FngkProcessClient({binary:fixture}),dbPath:path.join(directory,'atlas.db'),databaseRuntime:runtime});cleanups.push(async()=>{await app.close();await rm(directory,{recursive:true,force:true})});
+    const started=await app.inject({method:'POST',url:'/api/databases/sessions',payload:{contextId:'local',engine:'postgres',host:'127.0.0.1',port:5432,user:'atlas',password:'not-in-response',readOnly:true}});expect(started.statusCode).toBe(201);expect(started.body).not.toContain('not-in-response');const value=started.json(),cookie=started.headers['set-cookie'];
+    const proxied=await app.inject({method:'GET',url:value.session.proxyPath,headers:{cookie:String(cookie)}});expect(proxied.statusCode).toBe(200);expect(proxied.body).toContain('Database workbench');
+    expect((await app.inject({method:'GET',url:value.session.proxyPath})).statusCode).toBe(403);expect((await app.inject({method:'DELETE',url:`/api/databases/sessions/${value.session.id}`,payload:{}})).statusCode).toBe(409);
   });
 
   it('browses, conflict-checks, saves, and scans the process-visible machine context', async () => {

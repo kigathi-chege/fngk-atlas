@@ -22,6 +22,10 @@ import { correlateRuntime } from '../correlation/runtime-code.js';
 import { analyzeRepository } from '../analysis/repository-analyzer.js';
 import { redactCommandLine } from '../discovery/redaction.js';
 import { buildGraphLens, type GraphLens } from '../web/lib/graph-model.js';
+import {discoverDatabases} from '../databases/discovery.js';
+import {DbGateSupervisor} from '../databases/sidecar.js';
+import type {DatabaseRuntime,DatabaseConnection} from '../databases/types.js';
+import {proxyDatabase} from '../databases/proxy.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const terminalInputs = new Set(['input', 'command', 'resize', 'interrupt', 'mode', 'control_request', 'control_resolve', 'nested_approval_resolve', 'detach', 'stop']);
@@ -32,6 +36,7 @@ interface CreateAppOptions {
   root?: string;
   localRoot?: string;
   logger?: boolean;
+  databaseRuntime?:DatabaseRuntime;
 }
 
 function processError(error: unknown): { statusCode: number; body: Record<string, unknown> } {
@@ -60,15 +65,17 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   const evidence = new EvidenceStore(options.dbPath ?? process.env.ATLAS_DB ?? path.join(root, '.atlas', 'atlas.db'));
   let activeIndex = store.latestIndex();
   const resolveIndex = (indexId?: string, contextId?: string) => indexId ? store.index(indexId) : contextId ? store.latestIndex(contextId) : activeIndex;
+  const databases=options.databaseRuntime??new DbGateSupervisor();
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 << 20 });
   await app.register(websocket);
-  app.addHook('onClose', async () => { contexts.close(); evidence.close(); store.close(); });
+  app.addHook('onClose', async () => { await databases.close(); contexts.close(); evidence.close(); store.close(); });
 
   app.addHook('onSend', async (_request, reply, payload) => {
+    const databaseProxy=String((_request as any).url??'').startsWith('/api/databases/sessions/')&&String((_request as any).url??'').includes('/workbench');
     reply.header('X-Content-Type-Options', 'nosniff')
-      .header('X-Frame-Options', 'DENY')
+      .header('X-Frame-Options', databaseProxy?'SAMEORIGIN':'DENY')
       .header('Referrer-Policy', 'no-referrer')
-      .header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:");
+      .header('Content-Security-Policy', databaseProxy?"default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; connect-src 'self' ws: wss:; img-src 'self' data: blob:; frame-ancestors 'self'":"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; frame-src 'self'");
     return payload;
   });
 
@@ -97,6 +104,11 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   const routeEvidence = (route: { id: string; kind: string; deviceId?: string; effectiveIdentity: string; privilege: string; observedAt: string; operations?: string[] }) => ({ id: route.id, kind: route.kind, deviceId: route.deviceId, effectiveIdentity: route.effectiveIdentity, privilege: route.privilege, observedAt: route.observedAt, operations: route.operations ?? [] });
   const operationEvidence = (type: string, contextId: string, route: { id: string; kind: string; effectiveIdentity: string; privilege: string; observedAt: string; operations?: string[] }, summary:Record<string,unknown>={}) => { const operation={ id: randomUUID(), type, contextId, route: routeEvidence(route), summary, recordedAt: new Date().toISOString() }; evidence.recordOperation(operation); return operation; };
   app.get('/api/operations',async(request)=>{const query=request.query as {contextId?:string;limit?:string};return {items:evidence.operations(query.contextId,Number(query.limit)||200)}});
+  app.get('/api/databases/discover',async(request,reply)=>{const contextId=String((request.query as {contextId?:string}).contextId??'local');try{return await discoverDatabases(contextId,await contexts.commandExecutor(contextId))}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.get('/api/databases/sessions',async()=>({items:databases.list()}));
+  app.post('/api/databases/sessions',async(request,reply)=>{const body=request.body as DatabaseConnection;if(!body?.contextId||!body.engine||!body.host)return reply.code(400).send({error:'invalid_database_connection'});try{const value=await databases.start(body);reply.header('Set-Cookie',`atlas_db_${value.session.id.slice(0,8)}=${value.token}; HttpOnly; SameSite=Strict; Path=${value.session.proxyPath}; Max-Age=${Math.max(1,Math.floor((Date.parse(value.session.expiresAt)-Date.now())/1000))}`);const operation={id:randomUUID(),type:'database.session.start',contextId:body.contextId,route:{kind:body.contextId==='local'?'direct':'terminal',effectiveIdentity:'database-sidecar',privilege:'user'},summary:{engine:body.engine,host:body.host,port:body.port,database:body.database,readOnly:Boolean(body.readOnly)},recordedAt:new Date().toISOString()};evidence.recordOperation(operation as any);return reply.code(201).send({session:value.session})}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.delete('/api/databases/sessions/:id',async(request,reply)=>{const id=decodeURIComponent((request.params as {id:string}).id),body=request.body as {confirm?:boolean}|undefined;if(body?.confirm!==true)return reply.code(409).send({error:'confirmation_required'});return {stopped:await databases.stop(id)}});
+  app.all('/api/databases/sessions/:id/workbench/*',async(request,reply)=>proxyDatabase(databases,decodeURIComponent((request.params as {id:string}).id),String((request.params as any)['*']??''),request,reply));
   app.get('/api/files', async (request, reply) => {
     const query = request.query as { contextId?: string; path?: string; cursor?: string; limit?: string };
     try { const page = await (await contexts.files(query.contextId ?? 'local')).list({ contextId: query.contextId ?? 'local', path: query.path ?? '/' }, { cursor: query.cursor, limit: Number(query.limit) || 100 }); return { ...page, route: routeEvidence(page.route) }; }

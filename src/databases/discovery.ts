@@ -1,0 +1,9 @@
+import {createHash} from 'node:crypto';import type {CommandExecutor} from '../transports/terminal-command.js';import type {DatabaseEngine,DatabaseResource} from './types.js';
+const ports:Record<number,DatabaseEngine>={5432:'postgres',3306:'mysql',6379:'redis',27017:'mongodb',1433:'mssql',1521:'oracle'};
+const names:Array<[RegExp,DatabaseEngine]>=[[/\bpostgres(?:ql)?\b/i,'postgres'],[/\bmysqld\b/i,'mysql'],[/\bmariadbd\b/i,'mariadb'],[/\bredis-server\b/i,'redis'],[/\bmongod\b/i,'mongodb'],[/\bsqlservr\b/i,'mssql'],[/\boracle\b/i,'oracle']];
+export async function discoverDatabases(contextId:string,executor:CommandExecutor):Promise<{items:DatabaseResource[];errors:Array<{probe:string;message:string}>}>{
+  const errors:Array<{probe:string;message:string}>=[];let output='';try{output=(await executor.execute("(ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null || true); printf '\\n__ATLAS_PS__\\n'; ps -eo comm=,args= 2>/dev/null | head -2000",{timeoutMs:15_000})).output.toString('utf8')}catch(error){errors.push({probe:'database-census',message:(error as Error).message});}
+  const items=new Map<string,DatabaseResource>(),observedAt=new Date().toISOString();
+  for(const line of output.split(/\r?\n/)){const portMatches=[...line.matchAll(/(?:\*|\[[^\]]+\]|[\d.:]+):(\d{2,5})\b/g)];let engine:DatabaseEngine|undefined;for(const [pattern,value] of names)if(pattern.test(line)){engine=value;break}for(const match of portMatches){const port=Number(match[1]),resolved=engine??ports[port];if(!resolved)continue;const key=`${resolved}:127.0.0.1:${port}`;items.set(key,{id:createHash('sha256').update(`${contextId}:${key}`).digest('hex').slice(0,24),contextId,engine:resolved,host:'127.0.0.1',port,source:'terminal',evidence:{kind:'listening_socket',line:line.slice(0,300)},observedAt});}}
+  return {items:[...items.values()],errors};
+}
