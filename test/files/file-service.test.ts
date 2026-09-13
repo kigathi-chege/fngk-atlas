@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -71,6 +71,12 @@ describe('logical filesystem', () => {
     await expect(files.search({ contextId: 'host', path: '/' }, 'needle', { signal: controller.signal })).rejects.toMatchObject({ code: 'cancelled' });
   });
 
+  it('stops name matching at the requested result limit', async () => {
+    const { root, files } = await harness();
+    await Promise.all(['needle-a.txt', 'needle-b.txt', 'needle-c.txt'].map(name => writeFile(path.join(root, name), '')));
+    expect((await files.search({ contextId: 'host', path: '/' }, 'needle', { mode: 'name', limit: 1 })).matches).toHaveLength(1);
+  });
+
   it('trashes and restores paths when the effective route supports recovery', async () => {
     const { root, files } = await harness();
     await files.createFile({ contextId: 'host', path: '/recover.txt' }, Buffer.from('recover me'));
@@ -86,6 +92,32 @@ describe('logical filesystem', () => {
     await files.createFile({ contextId: 'host', path: '/recover.txt' });
     await files.trash({ contextId: 'host', path: '/recover.txt' });
     await expect(files.remove({ contextId: 'host', path: '/.atlas-trash' })).rejects.toMatchObject({ code: 'protected_path' });
+  });
+
+  it('restores only an authenticated vault token and never deletes an arbitrary directory', async () => {
+    const { root, files } = await harness();
+    await files.createDirectory({ contextId: 'host', path: '/attacker' });
+    await files.createFile({ contextId: 'host', path: '/attacker/payload' }, Buffer.from('payload'));
+    await files.createFile({ contextId: 'host', path: '/attacker/metadata.json' }, Buffer.from(JSON.stringify({ originalPath: '/restored.txt' })));
+    await expect(files.restore({ contextId: 'host', path: '/attacker' })).rejects.toMatchObject({ code: 'invalid_trash_record' });
+    await expect(readFile(path.join(root, 'attacker', 'payload'), 'utf8')).resolves.toBe('payload');
+  });
+
+  it('rejects a symlinked recovery vault without moving the source outside the route root', async () => {
+    const { root, files } = await harness();
+    const outside = await mkdtemp(path.join(tmpdir(), 'atlas-outside-')); directories.push(outside);
+    await writeFile(path.join(root, 'source.txt'), 'keep me');
+    await symlink(outside, path.join(root, '.atlas-trash'));
+    await expect(files.trash({ contextId: 'host', path: '/source.txt' })).rejects.toMatchObject({ code: 'path_escape' });
+    await expect(readFile(path.join(root, 'source.txt'), 'utf8')).resolves.toBe('keep me');
+  });
+
+  it('refuses to trash a symlink instead of following it into recovery', async () => {
+    const { root, files } = await harness();
+    await writeFile(path.join(root, 'source.txt'), 'keep me');
+    await symlink('source.txt', path.join(root, 'source-link'));
+    await expect(files.trash({ contextId: 'host', path: '/source-link' })).rejects.toMatchObject({ code: 'path_escape' });
+    await expect(readFile(path.join(root, 'source.txt'), 'utf8')).resolves.toBe('keep me');
   });
 
   it('falls through a failed structured adapter to effective terminal authority', async () => {

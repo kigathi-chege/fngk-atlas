@@ -109,6 +109,6 @@ describe('Atlas FNGK-native server', () => {
     expect((await app.inject({method:'DELETE',url:'/api/files',payload:{contextId:'local',path:'/repo',permanent:true}})).statusCode).toBe(409);
     expect((await app.inject({method:'DELETE',url:'/api/files',payload:{contextId:'local',path:'//',permanent:true,confirm:true}})).statusCode).toBe(400);
     const indexedSearch=(await app.inject({method:'GET',url:'/api/search?contextId=local&q=local'})).json();
-    expect(indexedSearch.items).toContainEqual(expect.objectContaining({type:'function'}));
+    expect(indexedSearch.items).toContainEqual(expect.objectContaining({type:'function',repositoryRoot:'/repo',contextId:'local'}));
   });
 });

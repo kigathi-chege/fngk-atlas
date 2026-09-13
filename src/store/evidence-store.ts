@@ -73,9 +73,7 @@ export class EvidenceStore {
     if (!value.partial) {
       const scan = this.db.prepare('SELECT context_id contextId FROM atlas_scans WHERE id=?').get(id) as { contextId?: string } | undefined;
       if (scan?.contextId) {
-        this.db.prepare('DELETE FROM atlas_entities WHERE context_id=? AND last_scan_id<>?').run(scan.contextId, id);
-        this.db.prepare('DELETE FROM atlas_relationships WHERE context_id=? AND last_scan_id<>?').run(scan.contextId, id);
-        this.db.prepare(`INSERT INTO atlas_context_state(context_id,stale,reason,updated_at) VALUES(?,0,NULL,?) ON CONFLICT(context_id) DO UPDATE SET stale=0,reason=NULL,updated_at=excluded.updated_at`).run(scan.contextId, new Date().toISOString());
+        this.db.exec('BEGIN');try{this.db.prepare('DELETE FROM atlas_entities WHERE context_id=? AND last_scan_id<>?').run(scan.contextId, id);this.db.prepare('DELETE FROM atlas_relationships WHERE context_id=? AND last_scan_id<>?').run(scan.contextId, id);this.db.prepare("DELETE FROM atlas_search WHERE source='evidence' AND context_id=? AND entity_id NOT IN (SELECT id FROM atlas_entities WHERE context_id=?)").run(scan.contextId,scan.contextId);this.db.prepare(`INSERT INTO atlas_context_state(context_id,stale,reason,updated_at) VALUES(?,0,NULL,?) ON CONFLICT(context_id) DO UPDATE SET stale=0,reason=NULL,updated_at=excluded.updated_at`).run(scan.contextId, new Date().toISOString());this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
       }
     }
   }
@@ -88,6 +86,6 @@ export class EvidenceStore {
   relationships(contextId: string): Array<EvidenceRelationship & { observedAt: string }> {
     return this.db.prepare(`SELECT r.id,r.context_id contextId,r.type,r.source_id sourceId,r.target_id targetId,r.evidence_json evidenceJson,r.observed_at observedAt,COALESCE(s.stale,0) stale,s.reason staleReason FROM atlas_relationships r LEFT JOIN atlas_context_state s ON s.context_id=r.context_id WHERE r.context_id=? ORDER BY r.type,r.id`).all(contextId).map((row: any) => ({ id: row.id, contextId: row.contextId, type: row.type, sourceId: row.sourceId, targetId: row.targetId, evidence: JSON.parse(row.evidenceJson), observedAt: row.observedAt, stale: Boolean(row.stale), staleReason: row.staleReason ?? undefined }));
   }
-  search(contextId:string,query:string,limit=100){const tokens=query.normalize('NFKC').trim().split(/\s+/).map(value=>value.replace(/[^\p{L}\p{N}_.:/-]/gu,'')).filter(Boolean).slice(0,8);if(!tokens.length)return[];const match=tokens.map(value=>`"${value.replaceAll('"','')}"*`).join(' AND ');try{return this.db.prepare(`SELECT context_id contextId,entity_id entityId,type,label,path,detail,source,bm25(atlas_search) rank FROM atlas_search WHERE atlas_search MATCH ? AND context_id=? ORDER BY rank LIMIT ?`).all(match,contextId,Math.min(250,Math.max(1,limit)))}catch{return[]}}
+  search(contextId:string,query:string,limit=100){const tokens=query.normalize('NFKC').trim().split(/\s+/).map(value=>value.replace(/[^\p{L}\p{N}_.:/-]/gu,'')).filter(Boolean).slice(0,8);if(!tokens.length)return[];const match=tokens.map(value=>`"${value.replaceAll('"','')}"*`).join(' AND ');try{return this.db.prepare(`SELECT a.context_id contextId,a.entity_id entityId,a.type,a.label,a.path,a.detail,a.source,bm25(atlas_search) rank,COALESCE(s.stale,0) stale,s.reason staleReason FROM atlas_search a LEFT JOIN atlas_context_state s ON s.context_id=a.context_id WHERE atlas_search MATCH ? AND a.context_id=? ORDER BY rank LIMIT ?`).all(match,contextId,Math.min(250,Math.max(1,limit))).map((row:any)=>({...row,stale:Boolean(row.stale),staleReason:row.staleReason??undefined}))}catch{return[]}}
   close(): void { this.db.close(); }
 }

@@ -16,8 +16,10 @@ describe('evidence store', () => {
     store.putEntities(replacement.id, [{ id: 'repo-2', contextId: 'host', type: 'repository', name: 'atlas', path: '/srv/atlas' }]);
     store.completeScan(replacement.id, { partial: false });
     expect(store.entities('host').map(value => value.id)).toEqual(['repo-2']);
+    expect(store.search('host','signal')).toEqual([]);
     store.invalidateContext('host', 'terminal_disconnected');
     expect(store.entities('host')).toEqual([expect.objectContaining({ id: 'repo-2', stale: true, staleReason: 'terminal_disconnected' })]);
+    expect(store.search('host','atlas')).toEqual([expect.objectContaining({ entityId: 'repo-2', stale: true, staleReason: 'terminal_disconnected' })]);
     const refreshed = store.beginScan({ contextId: 'host', routeId: 'terminal-2' });
     store.putEntities(refreshed.id, [{ id: 'repo-2', contextId: 'host', type: 'repository', name: 'atlas', path: '/srv/atlas' }]);
     store.completeScan(refreshed.id, { partial: false });

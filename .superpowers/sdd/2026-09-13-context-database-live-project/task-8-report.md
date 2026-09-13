@@ -67,3 +67,68 @@ Svelte check completed with 0 errors and 0 warnings; TypeScript completed succes
 - Reviewed the complete Task 8 diff and ran `git diff --check`; no whitespace errors.
 - Direct recovery records store only recovery metadata; file contents remain in the selected filesystem's trash vault and are not copied into Atlas persistence.
 - The production web build retains the existing Vite advisory for a minified JavaScript chunk above 500 kB. It does not affect test, type, Svelte, build, or browser-test success and is outside this focused slice.
+
+## Fix round 1: security, bounds, and context races
+
+### What changed
+
+- Recovery restore now accepts only UUID tokens immediately under the canonical, non-symlinked `.atlas-trash` vault. It validates the token directory, metadata, and payload as canonical non-symlink paths before reading, renaming, or removing anything.
+- Direct trash validates the vault before source movement; if metadata persistence fails it rolls the payload back to its original path, or preserves the recovery record and reports its recovery path if rollback itself fails. Symlink sources are rejected rather than moved into a record that cannot be safely restored.
+- Direct search streams directories through `opendir`, applies entry and result limits before more work, and rechecks file size after reading. Terminal search uses bounded NUL-structured name/type records, bounded content candidates, `pipefail`, and non-masking grep exit handling.
+- Nonempty terminal file create stages data then uses an exclusive hard-link, never `mv -f` onto an existing destination.
+- Evidence scan completion deletes superseded FTS entries transactionally; evidence FTS results include stale state/reason.
+- Contextual indexed search returns `repositoryRoot`; Navigator opens relative results against that provenance rather than the editable repository field.
+- Both Svelte search surfaces cancel superseded requests and ignore stale generations/context responses. Pending mutation dialogs and recovery actions are bound to their original context and invalidated on context changes. The server also aborts file search work on response disconnect.
+
+### TDD evidence
+
+#### RED
+
+`npx vitest run test/files/file-service.test.ts test/transports/terminal.test.ts test/store/evidence-store.test.ts test/server/app.test.ts`
+
+7 expected failures before implementation: direct name search returned 3 results for `limit:1`; arbitrary restore succeeded; a symlinked vault moved data; nonempty terminal create resolved instead of refusing an existing path; terminal names corrupted newline/colon paths; deleted evidence remained searchable; indexed results had no repository provenance.
+
+`npm run test:e2e`
+
+The initial two-test browser run exposed a Chromium single-process launch closure before its second context. The race regression was then run on the existing browser page, matching the configured single-process execution model.
+
+#### GREEN
+
+`npx vitest run test/files/file-service.test.ts test/transports/terminal.test.ts test/store/evidence-store.test.ts test/server/app.test.ts && npm run check:web && npm run typecheck`
+
+26/26 focused tests passed; Svelte check had 0 errors/warnings and TypeScript passed.
+
+`npm run test:e2e`
+
+1/1 browser scenario passed, including delayed filesystem and indexed-search response races across context changes.
+
+### Full verification
+
+`npm test && npm run check:web && npm run typecheck && npm run build && npm run test:e2e`
+
+- Legacy tests: 4/4 passed.
+- Vitest: 17 files, 57/57 passed.
+- Svelte check: 0 errors, 0 warnings.
+- Typecheck and server/web builds passed.
+- Playwright: 1/1 passed.
+
+### Files changed
+
+- `src/transports/direct.ts`
+- `src/transports/terminal-file.ts`
+- `src/files/file-service.ts`
+- `src/store/evidence-store.ts`
+- `src/server/app.ts`
+- `src/web/components/FilesystemTree.svelte`
+- `src/web/components/Navigator.svelte`
+- `test/files/file-service.test.ts`
+- `test/transports/terminal.test.ts`
+- `test/store/evidence-store.test.ts`
+- `test/server/app.test.ts`
+- `e2e/workbench.spec.ts`
+
+### Self-review
+
+- Reviewed recovery behavior for arbitrary directories, vault/payload symlinks, malformed metadata, destination conflicts, and metadata-write rollback preservation.
+- Verified direct and terminal search limit/cancellation paths, context-bound UI mutations/restores, indexed-root provenance, and stale evidence query state.
+- `git diff --check` is clean. The pre-existing Vite chunk-size advisory remains the only non-failing build notice.

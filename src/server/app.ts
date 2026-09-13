@@ -45,9 +45,10 @@ function processError(error: unknown): { statusCode: number; body: Record<string
   return { statusCode, body: { error: code, message: value.message ?? 'Unexpected error.' } };
 }
 
-function requestSignal(request: { raw: NodeJS.EventEmitter }): AbortSignal {
+function requestSignal(request: { raw: NodeJS.EventEmitter }, reply?: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }): AbortSignal {
   const controller = new AbortController();
   request.raw.once('aborted', () => controller.abort());
+  reply?.raw.once('close', () => { if (!reply.raw.writableEnded) controller.abort(); });
   return controller.signal;
 }
 
@@ -117,7 +118,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   app.get('/api/files/search', async (request, reply) => {
     const query=request.query as {contextId?:string;path?:string;query?:string;mode?:'name'|'content'|'all';limit?:string;maxEntries?:string;maxDepth?:string};if(!query.query?.trim())return {matches:[],route:null};
     const contextId=query.contextId??'local';
-    try{const value=await (await contexts.files(contextId)).search({contextId,path:query.path??'/'},query.query,{mode:query.mode??'all',limit:Number(query.limit)||200,maxEntries:Number(query.maxEntries)||5_000,maxDepth:Number(query.maxDepth)||12,signal:requestSignal(request)});return {...value,route:routeEvidence(value.route),operation:operationEvidence('file.search',contextId,value.route)}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
+    try{const value=await (await contexts.files(contextId)).search({contextId,path:query.path??'/'},query.query,{mode:query.mode??'all',limit:Number(query.limit)||200,maxEntries:Number(query.maxEntries)||5_000,maxDepth:Number(query.maxDepth)||12,signal:requestSignal(request,reply)});return {...value,route:routeEvidence(value.route),operation:operationEvidence('file.search',contextId,value.route)}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
   });
   app.post('/api/files', async (request, reply) => {
     const body=request.body as {contextId?:string;path?:string;type?:'file'|'directory';contentBase64?:string};if(!body.path||!['file','directory'].includes(String(body.type)))return reply.code(400).send({error:'invalid_create'});
@@ -137,7 +138,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   });
   app.get('/api/search', async (request) => {
     const query=request.query as {contextId?:string;q?:string;limit?:string},contextId=String(query.contextId??'')||undefined,q=String(query.q??''),limit=Math.min(250,Math.max(1,Number(query.limit)||100));
-    const values=[...store.search(contextId,q,limit),...(contextId?evidence.search(contextId,q,limit):[])],seen=new Set<string>();return {items:values.filter((value:any)=>{const key=`${value.type}:${value.entityId}`;if(seen.has(key))return false;seen.add(key);return true}).slice(0,limit)};
+    const indexed=store.search(contextId,q,limit).map((value:any)=>value.source==='index'?{...value,repositoryRoot:resolveIndex(undefined,value.contextId)?.root}:value),values=[...indexed,...(contextId?evidence.search(contextId,q,limit):[])],seen=new Set<string>();return {items:values.filter((value:any)=>{const key=`${value.type}:${value.entityId}`;if(seen.has(key))return false;seen.add(key);return true}).slice(0,limit)};
   });
   app.get('/api/discovery/entities', async (request) => { const contextId = String((request.query as { contextId?: string }).contextId ?? 'local'); return { entities: evidence.entities(contextId), relationships: evidence.relationships(contextId) }; });
   app.get('/api/discovery/scan', { websocket: true }, (socket, request) => {

@@ -62,7 +62,27 @@ describe('terminal-backed effective access', () => {
     const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.alloc(0), exitCode: 0 }; } };
     const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
     await transport.search('/srv/atlas', 'needle', { mode: 'content', maxEntries: 12, maxDepth: 3, maxFileBytes: 2048 });
-    expect(commands[0]).toContain("find '/srv/atlas' -xdev -mindepth 1 -maxdepth 3 -type f -size -2048c -print0 | head -z -n 12 | xargs -0 -r grep");
+    expect(commands[0]).toContain("find '/srv/atlas' -xdev -mindepth 1 -maxdepth 3 -type f -size -2048c -print0 | head -z -n 12 | xargs -0 -r sh -c");
     expect(commands[0]).not.toContain('grep -R');
+  });
+
+  it('uses exclusive linking for nonempty terminal file creation', async () => {
+    const commands: string[] = [];
+    const executor: CommandExecutor = { execute: async command => { commands.push(command); return command.includes('ln --') ? { output: Buffer.alloc(0), exitCode: 1 } : { output: Buffer.alloc(0), exitCode: 0 }; } };
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
+    await expect(transport.createFile('/existing.txt', Buffer.from('new'))).rejects.toMatchObject({ code: 'remote_command_failed' });
+    expect(commands.some(command => command.includes('ln --'))).toBe(true);
+    expect(commands.join('\n')).not.toContain('mv -f');
+  });
+
+  it('uses bounded structured NUL records for terminal name search', async () => {
+    const commands: string[] = [];
+    const encoded = Buffer.from('/srv/atlas/name:with\nnewline\0d\0').toString('base64');
+    const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.from(encoded), exitCode: 0 }; } };
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
+    await expect(transport.search('/srv/atlas', 'name', { mode: 'name', maxEntries: 12 })).resolves.toEqual([{ path: '/srv/atlas/name:with\nnewline', type: 'directory' }]);
+    expect(commands[0]).toContain('-printf');
+    expect(commands[0]).toContain('head -z -n 24');
+    expect(commands[0]).toContain('pipefail');
   });
 });
