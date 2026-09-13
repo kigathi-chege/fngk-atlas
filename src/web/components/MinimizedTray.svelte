@@ -1,0 +1,6 @@
+<script lang="ts">
+  import PanelTopOpen from '@lucide/svelte/icons/panel-top-open';import MoreHorizontal from '@lucide/svelte/icons/more-horizontal';import WorkbenchContextMenu from './WorkbenchContextMenu.svelte';import type {AtlasPanelDescriptor} from '../lib/panel-registry.js';
+  export let items:AtlasPanelDescriptor[]=[];export let onrestore:(id:string)=>void=()=>{};export let onforget:(id:string)=>void=()=>{};let menu:{x:number;y:number;item:AtlasPanelDescriptor}|undefined;
+</script>
+{#if items.length}<nav class="minimized-tray" aria-label="Minimized panels"><span>MINIMIZED</span>{#each items as item}<div><button aria-label={`Restore ${item.title}`} title={`Restore ${item.title}`} onclick={()=>onrestore(item.id)} oncontextmenu={(event)=>{event.preventDefault();menu={x:event.clientX,y:event.clientY,item}}}><PanelTopOpen size={13}/><b>{item.title}</b></button><button title={`Options for ${item.title}`} onclick={(event)=>menu={x:event.clientX,y:event.clientY,item}}><MoreHorizontal size={12}/></button></div>{/each}</nav>{/if}
+{#if menu}<WorkbenchContextMenu x={menu.x} y={menu.y} actions={[{id:'restore',label:'Restore panel'},{id:'close',label:'Close panel',danger:true}]} onclose={()=>menu=undefined} onrun={(action)=>{if(action==='restore')onrestore(menu!.item.id);else onforget(menu!.item.id)}}/>{/if}

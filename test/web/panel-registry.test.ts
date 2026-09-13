@@ -24,4 +24,12 @@ describe('Atlas panel registry',()=>{
     expect(registry.all()).toHaveLength(1);expect(registry.get('atlas.graph')?.title).toBe('System architecture');
     registry.forget('atlas.graph');expect(registry.get('atlas.graph')).toBeUndefined();
   });
+
+  it('keeps a dirty buffer reconstructable without persisting its body',()=>{
+    const registry=new PanelRegistry();
+    registry.remember({id:'buffer:one',kind:'file',title:'Untitled-1 ●',params:{contextId:'local',bufferId:'buffer-1',content:'private draft'}});
+
+    expect(registry.minimize('buffer:one')).toEqual({id:'buffer:one',kind:'file',title:'Untitled-1 ●',params:{contextId:'local',bufferId:'buffer-1'},minimized:true});
+    expect(JSON.stringify(registry.persistable())).not.toContain('private draft');
+  });
 });
