@@ -26,6 +26,8 @@ import {discoverDatabases} from '../databases/discovery.js';
 import {DbGateSupervisor} from '../databases/sidecar.js';
 import type {DatabaseRuntime,DatabaseConnection} from '../databases/types.js';
 import {proxyDatabase} from '../databases/proxy.js';
+import {RoutedDatabaseRuntime} from '../databases/routed-runtime.js';
+import {DbGateContainerSupervisor} from '../databases/container-sidecar.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const terminalInputs = new Set(['input', 'command', 'resize', 'interrupt', 'mode', 'control_request', 'control_resolve', 'nested_approval_resolve', 'detach', 'stop']);
@@ -65,7 +67,8 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   const evidence = new EvidenceStore(options.dbPath ?? process.env.ATLAS_DB ?? path.join(root, '.atlas', 'atlas.db'));
   let activeIndex = store.latestIndex();
   const resolveIndex = (indexId?: string, contextId?: string) => indexId ? store.index(indexId) : contextId ? store.latestIndex(contextId) : activeIndex;
-  const databases=options.databaseRuntime??new DbGateSupervisor();
+  const sidecar=process.env.DBGATE_RUNTIME==='container'?new DbGateContainerSupervisor():new DbGateSupervisor();
+  const databases=options.databaseRuntime??new RoutedDatabaseRuntime(sidecar,fngk);
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 << 20 });
   await app.register(websocket);
   app.addHook('onClose', async () => { await databases.close(); contexts.close(); evidence.close(); store.close(); });
@@ -112,7 +115,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   const routeEvidence = (route: { id: string; kind: string; deviceId?: string; effectiveIdentity: string; privilege: string; observedAt: string; operations?: string[] }) => ({ id: route.id, kind: route.kind, deviceId: route.deviceId, effectiveIdentity: route.effectiveIdentity, privilege: route.privilege, observedAt: route.observedAt, operations: route.operations ?? [] });
   const operationEvidence = (type: string, contextId: string, route: { id: string; kind: string; effectiveIdentity: string; privilege: string; observedAt: string; operations?: string[] }, summary:Record<string,unknown>={}) => { const operation={ id: randomUUID(), type, contextId, route: routeEvidence(route), summary, recordedAt: new Date().toISOString() }; evidence.recordOperation(operation); return operation; };
   app.get('/api/operations',async(request)=>{const query=request.query as {contextId?:string;limit?:string};return {items:evidence.operations(query.contextId,Number(query.limit)||200)}});
-  app.get('/api/databases/discover',async(request,reply)=>{const contextId=String((request.query as {contextId?:string}).contextId??'local');try{return await discoverDatabases(contextId,await contexts.commandExecutor(contextId))}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.get('/api/databases/discover',async(request,reply)=>{const contextId=String((request.query as {contextId?:string}).contextId??'local'),deviceId=contextId.startsWith('device:')?contextId.slice(7):'';try{let executor;try{executor=await contexts.commandExecutor(contextId)}catch{}let resources:NonNullable<Awaited<ReturnType<FngkProcessClient['namespace']>>['resources']>=[];try{resources=(await fngk.namespace()).resources?.filter(item=>!deviceId||item.deviceId===deviceId)??[]}catch{}return await discoverDatabases(contextId,executor,resources)}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
   app.get('/api/databases/sessions',async()=>({items:databases.list()}));
   app.post('/api/databases/sessions',async(request,reply)=>{const body=request.body as DatabaseConnection;if(!body?.contextId||!body.engine||!body.host)return reply.code(400).send({error:'invalid_database_connection'});try{const value=await databases.start(body);reply.header('Set-Cookie',`atlas_db_${value.session.id.slice(0,8)}=${value.token}; HttpOnly; SameSite=Strict; Path=${value.session.proxyPath}; Max-Age=${Math.max(1,Math.floor((Date.parse(value.session.expiresAt)-Date.now())/1000))}`);const operation={id:randomUUID(),type:'database.session.start',contextId:body.contextId,route:{kind:body.contextId==='local'?'direct':'terminal',effectiveIdentity:'database-sidecar',privilege:'user'},summary:{engine:body.engine,host:body.host,port:body.port,database:body.database,readOnly:Boolean(body.readOnly)},recordedAt:new Date().toISOString()};evidence.recordOperation(operation as any);return reply.code(201).send({session:value.session})}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
   app.delete('/api/databases/sessions/:id',async(request,reply)=>{const id=decodeURIComponent((request.params as {id:string}).id),body=request.body as {confirm?:boolean}|undefined;if(body?.confirm!==true)return reply.code(409).send({error:'confirmation_required'});return {stopped:await databases.stop(id)}});

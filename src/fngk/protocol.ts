@@ -30,6 +30,10 @@ export interface NamespaceSession {
   [key: string]: unknown;
 }
 
+export interface NamespaceResource {
+  id:string;name:string;kind:string;status?:string;availability?:string;provenance?:string;deviceId:string;projectId?:string;capabilities?:string[];attributes?:Record<string,unknown>;lastObservedAt?:string;
+}
+
 export interface NamespaceSnapshot {
   protocolVersion: typeof NAMESPACE_PROTOCOL;
   generatedAt: string;
@@ -37,6 +41,7 @@ export interface NamespaceSnapshot {
   devices: NamespaceDevice[];
   connections: NamespaceConnection[];
   sessions: NamespaceSession[];
+  resources?: NamespaceResource[];
   [key: string]: unknown;
 }
 

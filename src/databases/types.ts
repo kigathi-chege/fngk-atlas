@@ -1,5 +1,5 @@
 export type DatabaseEngine='postgres'|'mysql'|'mariadb'|'redis'|'mongodb'|'mssql'|'oracle'|'sqlite'|'unknown';
 export interface DatabaseResource {id:string;contextId:string;engine:DatabaseEngine;host:string;port?:number;socket?:string;version?:string;source:'terminal'|'adapter'|'explicit';evidence:Record<string,unknown>;observedAt:string;stale?:boolean}
 export interface DatabaseConnection {contextId:string;engine:DatabaseEngine;host:string;port?:number;database?:string;user?:string;password?:string;readOnly?:boolean;label?:string}
-export interface DatabaseSession {id:string;contextId:string;engine:DatabaseEngine;label:string;status:'starting'|'live'|'failed'|'expired'|'stopped';createdAt:string;expiresAt:string;proxyPath:string;pid?:number;error?:string}
+export interface DatabaseSession {id:string;contextId:string;engine:DatabaseEngine;label:string;status:'starting'|'live'|'failed'|'expired'|'stopped';createdAt:string;expiresAt:string;proxyPath:string;pid?:number;runtimeId?:string;error?:string;accessRoute?:'direct'|'fngk-tcp';target?:{host:string;port:number}}
 export interface DatabaseRuntime {start(connection:DatabaseConnection):Promise<{session:DatabaseSession;token:string;origin:string}>;list():DatabaseSession[];get(id:string):({session:DatabaseSession;token:string;origin:string}|undefined);stop(id:string):Promise<boolean>;close():Promise<void>}

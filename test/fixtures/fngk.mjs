@@ -34,6 +34,9 @@ if (args[0] === 'version') {
   let raw='';process.stdin.setEncoding('utf8');process.stdin.on('data',value=>raw+=value);process.stdin.on('end',()=>process.stdout.write(JSON.stringify({protocolVersion:'fngk.files.v1',output:{argv:args,input:raw?JSON.parse(raw):{}}})+'\n'));
 } else if (args[0] === 'sessions' && args.includes('--json')) {
   process.stdout.write(JSON.stringify({protocolVersion:'fngk.session.v1',action:args[2],result:{id:args[1],title:args[args.indexOf('--title')+1],argv:args}})+'\n');
+} else if (args[0] === 'tcp' && args.includes('--stdio-json')) {
+  process.stdout.write(JSON.stringify({protocolVersion:'fngk.tcp.v1',type:'ready',listenHost:'127.0.0.1',listenPort:32123,target:args[1],targetPort:Number(args[2]),argv:args})+'\n');
+  setInterval(()=>{},60_000);
 } else if (args.includes('--stdio-json')) {
   process.stdout.write(JSON.stringify({ type: 'ready', protocolVersion: 'fngk.terminal.v1', sessionId: 'session-1', argv: args }) + '\n');
   const lines = createInterface({ input: process.stdin });
