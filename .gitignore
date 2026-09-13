@@ -6,3 +6,4 @@ playwright-report/
 .atlas/
 output/
 .playwright-cli/
+.worktrees/
