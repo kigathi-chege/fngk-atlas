@@ -54,6 +54,9 @@ export class EffectiveContextService {
     let identity = 'remote-shell', privilege: FileTransport['privilege'] = 'unknown';
     try { const result = await executor.execute('id -u'); const uid = result.output.toString('utf8').trim(); if (/^\d+$/.test(uid)) { identity = `uid:${uid}`; privilege = uid === '0' ? 'root' : 'user'; } } catch {}
     const route = new TerminalFileTransport({ id: `terminal:${device.id}`, contextId, deviceId: device.id, identity, privilege, executor });
+    const invalidate=()=>{if(this.#remote.get(contextId)===route)this.#remote.delete(contextId);};
+    terminal.once('close',invalidate);
+    terminal.once('error',invalidate);
     this.#remote.set(contextId, route); return route;
   }
   async files(contextId: string): Promise<FileService> {if(contextId==='local')return new FileService([this.direct]);if(!this.#adapters.has(contextId))await this.#refreshAdapters(this.#profile).catch(()=>{});const routes:FileTransport[]=[];try{routes.push(await this.route(contextId));}catch(error){if(!(this.#adapters.get(contextId)?.length))throw error;}routes.push(...(this.#adapters.get(contextId)??[]));return new FileService(routes); }

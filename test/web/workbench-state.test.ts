@@ -30,6 +30,16 @@ describe('shared workbench state', () => {
     expect(chooseContext(contexts, state.snapshot())).toBe('local');
   });
 
+  it('does not restore an explicitly selected Device after that identity goes offline', () => {
+    const contexts = [
+      { id: 'local', kind: 'local', online: true },
+      { id: 'device:retired', kind: 'fngk-device', online: false },
+      { id: 'device:replacement', kind: 'fngk-device', online: true },
+    ];
+    const state = createWorkbenchState(); state.setContext('device:retired');
+    expect(chooseContext(contexts, state.snapshot())).toBe('device:replacement');
+  });
+
   it('exposes FNGK connection truth without persisting transient status', () => {
     const state = createWorkbenchState();
     state.setConnection({ phase: 'unavailable', message: 'binary_missing' });

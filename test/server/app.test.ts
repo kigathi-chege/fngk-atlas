@@ -51,6 +51,24 @@ describe('Atlas FNGK-native server', () => {
     await once(socket, 'close');
   });
 
+  it('scopes terminal sessions to one Device and reports lifecycle counts', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'fngk-atlas-sessions-'));
+    const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture, env: { FNGK_FIXTURE_MODE: 'session-list' } }), dbPath: path.join(directory, 'atlas.db') });
+    cleanups.push(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
+
+    const response = await app.inject({ method: 'GET', url: '/api/fngk/sessions?deviceId=device-1' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      sessions: [
+        { id: 'session-live', deviceId: 'device-1' },
+        { id: 'session-detached', deviceId: 'device-1' },
+        { id: 'session-archived', deviceId: 'device-1' },
+      ],
+      counts: { total: 3, active: 2, live: 1, detached: 1, archived: 1 },
+    });
+  });
+
   it('requires explicit confirmation and streams a guided FNGK update', async () => {
     const app = await harness();
     expect((await app.inject({ method: 'POST', url: '/api/fngk/update', payload: {} })).statusCode).toBe(409);
@@ -111,6 +129,9 @@ describe('Atlas FNGK-native server', () => {
 
     expect((await app.inject({method:'POST',url:'/api/files',payload:{contextId:'local',path:'/repo/new',type:'directory'}})).statusCode).toBe(201);
     expect((await app.inject({method:'POST',url:'/api/files',payload:{contextId:'local',path:'/repo/new/readme.txt',type:'file',contentBase64:Buffer.from('Atlas searchable content').toString('base64')}})).statusCode).toBe(201);
+    const firstSave=await app.inject({method:'POST',url:'/api/files/content',payload:{contextId:'local',path:'/repo/new/from-buffer.ts',contentBase64:Buffer.from('export const first = true;').toString('base64'),createOnly:true}});expect(firstSave.statusCode).toBe(201);expect(firstSave.json()).toMatchObject({fingerprint:expect.any(String),operation:{type:'file.create.content'}});
+    const conflictingSave=await app.inject({method:'POST',url:'/api/files/content',payload:{contextId:'local',path:'/repo/new/from-buffer.ts',contentBase64:Buffer.from('overwritten').toString('base64'),createOnly:true}});expect(conflictingSave.statusCode).toBe(409);
+    expect((await app.inject({method:'GET',url:'/api/files/content?contextId=local&path=/repo/new/from-buffer.ts'})).json().text).toBe('export const first = true;');
     const searched=(await app.inject({method:'GET',url:'/api/files/search?contextId=local&path=/repo&query=searchable&mode=all'})).json();
     expect(searched.matches).toContainEqual(expect.objectContaining({path:'/repo/new/readme.txt',line:1}));
     expect((await app.inject({method:'PATCH',url:'/api/files',payload:{contextId:'local',path:'/repo/new/readme.txt',destination:'/repo/new/renamed.txt'}})).statusCode).toBe(200);

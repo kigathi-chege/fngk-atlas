@@ -27,6 +27,8 @@ The application shell has four persistent regions:
 
 The title bar and both rails remain available when Dockview contains no panels. An empty Dockview shows a quiet recovery surface, but recovery does not depend on that surface because every persistent rail command can recreate its panel.
 
+The expanded left context/sidebar and right filesystem/sidebar use the same default width and remain visibly secondary to the wider central work area. Their narrow permanent activity strips remain outside Dockview; minimizing either sidebar collapses it into its corresponding strip without offering Close. The terminal stays in the central Dockview column between the two expanded sidebars rather than spanning beneath them.
+
 ### Left rail
 
 The left rail contains the FNGK contexts and primary workbench destinations: Explorer, Search, Architecture, Terminal, Databases, Evidence, and Settings. Context identity and reachability remain visible without opening a Dockview panel. Selecting a context scopes newly opened surfaces; already-open resources retain their original context identity.
@@ -64,6 +66,12 @@ A central command registry is the single source for title-bar buttons, rails, ke
 
 The command palette is a searchable overlay with keyboard navigation. It is not an alias for contextual search.
 
+## Unified search
+
+The title bar contains one primary search field and one unified result collection. It replaces separate competing search presentations while retaining provider-specific routes internally. The collection combines indexed Atlas entities, live file name/content matches, contexts, terminal sessions, panels, and registered commands; every result carries its type, context, provenance, and actionable target.
+
+Search defaults to the selected context. An explicit All Contexts scope broadens persisted evidence, context, command, and panel results; live filesystem search remains bounded to an individually identified reachable context. Type filters refine the single collection without opening separate search applications. Selecting a result opens or focuses the corresponding file, graph entity, process, terminal session, context, panel, or command.
+
 ## Terminal ownership and lifecycle
 
 Atlas separates three identities:
@@ -86,6 +94,8 @@ The session rail:
 - assigns deterministic colors by session ID;
 - supports select, rename, reconnect, terminate, archive, restore, and explicit new session;
 - warns before creating a session when the configurable active-session threshold is reached.
+- scrolls independently when sessions exceed the available height;
+- shows a readable session name beside its status color and exposes compact quick actions without requiring a new Dockview tab.
 
 Atlas does not automatically terminate user sessions when a panel closes. It may offer explicit cleanup for detached or stopped sessions, but cleanup never runs silently.
 
@@ -146,6 +156,8 @@ The presentation pass consolidates accumulated CSS overrides into a small set of
 The rails use restrained iconography, clear active indicators, concise tooltips, and no oversized text controls. Searches share one input/result visual pattern with type icons, context provenance, highlighted matches, empty/loading/error states, and sensible truncation. Filesystem rows align chevrons, file icons, names, size, modification time, permissions, and state indicators. Menus and dialogs use consistent elevation and keyboard focus.
 
 Desktop and narrow layouts retain both rails as compact strips. Expanded rail details may collapse responsively, but the commands remain reachable. Motion is limited to useful panel, menu, and auto-hide transitions and respects reduced-motion preferences.
+
+Dockview groups use rounded framed surfaces separated by canvas-colored empty gutters. Resize sashes keep a generous invisible hit target but render only the gap and a centered three-dot grip, horizontal or vertical according to orientation. Atlas-owned tab chrome provides Minimize and Close buttons; sidebars provide Minimize only. Minimized panels appear as named, icon-bearing entries in the bottom restoration tray. Native floating remains opt-in and can be redocked through Dockview targets.
 
 ## State and persistence
 

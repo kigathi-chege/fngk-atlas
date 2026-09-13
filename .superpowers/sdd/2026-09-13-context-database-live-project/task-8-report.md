@@ -77,6 +77,18 @@ Svelte check completed with 0 errors and 0 warnings; TypeScript completed succes
 - File operation evidence is redacted, searchable, persisted, and bounded to the latest 2,000 operations per context.
 - Final verification: Atlas 4/4 legacy and 62/62 Vitest tests, clean TypeScript/Svelte checks; Signal server check; Signal CLI Docker target passed Go tests and all release cross-builds.
 
+## Workbench-shell continuation
+
+- Moved recovery controls into permanent application chrome outside Dockview so closing or minimizing every panel cannot strand Atlas.
+- Added a safe panel registry, bottom restoration tray, protected sidebar tabs, tab/background/root context menus, and native floating/redocking.
+- Replaced repeated terminal tabs with one `atlas.terminal` surface. Generic open reuses a Device session; only the explicit plus action creates one. The session rail is Device-scoped, named, independently scrollable, and reports active/live/detached totals.
+- Added context-bound pinned folders and workspace roots in a permanent right rail. Pin and workspace membership remain separate operations.
+- Added memory-only Untitled buffers, inline Explorer naming, exclusive first save, Save As, conflict preservation, filesystem reveal, and cancellation cleanup for temporary Save-As copies.
+- Added one title-bar collection spanning commands, indexed evidence, live filesystem results, contexts, and terminal sessions, with context/all scopes, type filters, provenance, stable ranking, cancellation, and `Ctrl/Cmd+K` focus.
+- Completed the visual shell without changing the established information architecture: equal expanded sidebars, wider center, canvas gutters, rounded group frames, centered dotted sash grips, Atlas tab controls, consistent menus/dialogs/focus states, reduced motion, and a usable narrow layout that transiently collapses expanded sidebars.
+- Removed Playwright's `--single-process --no-zygote` flags after reproducing cross-test browser termination; Chromium now retains normal process isolation.
+- DbGate remains deliberately outside this shell checkpoint and resumes only after the verification recorded below is clean.
+
 ## Fix round 1: security, bounds, and context races
 
 ### What changed
