@@ -8,6 +8,8 @@ import { FngkTerminalCommandExecutor } from '../transports/terminal-command.js';
 import type { CommandExecutor } from '../transports/terminal-command.js';
 import { TerminalFileTransport } from '../transports/terminal-file.js';
 import { DirectCommandExecutor } from '../transports/direct-command.js';
+import { nativeFileTransport } from '../transports/fngk-adapter-file.js';
+import { AdapterFileTransport } from '../transports/adapter-file.js';
 
 function deviceTarget(device: NamespaceDevice): string { return typeof device.ref === 'string' ? device.ref : `device:${device.id}`; }
 async function matchingEvent(emitter: NodeJS.EventEmitter, predicate: (event: TerminalEvent) => boolean, timeoutMs = 5_000): Promise<TerminalEvent> {
@@ -23,16 +25,21 @@ async function matchingEvent(emitter: NodeJS.EventEmitter, predicate: (event: Te
 export class EffectiveContextService {
   readonly direct: DirectTransport;
   #remote = new Map<string, TerminalFileTransport>();
+  #adapters = new Map<string, AdapterFileTransport[]>();
+  #profile: string | undefined;
   constructor(readonly fngk: FngkProcessClient, options: { localRoot?: string } = {}) {
     this.direct = new DirectTransport({ id: 'direct:local', contextId: 'local', root: options.localRoot ?? '/' });
   }
   async contexts() {
     const state = await this.fngk.probe();
+    this.#profile=state.profile;
+    if(state.compatible)await this.#refreshAdapters(state.profile).catch(()=>{});
     const local = { id: 'local', name: 'Atlas process host', kind: 'local', online: true, root: this.direct.root, workspaceRoot: process.cwd(), routes: [this.#evidence(this.direct)] };
-    const devices = (state.namespace?.devices ?? []).map(device => ({ id: `device:${device.id}`, name: device.name, kind: 'fngk-device', online: device.online ?? false, device, routes: this.#remote.has(`device:${device.id}`) ? [this.#evidence(this.#remote.get(`device:${device.id}`)!)] : [] }));
+    const devices = (state.namespace?.devices ?? []).map(device => {const id=`device:${device.id}`,routes=[...(this.#remote.has(id)?[this.#remote.get(id)!]:[]),...(this.#adapters.get(id)??[])];return { id, name: device.name, kind: 'fngk-device', online: device.online ?? false, device, routes:routes.map(value=>this.#evidence(value)) }});
     return { state, contexts: [local, ...devices] };
   }
   #evidence(route: FileTransport) { return { id: route.id, kind: route.kind, deviceId: route.deviceId, effectiveIdentity: route.effectiveIdentity, privilege: route.privilege, observedAt: route.observedAt, available: route.available, operations: route.operations }; }
+  async #refreshAdapters(profile?:string){const bindings=await this.fngk.fileBindings(profile),next=new Map<string,AdapterFileTransport[]>();for(const binding of bindings.bindings){const id=`device:${binding.deviceId}`,values=next.get(id)??[];values.push(nativeFileTransport(this.fngk,binding,bindings.profile.name));next.set(id,values);}this.#adapters=next;}
   async route(contextId: string): Promise<FileTransport> {
     if (contextId === 'local') return this.direct;
     const existing = this.#remote.get(contextId); if (existing) return existing;
@@ -49,7 +56,7 @@ export class EffectiveContextService {
     const route = new TerminalFileTransport({ id: `terminal:${device.id}`, contextId, deviceId: device.id, identity, privilege, executor });
     this.#remote.set(contextId, route); return route;
   }
-  async files(contextId: string): Promise<FileService> { return new FileService([await this.route(contextId)]); }
+  async files(contextId: string): Promise<FileService> {if(contextId==='local')return new FileService([this.direct]);if(!this.#adapters.has(contextId))await this.#refreshAdapters(this.#profile).catch(()=>{});const routes:FileTransport[]=[];try{routes.push(await this.route(contextId));}catch(error){if(!(this.#adapters.get(contextId)?.length))throw error;}routes.push(...(this.#adapters.get(contextId)??[]));return new FileService(routes); }
   async commandExecutor(contextId: string): Promise<CommandExecutor> { const route = await this.route(contextId); if (route instanceof TerminalFileTransport) return route.executor; if (route instanceof DirectTransport) return new DirectCommandExecutor(); throw Object.assign(new Error('This context has no command route.'), { code: 'route_unavailable' }); }
   async commandPath(contextId: string, logicalPath: string): Promise<string> { const route = await this.route(contextId); return route instanceof DirectTransport ? route.resolve(logicalPath) : logicalPath; }
   activeTerminals() { return [...this.#remote.entries()].map(([contextId, route]) => ({ contextId, route: this.#evidence(route), sessionId: route.executor instanceof FngkTerminalCommandExecutor ? route.executor.session.sessionId : undefined })); }

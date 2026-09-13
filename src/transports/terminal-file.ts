@@ -11,7 +11,7 @@ export interface TerminalFileTransportOptions { id: string; contextId: string; d
 export class TerminalFileTransport implements FileTransport {
   readonly kind = 'terminal' as const; readonly id: string; readonly contextId: string; readonly deviceId: string;
   readonly effectiveIdentity: string; readonly privilege: AccessRoute['privilege']; readonly observedAt = new Date().toISOString(); readonly available = true;
-  readonly operations: Operation[] = ['list', 'stat', 'read', 'write', 'search', 'create', 'move', 'trash', 'delete', 'execute', 'processes', 'containers'];
+  readonly operations: Operation[] = ['list', 'stat', 'read', 'write', 'search', 'create', 'move', 'trash', 'restore', 'delete', 'execute', 'processes', 'containers'];
   readonly executor: CommandExecutor;
   constructor(options: TerminalFileTransportOptions) { this.id = options.id; this.contextId = options.contextId; this.deviceId = options.deviceId; this.effectiveIdentity = options.identity ?? 'remote-shell'; this.privilege = options.privilege ?? 'unknown'; this.executor = options.executor; }
   covers(target: AccessTarget): boolean { return target.contextId === this.contextId && Boolean(target.path?.startsWith('/')); }
@@ -53,6 +53,16 @@ export class TerminalFileTransport implements FileTransport {
   async createFile(logicalPath:string,content=Buffer.alloc(0)){if(!content.length){await this.#run(`umask 077; set -C; : > ${posixQuote(logicalPath)}`);return;}const suffix=randomUUID(),temporary=`${logicalPath}.atlas-${suffix}.tmp`,encoded=`${temporary}.b64`;try{await this.#run(`umask 077; set -C; : > ${posixQuote(encoded)}`);const base64=content.toString('base64');for(let offset=0;offset<base64.length;offset+=12_000)await this.#run(`printf '%s' ${posixQuote(base64.slice(offset,offset+12_000))} >> ${posixQuote(encoded)}`);await this.#run(`base64 -d ${posixQuote(encoded)} > ${posixQuote(temporary)} && chmod 600 ${posixQuote(temporary)} && ln -- ${posixQuote(temporary)} ${posixQuote(logicalPath)} && rm -f ${posixQuote(temporary)} ${posixQuote(encoded)}`);}catch(error){await this.executor.execute(`rm -f ${posixQuote(temporary)} ${posixQuote(encoded)}`).catch(()=>{});throw error;}}
   async createDirectory(logicalPath:string){await this.#run(`mkdir -- ${posixQuote(logicalPath)}`);}
   async move(logicalPath:string,destination:string){await this.#run(`[ ! -e ${posixQuote(destination)} ] && mv -- ${posixQuote(logicalPath)} ${posixQuote(destination)}`);}
-  async trash(logicalPath:string){await this.#run(`command -v gio >/dev/null 2>&1 && gio trash -- ${posixQuote(logicalPath)}`);}
+  async trash(logicalPath:string):Promise<{restorePath:string}>{
+    const token=randomUUID(),encoded=Buffer.from(logicalPath).toString('base64');
+    await this.#run(`set -eu; source=${posixQuote(logicalPath)}; vault_root="\${XDG_STATE_HOME:-\${HOME:-/tmp}/.local/state}/fngk-atlas/trash"; vault="$vault_root/${token}"; payload="$vault/payload"; mkdir -p -- "$vault_root"; chmod 700 "$vault_root"; [ ! -L "$source" ]; mkdir -- "$vault"; mv -- "$source" "$payload"; if ! printf '%s' ${posixQuote(encoded)} > "$vault/original.b64"; then mv -- "$payload" "$source" 2>/dev/null || true; rmdir -- "$vault" 2>/dev/null || true; exit 1; fi`);
+    return {restorePath:`/.atlas-trash/${token}`};
+  }
+  async restore(restorePath:string){
+    const match=/^\/\.atlas-trash\/([0-9a-f]{8}-[0-9a-f-]{27})$/i.exec(path.posix.normalize(restorePath));
+    if(!match)throw Object.assign(new Error('Restore requires a recovery token.'),{code:'invalid_trash_record'});
+    const token=match[1];
+    await this.#run(`set -eu; vault_root="\${XDG_STATE_HOME:-\${HOME:-/tmp}/.local/state}/fngk-atlas/trash"; vault="$vault_root/${token}"; payload="$vault/payload"; [ -d "$vault" ] && [ ! -L "$vault" ] && [ -e "$payload" ] && [ ! -L "$payload" ] && [ -f "$vault/original.b64" ] && [ ! -L "$vault/original.b64" ]; original="$(base64 -d -- "$vault/original.b64")"; case "$original" in /*) ;; *) exit 1;; esac; [ "$original" != / ] && [ ! -e "$original" ] && [ ! -L "$original" ]; mv -- "$payload" "$original"; rm -f -- "$vault/original.b64"; rmdir -- "$vault"`);
+  }
   async remove(logicalPath:string){await this.#run(`rm -rf -- ${posixQuote(logicalPath)}`);}
 }

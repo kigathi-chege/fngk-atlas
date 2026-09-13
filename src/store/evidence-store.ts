@@ -6,6 +6,7 @@ import { redactFacts } from '../discovery/redaction.js';
 
 export interface EvidenceEntity { id: string; contextId: string; type: string; name: string; path?: string; metadata?: Record<string, unknown>; stale?: boolean; staleReason?: string }
 export interface EvidenceRelationship { id: string; contextId: string; type: string; sourceId: string; targetId: string; evidence?: Record<string, unknown>; stale?: boolean; staleReason?: string }
+export interface EvidenceOperation { id: string; type: string; contextId: string; route: Record<string, unknown>; summary: Record<string, unknown>; recordedAt: string }
 
 export class EvidenceStore {
   readonly db: DatabaseSync;
@@ -36,6 +37,11 @@ export class EvidenceStore {
         context_id TEXT PRIMARY KEY, stale INTEGER NOT NULL DEFAULT 0,
         reason TEXT, updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS atlas_operations(
+        id TEXT PRIMARY KEY, type TEXT NOT NULL, context_id TEXT NOT NULL,
+        route_json TEXT NOT NULL, summary_json TEXT NOT NULL, recorded_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS atlas_operations_context_time ON atlas_operations(context_id,recorded_at DESC);
       CREATE VIRTUAL TABLE IF NOT EXISTS atlas_search USING fts5(
         context_id UNINDEXED, entity_id UNINDEXED, type UNINDEXED,
         label, path, detail, source UNINDEXED, tokenize='unicode61'
@@ -79,6 +85,22 @@ export class EvidenceStore {
   }
   invalidateContext(contextId: string, reason: string): void {
     this.db.prepare(`INSERT INTO atlas_context_state(context_id,stale,reason,updated_at) VALUES(?,1,?,?) ON CONFLICT(context_id) DO UPDATE SET stale=1,reason=excluded.reason,updated_at=excluded.updated_at`).run(contextId, reason, new Date().toISOString());
+  }
+  recordOperation(value: EvidenceOperation): void {
+    const route=redactFacts(value.route) as Record<string,unknown>,summary=redactFacts(value.summary) as Record<string,unknown>;
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('INSERT INTO atlas_operations(id,type,context_id,route_json,summary_json,recorded_at) VALUES(?,?,?,?,?,?)').run(value.id,value.type,value.contextId,JSON.stringify(route),JSON.stringify(summary),value.recordedAt);
+      this.db.prepare("DELETE FROM atlas_search WHERE source='operation' AND entity_id=?").run(value.id);
+      this.db.prepare('INSERT INTO atlas_search(context_id,entity_id,type,label,path,detail,source) VALUES(?,?,?,?,?,?,?)').run(value.contextId,value.id,'operation',value.type,String(summary.path??''),JSON.stringify({route,summary}),'operation');
+      const expired=this.db.prepare('SELECT id FROM atlas_operations WHERE context_id=? ORDER BY recorded_at DESC,id DESC LIMIT -1 OFFSET 2000').all(value.contextId) as Array<{id:string}>;
+      for(const item of expired){this.db.prepare("DELETE FROM atlas_search WHERE source='operation' AND entity_id=?").run(item.id);this.db.prepare('DELETE FROM atlas_operations WHERE id=?').run(item.id);}
+      this.db.exec('COMMIT');
+    } catch(error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  operations(contextId?: string, limit=200): EvidenceOperation[] {
+    const bounded=Math.min(500,Math.max(1,limit)),rows=contextId?this.db.prepare('SELECT id,type,context_id contextId,route_json routeJson,summary_json summaryJson,recorded_at recordedAt FROM atlas_operations WHERE context_id=? ORDER BY recorded_at DESC LIMIT ?').all(contextId,bounded):this.db.prepare('SELECT id,type,context_id contextId,route_json routeJson,summary_json summaryJson,recorded_at recordedAt FROM atlas_operations ORDER BY recorded_at DESC LIMIT ?').all(bounded);
+    return rows.map((row:any)=>({id:row.id,type:row.type,contextId:row.contextId,route:JSON.parse(row.routeJson),summary:JSON.parse(row.summaryJson),recordedAt:row.recordedAt}));
   }
   entities(contextId: string): Array<EvidenceEntity & { observedAt: string }> {
     return this.db.prepare(`SELECT e.id,e.context_id contextId,e.type,e.name,e.path,e.metadata_json metadataJson,e.observed_at observedAt,COALESCE(s.stale,0) stale,s.reason staleReason FROM atlas_entities e LEFT JOIN atlas_context_state s ON s.context_id=e.context_id WHERE e.context_id=? ORDER BY e.type,e.path,e.id`).all(contextId).map((row: any) => ({ id: row.id, contextId: row.contextId, type: row.type, name: row.name, path: row.path ?? undefined, metadata: JSON.parse(row.metadataJson), observedAt: row.observedAt, stale: Boolean(row.stale), staleReason: row.staleReason ?? undefined }));

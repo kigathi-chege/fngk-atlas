@@ -1,10 +1,11 @@
-import { lstat, mkdir, opendir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, opendir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import type { AccessRoute, AccessTarget, Operation } from '../domain/access.js';
 import type { FileSearchMatch, FileSearchOptions } from './file-transport.js';
 
-export interface DirectTransportOptions { id: string; contextId: string; root?: string; identity?: string }
+export interface DirectTransportOptions { id: string; contextId: string; root?: string; identity?: string; recoveryRoot?:string }
 export interface TransportEntry { name: string; path: string; type: 'file' | 'directory' | 'symlink' | 'other'; bytes: number; modifiedAt: string; mode: number }
 
 export class DirectTransport implements AccessRoute {
@@ -17,9 +18,11 @@ export class DirectTransport implements AccessRoute {
   readonly available = true;
   readonly operations: Operation[] = ['list', 'stat', 'read', 'write', 'search', 'create', 'move', 'trash', 'restore', 'delete', 'execute', 'processes', 'containers'];
   readonly root: string;
+  readonly recoveryRoot:string;
 
   constructor(options: DirectTransportOptions) {
     this.id = options.id; this.contextId = options.contextId; this.root = path.resolve(options.root ?? '/');
+    this.recoveryRoot=path.resolve(options.recoveryRoot??(this.root==='/'?path.join(process.env.XDG_STATE_HOME??path.join(homedir(),'.local','state'),'fngk-atlas','trash'):path.join(this.root,'.atlas-trash')));
     this.effectiveIdentity = options.identity ?? (typeof process.getuid === 'function' ? `uid:${process.getuid()}` : process.env.USER ?? 'local');
     this.privilege = typeof process.getuid === 'function' && process.getuid() === 0 ? 'root' : 'user';
   }
@@ -39,12 +42,10 @@ export class DirectTransport implements AccessRoute {
     if (canonical !== canonicalRoot && !canonical.startsWith(`${canonicalRoot}${path.sep}`)) throw Object.assign(new Error('Symlink escapes the route root.'), { code: 'path_escape' });
   }
   async #recoveryVault(): Promise<string> {
-    const vault = path.join(this.root, '.atlas-trash');
+    const vault = this.recoveryRoot;
     try { await mkdir(vault, { recursive: true, mode: 0o700 }); } catch (error) { throw error; }
     const entry = await lstat(vault);
     if (!entry.isDirectory() || entry.isSymbolicLink()) throw Object.assign(new Error('Recovery vault must be a real directory.'), { code: 'path_escape' });
-    const canonicalRoot = await realpath(this.root), canonicalVault = await realpath(vault);
-    if (canonicalVault !== path.join(canonicalRoot, '.atlas-trash')) throw Object.assign(new Error('Recovery vault escapes its route root.'), { code: 'path_escape' });
     return vault;
   }
   async #realChild(parent: string, name: string, expected: 'file' | 'directory'): Promise<string> {
@@ -82,15 +83,19 @@ export class DirectTransport implements AccessRoute {
     const wanted = query.toLocaleLowerCase(), matches: FileSearchMatch[] = [], queue = [{ path: logicalPath, depth: 0 }]; let examined = 0;
     while (queue.length && matches.length < limit) {
       cancelled(); const current = queue.shift()!;
-      const currentRoot = this.resolve(current.path); await this.#ensureContained(currentRoot);
-      const directory = await opendir(currentRoot);
+      const currentRoot = this.resolve(current.path);
+      let directory;
+      try { await this.#ensureContained(currentRoot); directory = await opendir(currentRoot); }
+      catch { continue; }
       for await (const value of directory) {
         cancelled(); if (examined++ >= maxEntries) return matches;
-        const absolute = path.join(currentRoot, value.name), metadata = await lstat(absolute), entry: TransportEntry = { name: value.name, path: path.posix.join(current.path, value.name), type: metadata.isSymbolicLink() ? 'symlink' : metadata.isDirectory() ? 'directory' : metadata.isFile() ? 'file' : 'other', bytes: metadata.size, modifiedAt: metadata.mtime.toISOString(), mode: metadata.mode };
+        const absolute = path.join(currentRoot, value.name); let metadata;
+        try { metadata = await lstat(absolute); } catch { continue; }
+        const entry: TransportEntry = { name: value.name, path: path.posix.join(current.path, value.name), type: metadata.isSymbolicLink() ? 'symlink' : metadata.isDirectory() ? 'directory' : metadata.isFile() ? 'file' : 'other', bytes: metadata.size, modifiedAt: metadata.mtime.toISOString(), mode: metadata.mode };
         if (entry.type === 'directory' && current.depth < maxDepth) queue.push({ path: entry.path, depth: current.depth + 1 });
         if (mode !== 'content' && entry.name.toLocaleLowerCase().includes(wanted)) { matches.push({ path: entry.path, type: entry.type === 'directory' ? 'directory' : 'file' }); if (matches.length >= limit) return matches; }
         if (matches.length >= limit || entry.type !== 'file' || mode === 'name' || entry.bytes > maxFileBytes) continue;
-        const content = await this.read(entry.path); if (content.length > maxFileBytes || content.includes(0)) continue;
+        let content:Buffer; try { content = await this.read(entry.path); } catch { continue; } if (content.length > maxFileBytes || content.includes(0)) continue;
         const lines = content.toString('utf8').split(/\r?\n/);
         for (let index = 0; index < lines.length && matches.length < limit; index++) if (lines[index].toLocaleLowerCase().includes(wanted)) matches.push({ path: entry.path, type: 'file', line: index + 1, preview: lines[index].trim().slice(0, 240) });
       }
@@ -100,7 +105,33 @@ export class DirectTransport implements AccessRoute {
   async createFile(logicalPath: string, content = Buffer.alloc(0)): Promise<void> { const resolved=this.resolve(logicalPath);await this.#ensureContained(path.dirname(resolved));await writeFile(resolved,content,{flag:'wx',mode:0o600}); }
   async createDirectory(logicalPath: string): Promise<void> { const resolved=this.resolve(logicalPath);await this.#ensureContained(path.dirname(resolved));await mkdir(resolved); }
   async move(logicalPath: string, destination: string): Promise<void> { const source=this.resolve(logicalPath),target=this.resolve(destination);await this.#ensureContained(source);await this.#ensureContained(path.dirname(target));try{await lstat(target);throw Object.assign(new Error('Destination already exists.'),{code:'file_conflict'});}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}await rename(source,target); }
-  async trash(logicalPath: string): Promise<{ restorePath: string }> { const source=this.resolve(logicalPath);await this.#ensureContained(source);if((await lstat(source)).isSymbolicLink())throw Object.assign(new Error('Symlinks cannot be moved into the recovery vault.'),{code:'path_escape'});const vaultRoot=await this.#recoveryVault(),token=randomUUID(),vault=path.join(vaultRoot,token),payload=path.join(vault,'payload');await mkdir(vault,{mode:0o700});let moved=false;try{await rename(source,payload);moved=true;await writeFile(path.join(vault,'metadata.json'),JSON.stringify({token,originalPath:logicalPath}),{mode:0o600,flag:'wx'});return {restorePath:path.posix.join('/.atlas-trash',token)};}catch(error){if(moved){try{await rename(payload,source);moved=false;}catch(rollback){throw Object.assign(error as Error,{code:'trash_recovery_preserved',recoveryPath:path.posix.join('/.atlas-trash',token),rollbackMessage:(rollback as Error).message});}}if(!moved)await rm(vault,{recursive:true,force:true});throw error;} }
+  async trash(logicalPath: string): Promise<{ restorePath: string }> {
+    const source=this.resolve(logicalPath); await this.#ensureContained(source);
+    if((await lstat(source)).isSymbolicLink())throw Object.assign(new Error('Symlinks cannot be moved into the recovery vault.'),{code:'path_escape'});
+    const vaultRoot=await this.#recoveryVault(),token=randomUUID(),vault=path.join(vaultRoot,token),payload=path.join(vault,'payload');
+    await mkdir(vault,{mode:0o700}); let moved=false,copied=false;
+    try {
+      try { await rename(source,payload); moved=true; }
+      catch(error){
+        if((error as NodeJS.ErrnoException).code!=='EXDEV')throw error;
+        await cp(source,payload,{recursive:true,preserveTimestamps:true,errorOnExist:true,force:false}); copied=true;
+      }
+      await writeFile(path.join(vault,'metadata.json'),JSON.stringify({token,originalPath:logicalPath}),{mode:0o600,flag:'wx'});
+      if(copied){
+        try { await rm(source,{recursive:true}); }
+        catch(error){throw Object.assign(error as Error,{code:'trash_recovery_preserved',recoveryPath:path.posix.join('/.atlas-trash',token)});}
+      }
+      return {restorePath:path.posix.join('/.atlas-trash',token)};
+    } catch(error) {
+      if(moved){
+        try{await rename(payload,source);moved=false;}
+        catch(rollback){throw Object.assign(error as Error,{code:'trash_recovery_preserved',recoveryPath:path.posix.join('/.atlas-trash',token),rollbackMessage:(rollback as Error).message});}
+      }
+      if(copied&&(error as {code?:string}).code!=='trash_recovery_preserved')await rm(payload,{recursive:true,force:true}).catch(()=>{});
+      if(!moved&&(error as {code?:string}).code!=='trash_recovery_preserved')await rm(vault,{recursive:true,force:true});
+      throw error;
+    }
+  }
   async restore(restorePath: string): Promise<void> { const normalized=path.posix.normalize(restorePath),match=/^\/\.atlas-trash\/([0-9a-f]{8}-[0-9a-f-]{27})$/i.exec(normalized);if(!match)throw Object.assign(new Error('Restore requires a recovery token.'),{code:'invalid_trash_record'});const vaultRoot=await this.#recoveryVault(),vault=path.join(vaultRoot,match[1]),vaultEntry=await lstat(vault);if(!vaultEntry.isDirectory()||vaultEntry.isSymbolicLink()||await realpath(vault)!==path.join(await realpath(vaultRoot),match[1]))throw Object.assign(new Error('Recovery token is unsafe.'),{code:'path_escape'});const metadataPath=await this.#realChild(vault,'metadata.json','file'),payloadPath=path.join(vault,'payload'),payloadEntry=await lstat(payloadPath);if(payloadEntry.isSymbolicLink()||(!payloadEntry.isFile()&&!payloadEntry.isDirectory())||await realpath(payloadPath)!==path.join(await realpath(vault),'payload'))throw Object.assign(new Error('Recovery payload is unsafe.'),{code:'path_escape'});let metadata:{token?:unknown;originalPath?:unknown};try{metadata=JSON.parse(await readFile(metadataPath,'utf8')) as {token?:unknown;originalPath?:unknown};}catch{throw Object.assign(new Error('Trash metadata is invalid.'),{code:'invalid_trash_record'});}if(metadata.token!==match[1]||typeof metadata.originalPath!=='string'||!metadata.originalPath.startsWith('/')||path.posix.normalize(metadata.originalPath)==='/'||metadata.originalPath.includes('\0'))throw Object.assign(new Error('Trash metadata is invalid.'),{code:'invalid_trash_record'});const target=this.resolve(metadata.originalPath);await this.#ensureContained(path.dirname(target));try{await lstat(target);throw Object.assign(new Error('Restore destination already exists.'),{code:'file_conflict'});}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}await rename(payloadPath,target);await rm(vault,{recursive:true,force:true}); }
   async remove(logicalPath: string): Promise<void> { const resolved=this.resolve(logicalPath);await this.#ensureContained(resolved);await rm(resolved,{recursive:true}); }
 }

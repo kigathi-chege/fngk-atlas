@@ -23,6 +23,10 @@ if (args[0] === 'version') {
       sessions: [],
     }) + '\n');
   }
+} else if (args[0] === 'files' && args[1] !== 'invoke' && args.includes('--json')) {
+  process.stdout.write(JSON.stringify({protocolVersion:'fngk.files.v1',profile:{name:args[args.indexOf('--profile')+1]??'default'},bindings:[{id:'binding-1',name:'Workspace',resourceId:'resource-1',deviceId:'device-1',deviceName:'kigathi',adapterId:'signal.files',root:'/workspace',readOnly:false,capabilities:['*'],provenance:'adopted'}]})+'\n');
+} else if (args[0] === 'files' && args[1] === 'invoke' && args.includes('--json')) {
+  let raw='';process.stdin.setEncoding('utf8');process.stdin.on('data',value=>raw+=value);process.stdin.on('end',()=>process.stdout.write(JSON.stringify({protocolVersion:'fngk.files.v1',output:{argv:args,input:raw?JSON.parse(raw):{}}})+'\n'));
 } else if (args.includes('--stdio-json')) {
   process.stdout.write(JSON.stringify({ type: 'ready', protocolVersion: 'fngk.terminal.v1', sessionId: 'session-1', argv: args }) + '\n');
   const lines = createInterface({ input: process.stdin });

@@ -16,7 +16,10 @@ export interface AccessRoute {
   covers?: (target: AccessTarget, operation: Operation) => boolean;
 }
 
-const priority: Record<RouteKind, number> = { direct: 0, adapter: 1, terminal: 2 };
+// Direct access is cheapest for the process host. On remote Devices the terminal
+// represents the operator's effective shell authority and is intentionally tried
+// before narrower adapter bindings; adapters remain a structured fallback.
+const priority: Record<RouteKind, number> = { direct: 0, terminal: 1, adapter: 2 };
 
 export class OperationResolver {
   #routes: AccessRoute[];

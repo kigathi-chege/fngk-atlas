@@ -50,4 +50,11 @@ describe('FngkProcessClient', () => {
     terminal.detach('detach-1');
     await once(terminal, 'close');
   });
+
+  it('lists and invokes native Files bindings without exposing credentials', async () => {
+    const client=new FngkProcessClient({binary:fixture});
+    await expect(client.fileBindings('work')).resolves.toMatchObject({protocolVersion:'fngk.files.v1',profile:{name:'work'},bindings:[{id:'binding-1',deviceId:'device-1',root:'/workspace'}]});
+    const invoked=await client.invokeFileBinding('binding-1','filesystem.list',{path:'.',limit:20},{profile:'work'});
+    expect(invoked.output).toMatchObject({input:{path:'.',limit:20},argv:['files','invoke','binding-1','filesystem.list','--json','--profile','work']});
+  });
 });

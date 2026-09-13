@@ -15,8 +15,13 @@ describe('effective access routing', () => {
       route('adapter', ['list', 'read']),
       route('direct', ['list', 'read', 'write']),
     ]);
-    expect(resolver.resolve({ contextId: 'host-1', path: '/srv/app' }, 'read').map(value => value.kind)).toEqual(['direct', 'adapter', 'terminal']);
+    expect(resolver.resolve({ contextId: 'host-1', path: '/srv/app' }, 'read').map(value => value.kind)).toEqual(['direct', 'terminal', 'adapter']);
     expect(resolver.resolve({ contextId: 'host-1', path: '/srv/app' }, 'execute').map(value => value.kind)).toEqual(['terminal']);
+  });
+
+  it('prefers terminal authority over a native adapter on remote contexts', () => {
+    const resolver = new OperationResolver([route('adapter', ['read']), route('terminal', ['read'])]);
+    expect(resolver.resolve({ contextId: 'host-1', path: '/srv/app' }, 'read').map(value => value.kind)).toEqual(['terminal', 'adapter']);
   });
 
   it('skips unavailable routes while retaining their evidence', () => {

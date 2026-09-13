@@ -68,6 +68,15 @@ Svelte check completed with 0 errors and 0 warnings; TypeScript completed succes
 - Direct recovery records store only recovery metadata; file contents remain in the selected filesystem's trash vault and are not copied into Atlas persistence.
 - The production web build retains the existing Vite advisory for a minified JavaScript chunk above 500 kB. It does not affect test, type, Svelte, build, or browser-test success and is outside this focused slice.
 
+## Native Files and effective-authority closure
+
+- Added generic `fngk files --json` and `fngk files invoke` contracts in Signal. Credentials remain inside FNGK; Atlas receives only binding metadata and operation results.
+- Atlas exposes native Files bindings as adapter routes, but orders remote terminal routes before adapters. A failed or unavailable terminal falls back to an authorized native binding.
+- Native mutation capabilities honor binding grants and read-only state rather than advertising writes unconditionally.
+- Terminal trash now has a private recoverable per-user vault; direct host trash uses an out-of-root state vault when Atlas maps `/`, including cross-device copy fallback.
+- File operation evidence is redacted, searchable, persisted, and bounded to the latest 2,000 operations per context.
+- Final verification: Atlas 4/4 legacy and 62/62 Vitest tests, clean TypeScript/Svelte checks; Signal server check; Signal CLI Docker target passed Go tests and all release cross-builds.
+
 ## Fix round 1: security, bounds, and context races
 
 ### What changed

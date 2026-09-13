@@ -85,4 +85,17 @@ describe('terminal-backed effective access', () => {
     expect(commands[0]).toContain('head -z -n 24');
     expect(commands[0]).toContain('pipefail');
   });
+
+  it('moves remote paths into a private recoverable vault and restores them', async () => {
+    const commands: string[] = [];
+    const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.alloc(0), exitCode: 0 }; } };
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
+    const trashed = await transport.trash("/srv/atlas/it's here.txt");
+    expect(trashed.restorePath).toMatch(/^\/\.atlas-trash\/[0-9a-f-]{36}$/);
+    expect(commands[0]).toContain('fngk-atlas/trash');
+    expect(commands[0]).toContain("'/srv/atlas/it'\"'\"'s here.txt'");
+    await transport.restore(trashed.restorePath);
+    expect(commands[1]).toContain('original.b64');
+    expect(commands[1]).toContain('mv -- "$payload" "$original"');
+  });
 });

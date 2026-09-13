@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { NAMESPACE_PROTOCOL, TERMINAL_PROTOCOL, type NamespaceSnapshot } from './protocol.js';
+import { FILES_PROTOCOL, NAMESPACE_PROTOCOL, TERMINAL_PROTOCOL, type NativeFileBindings, type NamespaceSnapshot } from './protocol.js';
 import { parseNamespace } from './namespace.js';
 import { TerminalSession } from './terminal-session.js';
 import { redact } from './redaction.js';
@@ -42,9 +42,9 @@ export class FngkProcessClient {
     this.env = { ...process.env, ...options.env };
   }
 
-  async #run(args: string[], signal?: AbortSignal): Promise<string> {
+  async #run(args: string[], signal?: AbortSignal, input?:string): Promise<string> {
     return await new Promise((resolve, reject) => {
-      const child = spawn(this.binary, args, { env: this.env, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(this.binary, args, { env: this.env, stdio: [input===undefined?'ignore':'pipe', 'pipe', 'pipe'] });
       let stdout = '', stderr = '', settled = false;
       const finish = (error?: FngkProcessError) => {
         if (settled) return;
@@ -57,11 +57,11 @@ export class FngkProcessClient {
       const timer = setTimeout(() => { child.kill('SIGTERM'); finish(new FngkProcessError('timeout', `FNGK operation timed out after ${this.timeoutMs}ms.`)); }, this.timeoutMs);
       timer.unref();
       if (signal?.aborted) cancel(); else signal?.addEventListener('abort', cancel, { once: true });
-      child.stdout.on('data', chunk => {
+      child.stdout!.on('data', chunk => {
         stdout += chunk.toString('utf8');
         if (stdout.length > 4 * 1024 * 1024) { child.kill('SIGTERM'); finish(new FngkProcessError('output_limit', 'FNGK output exceeded 4 MiB.')); }
       });
-      child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString('utf8')).slice(-64 * 1024); });
+      child.stderr!.on('data', chunk => { stderr = (stderr + chunk.toString('utf8')).slice(-64 * 1024); });
       child.on('error', error => finish(new FngkProcessError((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'binary_missing' : 'process_error', error.message)));
       child.on('close', code => {
         if (code === 0) return finish();
@@ -71,7 +71,21 @@ export class FngkProcessClient {
             : 'process_failed';
         finish(new FngkProcessError(failure, stderr || `FNGK exited with code ${code}.`, code));
       });
+      if(input!==undefined){child.stdin!.end(input);}
     });
+  }
+
+  async fileBindings(profile?:string,signal?:AbortSignal):Promise<NativeFileBindings>{
+    const args=['files','--json'];if(profile)args.push('--profile',profile);
+    const value=JSON.parse((await this.#run(args,signal)).trim()) as NativeFileBindings;
+    if(value.protocolVersion!==FILES_PROTOCOL||!value.profile||!Array.isArray(value.bindings))throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported Files protocol.');
+    return value;
+  }
+
+  async invokeFileBinding(bindingId:string,capability:string,input:Record<string,unknown>,options:{profile?:string;confirm?:boolean;signal?:AbortSignal}={}):Promise<{protocolVersion:typeof FILES_PROTOCOL;output:any}>{
+    const args=['files','invoke',bindingId,capability,'--json'];if(options.profile)args.push('--profile',options.profile);if(options.confirm)args.push('--yes');
+    const value=JSON.parse((await this.#run(args,options.signal,JSON.stringify(input))).trim());
+    if(value.protocolVersion!==FILES_PROTOCOL)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported Files protocol.');return value;
   }
 
   async namespace(profile?: string, signal?: AbortSignal): Promise<NamespaceSnapshot> {

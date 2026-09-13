@@ -1,5 +1,9 @@
 export const NAMESPACE_PROTOCOL = 'fngk.namespace.v1' as const;
 export const TERMINAL_PROTOCOL = 'fngk.terminal.v1' as const;
+export const FILES_PROTOCOL = 'fngk.files.v1' as const;
+
+export interface NativeFileBinding { id:string; name:string; resourceId:string; deviceId:string; deviceName:string; adapterId:string; root:string; readOnly:boolean; capabilities:string[]; provenance:string }
+export interface NativeFileBindings { protocolVersion:typeof FILES_PROTOCOL; profile:{name:string}; bindings:NativeFileBinding[] }
 
 export interface NamespaceDevice {
   id: string;
