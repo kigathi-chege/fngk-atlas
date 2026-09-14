@@ -19,6 +19,8 @@ For a real installed FNGK context, follow [the host handoff](docs/host-handoff.m
 
 To enable the isolated database workbench, start Atlas with `DBGATE_RUNTIME=container`. Atlas launches the pinned, non-root DbGate sidecar only when a database session is requested; remote bytes travel through the selected Device's authenticated FNGK TCP relay. See [the database workbench guide](docs/database-workbench.md) for isolation, compatibility, and licensing details.
 
+Live Project runs a chosen repository command in a dedicated, visible FNGK terminal, publishes its selected port through Signal's existing Connection/HKMN path, embeds the result, and offers opt-in Playwright diagnostics. It requires the exact-head `fngk.publish.v1` CLI protocol described in [the live project guide](docs/live-projects.md).
+
 From Docker, publish the service port to the host:
 
 ```bash

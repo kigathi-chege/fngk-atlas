@@ -53,6 +53,20 @@ test('keeps unsaved buffer bodies memory-only and drops stale restored tabs',asy
   await expect(page.getByRole('navigation',{name:'Atlas activity'})).toBeVisible();
 });
 
+test('opens Device database and live-project workbenches without starting privileged actions',async({page})=>{
+  await page.goto('/');
+  await page.locator('.context-rail').getByRole('button',{name:/kigathi/}).click();
+  const sidebar=page.locator('.context-sidebar');
+  await sidebar.getByRole('button',{name:'More actions'}).click();
+  await sidebar.getByRole('button',{name:'Live project'}).click();
+  await expect(page.getByRole('heading',{name:'Run on selected Device'})).toBeVisible();
+  await sidebar.getByRole('button',{name:'More actions'}).click();
+  await sidebar.getByRole('button',{name:'Databases'}).click();
+  await expect(page.locator('.database-panel')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Open workbench'})).toBeVisible();
+  await expect(page.getByTitle('Database workbench')).toHaveCount(0);
+});
+
 test('keeps the persistent shell polished and reachable at desktop and narrow widths',async({page})=>{
   await page.setViewportSize({width:1440,height:900});
   await page.goto('/');
