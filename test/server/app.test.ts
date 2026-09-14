@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/server/app.js';
 import { FngkProcessClient } from '../../src/fngk/process-client.js';
 import {DbGateSupervisor} from '../../src/databases/sidecar.js';
+import {DiagnosticRegistry} from '../../src/diagnostics/registry.js';
 
 const fixture = path.resolve('test/fixtures/fngk.mjs');
 const cleanups: Array<() => Promise<void>> = [];
@@ -20,6 +21,17 @@ async function harness() {
 }
 
 describe('Atlas FNGK-native server', () => {
+  it('lists redacted diagnostic sessions for operator inspection', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'fngk-atlas-diagnostics-'));
+    const diagnostics = new DiagnosticRegistry();
+    const created = diagnostics.create({ kind: 'fngk-relay', contextId: 'device:1', command: 'fngk tcp device:1 5432 --password secret' });
+    cleanups.push(async () => { await rm(directory, { recursive: true, force: true }); });
+    const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture }), dbPath: path.join(directory, 'atlas.db'), diagnosticRegistry: diagnostics });
+    cleanups.push(async () => { await app.close(); });
+    const response = await app.inject({ method: 'GET', url: '/api/diagnostics/sessions' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().items).toContainEqual(expect.objectContaining({ id: created.id, kind: 'fngk-relay', command: expect.not.stringContaining('secret') }));
+  });
   it('exposes process context and namespace without accepting credentials', async () => {
     const app = await harness();
     const context = await app.inject({ method: 'GET', url: '/api/fngk/context?profile=work' });

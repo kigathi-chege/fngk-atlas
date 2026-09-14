@@ -1,10 +1,11 @@
 import type {FngkProcessClient} from '../fngk/process-client.js';
 import {FngkTcpRelayProvider,type TcpRelay,type TcpRelayProvider} from '../fngk/tcp-relay.js';
 import type {DatabaseConnection,DatabaseRuntime} from './types.js';
+import type {DiagnosticRegistry} from '../diagnostics/registry.js';
 
 export class RoutedDatabaseRuntime implements DatabaseRuntime {
   #relays=new Map<string,{relay:TcpRelay;timer:NodeJS.Timeout}>();#routes=new Map<string,Pick<NonNullable<ReturnType<DatabaseRuntime['list']>[number]>, 'accessRoute'|'target'>>();
-  constructor(readonly inner:DatabaseRuntime,readonly fngk:FngkProcessClient,readonly relays:TcpRelayProvider=new FngkTcpRelayProvider({binary:fngk.binary,env:fngk.env})){}
+  constructor(readonly inner:DatabaseRuntime,readonly fngk:FngkProcessClient,readonly relays:TcpRelayProvider=new FngkTcpRelayProvider({binary:fngk.binary,env:fngk.env}),readonly diagnostics?:DiagnosticRegistry){}
   async start(connection:DatabaseConnection){
     if(connection.contextId==='local'){const value=await this.inner.start(connection);this.#routes.set(value.session.id,{accessRoute:'direct'});value.session.accessRoute='direct';return value}
     if(!connection.port)throw Object.assign(new Error('A remote database port is required.'),{code:'database_port_required'});

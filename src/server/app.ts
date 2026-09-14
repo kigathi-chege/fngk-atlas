@@ -27,9 +27,11 @@ import {DbGateSupervisor} from '../databases/sidecar.js';
 import type {DatabaseRuntime,DatabaseConnection} from '../databases/types.js';
 import {proxyDatabase} from '../databases/proxy.js';
 import {RoutedDatabaseRuntime} from '../databases/routed-runtime.js';
+import {FngkTcpRelayProvider} from '../fngk/tcp-relay.js';
 import {DbGateContainerSupervisor} from '../databases/container-sidecar.js';
 import {LiveProjectService} from '../live-projects/service.js';
 import {diagnoseBrowser} from '../diagnostics/browser-diagnostics.js';
+import {DiagnosticRegistry} from '../diagnostics/registry.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const terminalInputs = new Set(['input', 'command', 'resize', 'interrupt', 'mode', 'control_request', 'control_resolve', 'nested_approval_resolve', 'detach', 'stop']);
@@ -41,17 +43,20 @@ interface CreateAppOptions {
   localRoot?: string;
   logger?: boolean;
   databaseRuntime?:DatabaseRuntime;
+  diagnosticRegistry?:DiagnosticRegistry;
 }
 
 function processError(error: unknown): { statusCode: number; body: Record<string, unknown> } {
+  const details = error as { diagnosticSessionId?: string; liveProjectSession?: unknown };
+  const extra = { ...(details.diagnosticSessionId ? { diagnosticSessionId: details.diagnosticSessionId } : {}), ...(details.liveProjectSession ? { liveProjectSession: details.liveProjectSession } : {}) };
   if (error instanceof FngkProcessError) {
     const statusCode = error.code === 'binary_missing' || error.code === 'daemon_unavailable' ? 503 : error.code === 'authentication_required' ? 401 : error.code === 'unsupported_protocol' ? 409 : error.code === 'timeout' ? 504 : 502;
-    return { statusCode, body: { error: error.code, message: error.message } };
+    return { statusCode, body: { error: error.code, message: error.message, ...extra } };
   }
   const value = error as { code?: string; message?: string };
   const code = value.code ?? 'internal_error';
   const statusCode = code === 'context_not_found' ? 404 : code === 'device_offline' || code === 'route_unavailable' || code === 'file_conflict' ? 409 : code === 'invalid_path' || code === 'path_escape' || code === 'protected_path' ? 400 : code === 'cancelled' ? 499 : 500;
-  return { statusCode, body: { error: code, message: value.message ?? 'Unexpected error.' } };
+  return { statusCode, body: { error: code, message: value.message ?? 'Unexpected error.', ...extra } };
 }
 
 function requestSignal(request: { raw: NodeJS.EventEmitter }, reply?: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }): AbortSignal {
@@ -69,9 +74,10 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   const evidence = new EvidenceStore(options.dbPath ?? process.env.ATLAS_DB ?? path.join(root, '.atlas', 'atlas.db'));
   let activeIndex = store.latestIndex();
   const resolveIndex = (indexId?: string, contextId?: string) => indexId ? store.index(indexId) : contextId ? store.latestIndex(contextId) : activeIndex;
+  const diagnostics=options.diagnosticRegistry??new DiagnosticRegistry();
   const sidecar=process.env.DBGATE_RUNTIME==='container'?new DbGateContainerSupervisor():new DbGateSupervisor();
-  const databases=options.databaseRuntime??new RoutedDatabaseRuntime(sidecar,fngk);
-  const liveProjects=new LiveProjectService(fngk,contextId=>contexts.commandExecutor(contextId));
+  const databases=options.databaseRuntime??new RoutedDatabaseRuntime(sidecar,fngk,new FngkTcpRelayProvider({binary:fngk.binary,env:fngk.env,diagnostics}),diagnostics);
+  const liveProjects=new LiveProjectService(fngk,{diagnostics});
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 << 20 });
   await app.register(websocket);
   app.addHook('onClose', async () => { await liveProjects.close(); await databases.close(); contexts.close(); evidence.close(); store.close(); });
@@ -118,6 +124,9 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
   const routeEvidence = (route: { id: string; kind: string; deviceId?: string; effectiveIdentity: string; privilege: string; observedAt: string; operations?: string[] }) => ({ id: route.id, kind: route.kind, deviceId: route.deviceId, effectiveIdentity: route.effectiveIdentity, privilege: route.privilege, observedAt: route.observedAt, operations: route.operations ?? [] });
   const operationEvidence = (type: string, contextId: string, route: { id: string; kind: string; effectiveIdentity: string; privilege: string; observedAt: string; operations?: string[] }, summary:Record<string,unknown>={}) => { const operation={ id: randomUUID(), type, contextId, route: routeEvidence(route), summary, recordedAt: new Date().toISOString() }; evidence.recordOperation(operation); return operation; };
   app.get('/api/operations',async(request)=>{const query=request.query as {contextId?:string;limit?:string};return {items:evidence.operations(query.contextId,Number(query.limit)||200)}});
+  app.get('/api/diagnostics/sessions',async(request)=>{const query=request.query as {contextId?:string;kind?:string};return {items:diagnostics.list().filter(item=>(!query.contextId||item.contextId===query.contextId)&&(!query.kind||item.kind===query.kind))}});
+  app.get('/api/diagnostics/sessions/:id',async(request,reply)=>{const value=diagnostics.get(decodeURIComponent((request.params as {id:string}).id));return value??reply.code(404).send({error:'diagnostic_session_not_found'})});
+  app.get('/api/diagnostics/sessions/:id/events',{websocket:true},(socket,request)=>{const id=decodeURIComponent((request.params as {id:string}).id),initial=diagnostics.get(id);if(!initial){socket.close(1008,'diagnostic session not found');return}socket.send(JSON.stringify(initial));const send=(value:any)=>{if(value.id===id&&socket.readyState===socket.OPEN)socket.send(JSON.stringify(value))};diagnostics.on('changed',send);socket.once('close',()=>diagnostics.off('changed',send))});
   app.get('/api/databases/discover',async(request,reply)=>{const contextId=String((request.query as {contextId?:string}).contextId??'local'),deviceId=contextId.startsWith('device:')?contextId.slice(7):'';try{let executor;try{executor=await contexts.commandExecutor(contextId)}catch{}let resources:NonNullable<Awaited<ReturnType<FngkProcessClient['namespace']>>['resources']>=[];try{resources=(await fngk.namespace()).resources?.filter(item=>!deviceId||item.deviceId===deviceId)??[]}catch{}return await discoverDatabases(contextId,executor,resources)}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
   app.get('/api/databases/sessions',async()=>({items:databases.list()}));
   app.post('/api/databases/sessions',async(request,reply)=>{const body=request.body as DatabaseConnection;if(!body?.contextId||!body.engine||!body.host)return reply.code(400).send({error:'invalid_database_connection'});try{const value=await databases.start(body);reply.header('Set-Cookie',`atlas_db_${value.session.id.slice(0,8)}=${value.token}; HttpOnly; SameSite=Strict; Path=${value.session.proxyPath}; Max-Age=${Math.max(1,Math.floor((Date.parse(value.session.expiresAt)-Date.now())/1000))}`);const operation={id:randomUUID(),type:'database.session.start',contextId:body.contextId,route:{kind:body.contextId==='local'?'direct':'terminal',effectiveIdentity:'database-sidecar',privilege:'user'},summary:{engine:body.engine,host:body.host,port:body.port,database:body.database,readOnly:Boolean(body.readOnly)},recordedAt:new Date().toISOString()};evidence.recordOperation(operation as any);return reply.code(201).send({session:value.session})}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});

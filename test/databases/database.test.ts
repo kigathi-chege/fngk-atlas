@@ -35,4 +35,7 @@ describe('database resources and DbGate isolation',()=>{
     expect(received).toMatchObject({host:'127.0.0.1',port:41111});expect(relays.start).toHaveBeenCalledWith('device:one',5432,{profile:'local'});expect(value.session).toMatchObject({accessRoute:'fngk-tcp',target:{host:'127.0.0.1',port:5432}});await runtime.stop('db-1');expect(closed).toBe(1);
   });
   it('consumes versioned FNGK TCP relay readiness',async()=>{const relay=await new FngkTcpRelayProvider({binary:path.resolve('test/fixtures/fngk.mjs'),env:{FNGK_FIXTURE_MODE:'ok'}}).start('device:one',5432,{profile:'local'});expect(relay).toMatchObject({host:'127.0.0.1',port:32123,target:'device:one',targetPort:5432,profile:'local'});await relay.close()});
+  it('identifies human relay readiness as an outdated installed CLI',async()=>{
+    await expect(new FngkTcpRelayProvider({binary:path.resolve('test/fixtures/fngk.mjs'),env:{FNGK_FIXTURE_MODE:'human-tcp'}}).start('device:one',5432,{profile:'local'})).rejects.toMatchObject({code:'incompatible_cli',message:expect.stringContaining('exact-head FNGK')});
+  });
 });

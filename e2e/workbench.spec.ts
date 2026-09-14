@@ -32,7 +32,11 @@ test('renders contextual search and safe filesystem actions in the FNGK Atlas wo
   }
   const minimizeFilesystem=page.getByRole('button',{name:'Minimize Filesystem'});if(await minimizeFilesystem.count())await minimizeFilesystem.click();
   const minimizeAtlas=page.getByRole('button',{name:'Minimize Atlas'});if(await minimizeAtlas.count())await minimizeAtlas.click();
-  await expect(page.getByLabel('Restore Atlas panels')).toBeVisible();
+  for(let index=0;index<30;index++){
+    const minimize=page.locator('.atlas-tab:not(.atlas-workspace-anchor) .atlas-tab-minimize:visible').first();if(!await minimize.count())break;
+    await minimize.click({force:true});
+  }
+  await expect(page.getByLabel('Empty workspace')).toBeVisible();
   await expect(page.getByRole('navigation',{name:'Atlas activity'})).toBeVisible();
   await expect(page.getByRole('navigation',{name:'Pinned, workspace, and minimized panels'})).toBeVisible();
   await page.getByRole('button',{name:'Open filesystem'}).click();
@@ -72,7 +76,7 @@ test('keeps the persistent shell polished and reachable at desktop and narrow wi
   await page.goto('/');
   await page.locator('.context-rail').getByRole('button',{name:'Atlas process host'}).click();
   const unified=page.getByLabel('Search Atlas');await expect(unified).toBeVisible();await unified.fill('package');await expect(page.getByRole('listbox',{name:'Unified search results'})).toBeVisible();await expect(page.getByRole('option',{name:/package\.json/}).first()).toBeVisible();await page.keyboard.press('Escape');await page.locator('.atlas-shell').click({position:{x:400,y:400}});await page.keyboard.press('Control+k');await expect(unified).toBeFocused();await page.keyboard.press('Escape');
-  const geometry=await page.evaluate(()=>{const left=document.querySelector('.context-sidebar')?.closest('.dv-groupview')?.getBoundingClientRect(),right=document.querySelector('.tree-explorer')?.closest('.dv-groupview')?.getBoundingClientRect(),center=document.querySelector('.graph-panel')?.closest('.dv-groupview')?.getBoundingClientRect(),sash=document.querySelector('.dv-sash'),view=document.querySelector('.dockview-spaced .dv-view'),group=document.querySelector('.dockview-spaced .dv-groupview'),tab=document.querySelector('.atlas-tab');return {left:left?.width??0,right:right?.width??0,center:center?.width??0,grip:sash?getComputedStyle(sash,'::after').content:'',sashBackground:sash?getComputedStyle(sash).backgroundColor:'',viewPadding:view?getComputedStyle(view).padding:'',groupRadius:group?getComputedStyle(group).borderRadius:'',tabPadding:tab?getComputedStyle(tab).padding:'',tabRadius:tab?getComputedStyle(tab).borderRadius:''}});expect(Math.abs(geometry.left-geometry.right)).toBeLessThanOrEqual(8);expect(geometry.center).toBeGreaterThan(geometry.left*1.5);expect(geometry.grip).toContain('•••');expect(geometry.sashBackground).toBe('rgba(0, 0, 0, 0)');expect(geometry.viewPadding).toBe('6px');expect(geometry.groupRadius).toBe('8px');expect(geometry.tabPadding).toBe('0px 8px');expect(geometry.tabRadius).toBe('6px');
+  const geometry=await page.evaluate(()=>{const left=document.querySelector('.context-sidebar')?.closest('.dv-groupview')?.getBoundingClientRect(),right=document.querySelector('.tree-explorer')?.closest('.dv-groupview')?.getBoundingClientRect(),center=document.querySelector('.graph-panel')?.closest('.dv-groupview')?.getBoundingClientRect(),sash=document.querySelector('.dv-sash'),view=document.querySelector('.atlas-dock .dv-view'),group=document.querySelector('.atlas-dock .dv-groupview'),tab=document.querySelector('.atlas-tab:not(.atlas-workspace-anchor)');return {left:left?.width??0,right:right?.width??0,center:center?.width??0,grip:sash?getComputedStyle(sash,'::after').content:'',sashBackground:sash?getComputedStyle(sash).backgroundColor:'',viewPadding:view?getComputedStyle(view).padding:'',groupRadius:group?getComputedStyle(group).borderRadius:'',tabPadding:tab?getComputedStyle(tab).padding:'',tabRadius:tab?getComputedStyle(tab).borderRadius:'',tabDivider:getComputedStyle(document.querySelector('.dv-tab-divider')??document.body).backgroundColor}});expect(Math.abs(geometry.left-geometry.right)).toBeLessThanOrEqual(16);expect(geometry.center).toBeGreaterThan(geometry.left*1.5);expect(geometry.grip).toContain('•••');expect(geometry.sashBackground).toBe('rgba(0, 0, 0, 0)');expect(geometry.viewPadding).toBe('0px');expect(geometry.groupRadius).toBe('8px');expect(geometry.tabPadding).toBe('0px 8px');expect(geometry.tabRadius).toBe('6px');expect(await page.evaluate(()=>document.documentElement.scrollHeight-document.documentElement.clientHeight)).toBeLessThanOrEqual(0);
   await page.keyboard.press('Control+Shift+p');
   const palette=page.getByRole('dialog',{name:'Command palette'});
   await expect(palette).toBeVisible();
@@ -87,4 +91,35 @@ test('keeps the persistent shell polished and reachable at desktop and narrow wi
   await expect(page.locator('.tree-explorer')).toBeHidden();
   expect(await page.locator('.graph-panel').evaluate(element=>element.closest('.dv-groupview')?.getBoundingClientRect().width??0)).toBeGreaterThan(300);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth)).toBeLessThanOrEqual(0);
+});
+
+test('discards the legacy workbench schema and restores a full-height six-pixel canvas',async({page})=>{
+  await page.setViewportSize({width:1440,height:900});
+  await page.addInitScript(()=>localStorage.setItem('atlas.workbench.v2',JSON.stringify({version:2,layout:{grid:{width:1200,height:225}}})));
+  await page.goto('/');
+  const geometry=await page.evaluate(()=>{
+    const box=(element:Element|null)=>{const value=element?.getBoundingClientRect();return value?{left:value.left,right:value.right,top:value.top,bottom:value.bottom,width:value.width,height:value.height}:undefined};
+    const group=(selector:string)=>box(document.querySelector(selector)?.closest('.dv-groupview')??null);
+    return {workbench:box(document.querySelector('.workbench')),navigator:group('.context-sidebar'),center:group('.atlas-workspace-anchor'),filesystem:group('.tree-explorer'),legacy:localStorage.getItem('atlas.workbench.v2'),saved:JSON.parse(localStorage.getItem('atlas.workbench.v3')??'null')};
+  });
+  expect(geometry.legacy).toBeNull();expect(geometry.saved?.version).toBe(3);
+  expect(geometry.navigator!.left-geometry.workbench!.left).toBe(6);expect(geometry.workbench!.bottom-geometry.navigator!.bottom).toBe(6);
+  expect(geometry.center!.left-geometry.navigator!.right).toBe(6);expect(geometry.filesystem!.left-geometry.center!.right).toBe(6);
+  expect(geometry.navigator!.height).toBe(geometry.workbench!.height-12);
+});
+
+test('keeps sidebar widths and the center workspace when central tabs close',async({page})=>{
+  await page.setViewportSize({width:1440,height:900});await page.goto('/');
+  const widths=await page.evaluate(()=>({left:document.querySelector('.context-sidebar')?.closest('.dv-groupview')?.getBoundingClientRect().width,right:document.querySelector('.tree-explorer')?.closest('.dv-groupview')?.getBoundingClientRect().width}));
+  for(const id of ['atlas.graph','atlas.metrics','atlas.activity'])await page.locator(`.atlas-tab[data-panel-id="${id}"] .atlas-tab-minimize`).click();
+  await expect(page.locator('.workspace-placeholder')).toBeVisible();
+  const centerGroup=page.locator('.dv-groupview').filter({has:page.locator('.atlas-workspace-anchor')});
+  await expect(centerGroup.locator('.dv-tabs-and-actions-container')).toBeHidden();
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('atlas:new-buffer')));
+  await expect(centerGroup.locator('.atlas-tab[data-panel-id^="buffer:"]')).toBeVisible();
+  const after=await page.evaluate(()=>({left:document.querySelector('.context-sidebar')?.closest('.dv-groupview')?.getBoundingClientRect().width,right:document.querySelector('.tree-explorer')?.closest('.dv-groupview')?.getBoundingClientRect().width}));
+  expect(after.left).toBe(widths.left);expect(after.right).toBe(widths.right);
+  await page.getByRole('button',{name:'Minimize Filesystem'}).click();await page.getByRole('button',{name:'Restore Filesystem'}).click();
+  const restored=await page.evaluate(()=>{const right=document.querySelector('.tree-explorer')?.closest('.dv-groupview')?.getBoundingClientRect(),center=document.querySelector('.atlas-workspace-anchor')?.closest('.dv-groupview')?.getBoundingClientRect();return {width:right?.width,left:right?.left,centerRight:center?.right}});
+  expect(Math.abs(restored.width!-widths.right!)).toBeLessThanOrEqual(1);expect(restored.left).toBeGreaterThan(restored.centerRight!);
 });

@@ -15,7 +15,7 @@ if ! namespace="$($fngk_bin status --json 2>&1)"; then
   echo "See $atlas_root/docs/host-handoff.md for update and login steps." >&2
   exit 1
 fi
-if ! node -e "const v=JSON.parse(process.argv[1]);if(v.protocolVersion!=='fngk.namespace.v1')process.exit(1)" "$namespace"; then
+if ! printf '%s' "$namespace" | node -e "let raw='';process.stdin.setEncoding('utf8');process.stdin.on('data',chunk=>raw+=chunk);process.stdin.on('end',()=>{try{const value=JSON.parse(raw);if(value.protocolVersion!=='fngk.namespace.v1')process.exit(1)}catch{process.exit(1)}})"; then
   echo 'The installed FNGK does not support fngk.namespace.v1. Install the exact-head build first.' >&2
   exit 1
 fi

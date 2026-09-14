@@ -67,3 +67,44 @@ npm run test:e2e
 ```
 
 The browser suite builds the web assets, launches a disposable fixture server and FNGK process, and checks empty-workspace recovery, persistent rails, minimize/restore/float behavior, unified search, memory-only buffers, exclusive saves, responsive layout, filesystem menus, bounded terminal-session ownership, JSONL terminal input, and console errors.
+
+
+## UPDATING FNGK
+
+Run this on the host, from the Atlas checkout:
+
+  cd ~/Projects/signal/fngk-atlas
+
+  npm run build:fngk-head
+
+  mkdir -p /tmp/fngk-atlas-update
+  tar -xzf output/fngk-head/fngk_linux_amd64.tar.gz \
+    -C /tmp/fngk-atlas-update fngk
+
+  (cd output/fngk-head && sha256sum -c SHA256SUMS)
+
+  /tmp/fngk-atlas-update/fngk version
+  type -a fngk
+
+  Install it into the executable your shell actually uses. Since your ~/.local/bin likely comes first:
+
+  cp ~/.local/bin/fngk ~/.local/bin/fngk.atlas-backup 2>/dev/null || true
+  install -m 0755 /tmp/fngk-atlas-update/fngk ~/.local/bin/fngk
+  hash -r
+
+  Then converge the user daemon:
+
+  fngk version
+  fngk install --profile local
+  fngk status --json --profile local | jq '{profile,devices,connections}'
+
+  You should see the updated version and the local Device online. If Atlas is already running, restart it afterward:
+
+  npm run start:host
+
+  Do not run fngk update; that targets released artifacts. The exact-head artifact is the one built by npm run build:fngk-head.
+
+  If type -a fngk shows /usr/local/bin/fngk is the active first entry instead, install there with:
+
+  sudo cp /usr/local/bin/fngk /usr/local/bin/fngk.atlas-backup
+  sudo install -m 0755 /tmp/fngk-atlas-update/fngk /usr/local/bin/fngk

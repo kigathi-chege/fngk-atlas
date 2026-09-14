@@ -71,7 +71,6 @@ export class DbGateContainerSupervisor implements DatabaseRuntime {
     const id = randomUUID();
     const container = `fngk-atlas-dbgate-${id.slice(0, 12)}`;
     const token = randomBytes(24).toString('base64url');
-    const loginPassword = randomBytes(24).toString('base64url');
     const ttl = this.options.ttlMs ?? 30 * 60_000;
     const createdAt = new Date();
     const expiresAt = new Date(createdAt.getTime() + ttl);
@@ -92,8 +91,6 @@ export class DbGateContainerSupervisor implements DatabaseRuntime {
       PASSWORD_atlas: connection.password ?? '',
       ENGINE_atlas: `${connection.engine}@dbgate-plugin-${connection.engine === 'mariadb' ? 'mysql' : connection.engine}`,
       READONLY_atlas: connection.readOnly ? '1' : '0',
-      LOGIN: 'atlas',
-      PASSWORD: loginPassword,
       SHELL_SCRIPTING: '0',
       SHELL_CONNECTION: '0',
       TOKEN_LIFETIME: `${Math.ceil(ttl / 1000)}s`,
