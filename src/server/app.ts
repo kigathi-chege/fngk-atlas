@@ -32,6 +32,11 @@ import {DbGateContainerSupervisor} from '../databases/container-sidecar.js';
 import {LiveProjectService} from '../live-projects/service.js';
 import {diagnoseBrowser} from '../diagnostics/browser-diagnostics.js';
 import {DiagnosticRegistry} from '../diagnostics/registry.js';
+import {WorldStore} from '../world/store.js';
+import {WorldService} from '../world/service.js';
+import {loadInterpreterRegistry} from '../world/registry.js';
+import {loadDeviceAdapters,runDeviceAdapter,type RegisteredDeviceAdapter} from '../world/device-adapter.js';
+import {AtlasIntelligenceService,HttpCalculatorProvider,type CalculatorProvider} from '../intelligence/service.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const terminalInputs = new Set(['input', 'command', 'resize', 'interrupt', 'mode', 'control_request', 'control_resolve', 'nested_approval_resolve', 'detach', 'stop']);
@@ -44,6 +49,8 @@ interface CreateAppOptions {
   logger?: boolean;
   databaseRuntime?:DatabaseRuntime;
   diagnosticRegistry?:DiagnosticRegistry;
+  calculatorProvider?:CalculatorProvider;
+  deviceAdapters?:RegisteredDeviceAdapter[];
 }
 
 function processError(error: unknown): { statusCode: number; body: Record<string, unknown> } {
@@ -68,19 +75,27 @@ function requestSignal(request: { raw: NodeJS.EventEmitter }, reply?: { raw: Nod
 
 export async function createApp(options: CreateAppOptions = {}): Promise<FastifyInstance> {
   const root = options.root ?? projectRoot;
-  const store = new Store(options.dbPath ?? process.env.ATLAS_DB ?? path.join(root, '.atlas', 'atlas.db'));
+  const databaseFile=options.dbPath ?? process.env.ATLAS_DB ?? path.join(root, '.atlas', 'atlas.db');
+  const store = new Store(databaseFile);
   const fngk = options.fngk ?? new FngkProcessClient();
   const contexts = new EffectiveContextService(fngk, { localRoot: options.localRoot });
-  const evidence = new EvidenceStore(options.dbPath ?? process.env.ATLAS_DB ?? path.join(root, '.atlas', 'atlas.db'));
+  const evidence = new EvidenceStore(databaseFile);
+  let interpreterTrust:Record<string,string>={};try{interpreterTrust=JSON.parse(process.env.ATLAS_INTERPRETER_TRUST??'{}')}catch{}
+  const extensionInterpreters=await loadInterpreterRegistry({production:process.env.NODE_ENV==='production',signedDir:process.env.ATLAS_INTERPRETER_DIR,devDir:process.env.ATLAS_INTERPRETER_DEV_DIR,trust:interpreterTrust});
+  const deviceAdapters=options.deviceAdapters??await loadDeviceAdapters({production:process.env.NODE_ENV==='production',signedDir:process.env.ATLAS_DEVICE_ADAPTER_DIR,devDir:process.env.ATLAS_DEVICE_ADAPTER_DEV_DIR,trust:interpreterTrust});
+  const worldStore=new WorldStore(databaseFile),world=new WorldService(worldStore,extensionInterpreters);
+  const calculatorProvider=options.calculatorProvider??(process.env.ATLAS_CALCULATOR_URL?new HttpCalculatorProvider(process.env.ATLAS_CALCULATOR_URL,process.env.ATLAS_CALCULATOR_TOKEN):undefined),intelligence=new AtlasIntelligenceService(worldStore,world,calculatorProvider);
   let activeIndex = store.latestIndex();
   const resolveIndex = (indexId?: string, contextId?: string) => indexId ? store.index(indexId) : contextId ? store.latestIndex(contextId) : activeIndex;
   const diagnostics=options.diagnosticRegistry??new DiagnosticRegistry();
   const sidecar=process.env.DBGATE_RUNTIME==='container'?new DbGateContainerSupervisor():new DbGateSupervisor();
   const databases=options.databaseRuntime??new RoutedDatabaseRuntime(sidecar,fngk,new FngkTcpRelayProvider({binary:fngk.binary,env:fngk.env,diagnostics}),diagnostics);
   const liveProjects=new LiveProjectService(fngk,{diagnostics});
+  const worldRefreshState=new Map<string,{sourceKey:string;deviceKey:string;checkedAt:number}>();
+  const refreshWorld=async(contextId:string)=>{const index=resolveIndex(undefined,contextId),runtimeNodes=evidence.entities(contextId),relationships=evidence.relationships(contextId),runtimeEdges=relationships.map(value=>({id:value.id,source:value.sourceId,target:value.targetId,type:value.type,evidence:value.evidence,observedAt:value.observedAt,stale:value.stale})),latest=[...runtimeNodes,...relationships].reduce((value,item)=>String(item.observedAt??'')>value?String(item.observedAt):value,''),sourceKey=[index?.id,index?.revision,index?.nodes?.length,index?.edges?.length,runtimeNodes.length,runtimeEdges.length,latest].join(':');const previous=worldRefreshState.get(contextId);if(previous?.sourceKey===sourceKey&&Date.now()-previous.checkedAt<5_000)return index;let device:any;try{device=(await contexts.contexts()).contexts.find(value=>value.id===contextId)}catch{}const deviceKey=[device?.id,device?.online,device?.name].join(':');if(previous?.sourceKey!==sourceKey||previous.deviceKey!==deviceKey)world.refresh(contextId,[...(index?.nodes??[]),...runtimeNodes],[...(index?.edges??[]),...runtimeEdges],device);worldRefreshState.set(contextId,{sourceKey,deviceKey,checkedAt:Date.now()});return index};
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 << 20 });
   await app.register(websocket);
-  app.addHook('onClose', async () => { await liveProjects.close(); await databases.close(); contexts.close(); evidence.close(); store.close(); });
+  app.addHook('onClose', async () => { await liveProjects.close(); await databases.close(); contexts.close(); worldStore.close(); evidence.close(); store.close(); });
 
   app.addHook('onSend', async (_request, reply, payload) => {
     const databaseProxy=String((_request as any).url??'').startsWith('/api/databases/sessions/')&&String((_request as any).url??'').includes('/workbench');
@@ -190,8 +205,22 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Fastify
     const indexed=store.search(contextId,q,limit).map((value:any)=>value.source==='index'?{...value,repositoryRoot:resolveIndex(undefined,value.contextId)?.root}:value);
     const databaseItems=databases.list().filter(item=>(!contextId||item.contextId===contextId)&&matches(`${item.label} ${item.engine} ${item.status}`)).map(item=>({type:'database',entityId:item.id,contextId:item.contextId,label:item.label,detail:`${item.engine} · ${item.status}`,source:'live database session',rank:5}));
     const projectItems=liveProjects.list().filter(item=>(!contextId||item.contextId===contextId)&&matches(`${item.command} ${item.repositoryPath} ${item.hostname??''} ${item.status}`)).map(item=>({type:'live-project',entityId:item.id,contextId:item.contextId,label:item.repositoryPath.split('/').at(-1)??item.repositoryPath,path:item.repositoryPath,detail:`${item.status} · :${item.port}`,source:'live project session',rank:5}));
-    const values=[...databaseItems,...projectItems,...indexed,...(contextId?evidence.search(contextId,q,limit):[])],seen=new Set<string>();return {items:values.filter((value:any)=>{const key=`${value.type}:${value.entityId}`;if(seen.has(key))return false;seen.add(key);return true}).slice(0,limit)};
+    if(contextId)await refreshWorld(contextId).catch(()=>{});
+    const semantic=contextId?worldStore.search(contextId,q,limit).map((value:any)=>({type:value.kind,entityId:value.entityId,contextId:value.contextId,label:value.label,detail:value.detail,source:`semantic graph · ${value.namespace}`,rank:value.rank})):[];
+    const values=[...databaseItems,...projectItems,...indexed,...semantic,...(contextId?evidence.search(contextId,q,limit):[])],seen=new Set<string>();return {items:values.filter((value:any)=>{const key=`${value.type}:${value.entityId}`;if(seen.has(key))return false;seen.add(key);return true}).slice(0,limit)};
   });
+  app.get('/api/atlas/devices/:contextId/overview',async(request,reply)=>{const contextId=decodeURIComponent((request.params as {contextId:string}).contextId),query=request.query as {lens?:string;level?:string;budget?:string;cursor?:string};try{await refreshWorld(contextId);return world.projection(contextId,{lens:query.lens??'overview',level:Number(query.level)||0,budget:Math.min(500,Math.max(1,Number(query.budget)||100)),cursor:query.cursor})}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.get('/api/atlas/entities/:id',async(request,reply)=>{const id=decodeURIComponent((request.params as {id:string}).id),contextId=String((request.query as {contextId?:string}).contextId??'');if(contextId)await refreshWorld(contextId).catch(()=>{});const value=worldStore.entity(id);return value??reply.code(404).send({error:'entity_not_found'})});
+  app.get('/api/atlas/entities/:id/neighborhood',async(request,reply)=>{const id=decodeURIComponent((request.params as {id:string}).id),query=request.query as {contextId?:string;lens?:string;level?:string;budget?:string;cursor?:string},contextId=String(query.contextId??'');if(!contextId)return reply.code(400).send({error:'context_required'});await refreshWorld(contextId).catch(()=>{});if(!worldStore.entity(id))return reply.code(404).send({error:'entity_not_found'});return world.projection(contextId,{rootId:id,lens:query.lens??'overview',level:Number(query.level)||1,budget:Math.min(500,Math.max(1,Number(query.budget)||100)),cursor:query.cursor})});
+  app.get('/api/atlas/entities/:id/evidence',async(request,reply)=>{const id=decodeURIComponent((request.params as {id:string}).id),value=worldStore.entity(id);return value?{entity:value.entity,assertions:value.assertions}:reply.code(404).send({error:'entity_not_found'})});
+  app.get('/api/atlas/entities/:id/timeline',async(request,reply)=>{const id=decodeURIComponent((request.params as {id:string}).id),contextId=String((request.query as {contextId?:string}).contextId??'');if(!contextId)return reply.code(400).send({error:'context_required'});return{items:worldStore.timeline(contextId,id)}});
+  app.get('/api/atlas/interpreters',async()=>({protocolVersion:'atlas.interpreter.v1',items:worldStore.interpreters()}));
+  app.post('/api/atlas/interpreters/recompute',async(request,reply)=>{if(process.env.NODE_ENV==='production')return reply.code(403).send({error:'development_only'});const contextId=String((request.body as {contextId?:string})?.contextId??'local');await refreshWorld(contextId);return{contextId,interpreters:worldStore.interpreters()}});
+  app.get('/api/atlas/device-adapters',async()=>({protocolVersion:'atlas.device-adapter.v1',items:deviceAdapters.map(value=>({id:value.manifest.id,version:value.manifest.version,publisher:value.manifest.publisher,displayName:value.manifest.displayName,description:value.manifest.description,trusted:value.trusted,source:value.source,status:value.error?'error':'ready',error:value.error}))}));
+  app.post('/api/atlas/device-adapters/:id/run',async(request,reply)=>{const id=decodeURIComponent((request.params as {id:string}).id),body=request.body as {contextId?:string;confirm?:boolean},adapter=deviceAdapters.find(value=>value.manifest.id===id);if(!adapter)return reply.code(404).send({error:'adapter_not_found'});if(adapter.error)return reply.code(409).send({error:'adapter_invalid',message:adapter.error});if(body.confirm!==true)return reply.code(409).send({error:'confirmation_required'});const contextId=String(body.contextId??'local');try{const result=await runDeviceAdapter(adapter.manifest,await contexts.commandExecutor(contextId),contextId);world.ingest(adapter.manifest.interpreter,result.inputs,result.output);worldRefreshState.delete(contextId);return{adapterId:id,contextId,route:'terminal-preferred-command',observations:result.inputs.length,entities:result.output.entities.length,assertions:result.output.assertions.length}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.get('/api/intelligence/capabilities',async()=>intelligence.capabilities());
+  app.get('/api/intelligence/context',async(request)=>{const query=request.query as {contextId?:string;selectionId?:string},contextId=String(query.contextId??'local');await refreshWorld(contextId);return intelligence.context(contextId,query.selectionId)});
+  app.post('/api/intelligence/analyze',async(request,reply)=>{const body=request.body as {question?:string;contextId?:string;selectionId?:string},contextId=String(body.contextId??'local');try{await refreshWorld(contextId);return await intelligence.analyze(String(body.question??''),contextId,body.selectionId,requestSignal(request))}catch(error){const value=error as {code?:string;message?:string};return reply.code(value.code==='calculator_unavailable'?503:400).send({error:value.code??'analysis_failed',message:value.message})}});
   app.get('/api/discovery/entities', async (request) => { const contextId = String((request.query as { contextId?: string }).contextId ?? 'local'); return { entities: evidence.entities(contextId), relationships: evidence.relationships(contextId) }; });
   app.get('/api/discovery/scan', { websocket: true }, (socket, request) => {
     const query=request.query as {contextId?:string;root?:string;maxEntries?:string;maxDepth?:string},contextId=String(query.contextId??'local'),root=String(query.root??'/');

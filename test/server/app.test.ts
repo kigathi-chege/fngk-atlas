@@ -46,6 +46,8 @@ describe('Atlas FNGK-native server', () => {
     expect((await app.inject({method:'POST',url:'/api/fngk/sessions/session-1/actions',payload:{action:'rename',title:'Build shell',profile:'work'}})).json()).toMatchObject({protocolVersion:'fngk.session.v1',action:'rename'});
     const world = await app.inject({ method: 'GET', url: '/api/graph?lens=world&contextId=local' });
     expect(world.statusCode).toBe(200);expect(world.json().nodes).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'profile' }),expect.objectContaining({ type: 'device', label: 'kigathi' })]));
+    const atlas=await app.inject({method:'GET',url:'/api/atlas/devices/local/overview?lens=overview&budget=100'});expect(atlas.statusCode).toBe(200);expect(atlas.json()).toMatchObject({protocolVersion:'atlas.world.v1',contextId:'local',nodes:expect.arrayContaining([expect.objectContaining({kind:'device'})])});
+    expect((await app.inject({method:'GET',url:'/api/atlas/interpreters'})).json().items).toEqual(expect.arrayContaining([expect.objectContaining({id:'atlas.compatibility',trusted:true}),expect.objectContaining({id:'atlas.workloads',trusted:true})]));
     expect((await app.inject({ method: 'POST', url: '/api/fngk/connect', payload: { session: 'never-accept-this' } })).statusCode).toBe(404);
   });
 
@@ -92,6 +94,14 @@ describe('Atlas FNGK-native server', () => {
       expect.objectContaining({ type: 'output', line: 'installed' }),
       expect.objectContaining({ type: 'complete', context: expect.objectContaining({ compatible: true }) }),
     ]);
+  });
+
+  it('runs an explicitly confirmed Device adapter and publishes its semantic evidence',async()=>{
+    const directory=await mkdtemp(path.join(tmpdir(),'fngk-atlas-adapter-')),manifest:any={protocolVersion:'atlas.device-adapter.v1',id:'test.adapter',version:'1.0.0',publisher:'test',displayName:'Test adapter',command:"printf '%s\\n' '{\"kind\":\"database\",\"label\":\"PostgreSQL test\",\"sourceId\":\"db\"}'",interpreter:{protocolVersion:'atlas.interpreter.v1',ontologyVersion:'atlas.world.v1',id:'test.adapter.semantic',version:'1.0.0',publisher:'test',displayName:'Test adapter semantics',inputs:['database'],outputKinds:['workload','capability'],outputPredicates:['provides-capability'],rules:[{id:'db',when:{all:[{field:'kind',op:'eq',value:'database'}]},emit:{kind:'workload',capability:'relational-storage',explanation:'The confirmed test adapter observed a database.'}}]}};
+    const app=await createApp({fngk:new FngkProcessClient({binary:fixture}),dbPath:path.join(directory,'atlas.db'),deviceAdapters:[{manifest,trusted:false,source:'development'}]});cleanups.push(async()=>{await app.close();await rm(directory,{recursive:true,force:true})});
+    expect((await app.inject({method:'POST',url:'/api/atlas/device-adapters/test.adapter/run',payload:{contextId:'local'}})).statusCode).toBe(409);
+    const ran=await app.inject({method:'POST',url:'/api/atlas/device-adapters/test.adapter/run',payload:{contextId:'local',confirm:true}});expect(ran.statusCode).toBe(200);expect(ran.json()).toMatchObject({route:'terminal-preferred-command',observations:1,entities:2,assertions:1});
+    const searched=(await app.inject({method:'GET',url:'/api/search?contextId=local&q=PostgreSQL'})).json();expect(searched.items).toContainEqual(expect.objectContaining({type:'workload',label:'PostgreSQL test'}));
   });
 
   it('proxies an isolated database sidecar without returning credentials',async()=>{

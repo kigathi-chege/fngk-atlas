@@ -15,6 +15,9 @@
     "test:legacy": "node --test test/*.test.js",
     "test:e2e": "playwright test",
     "test:live": "bash scripts/live-acceptance.sh",
+    "interpreter:validate": "tsx scripts/atlas-interpreter.ts validate",
+    "interpreter:test": "tsx scripts/atlas-interpreter.ts test",
+    "interpreter:explain": "tsx scripts/atlas-interpreter.ts explain",
     "check:web": "svelte-check --tsconfig ./tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -71,7 +71,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .atlas-dock .dv-sash{background:transparent!important;border-color:transparent!important}
 .atlas-dock{--dv-tab-divider-color:transparent;--dv-paneview-header-border-color:transparent;--dv-separator-border:transparent}
 .atlas-dock .atlas-tab{padding:0 8px!important;border-radius:6px!important}
-.workspace-placeholder{width:100%;height:100%;background:var(--atlas-surface-1)}
+.workspace-placeholder,.operations-placeholder{width:100%;height:100%;background:var(--atlas-surface-1)}
 
 /* Final viewport contract: the application owns the viewport and panels own scrolling. */
 .atlas-shell{height:100dvh!important;min-height:0;overflow:hidden}
