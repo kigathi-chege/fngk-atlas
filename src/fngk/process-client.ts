@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { FILES_PROTOCOL, NAMESPACE_PROTOCOL, SESSION_PROTOCOL, TERMINAL_PROTOCOL, type NativeFileBindings, type NamespaceSnapshot } from './protocol.js';
+import { FILES_PROTOCOL, NAMESPACE_PROTOCOL, PROCESS_PROTOCOL, SESSION_PROTOCOL, TERMINAL_PROTOCOL, type ManagedProcess, type ManagedProcessLogs, type NativeFileBindings, type NamespaceSnapshot } from './protocol.js';
 import { parseNamespace } from './namespace.js';
 import { TerminalSession } from './terminal-session.js';
 import { redact } from './redaction.js';
@@ -92,6 +92,11 @@ export class FngkProcessClient {
     const args=['sessions',sessionId,action,'--json'];if(options.profile)args.push('--profile',options.profile);if(options.title)args.push('--title',options.title);if(options.confirm)args.push('--yes');
     const value=JSON.parse((await this.#run(args,options.signal)).trim());if(value.protocolVersion!==SESSION_PROTOCOL)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported terminal session protocol.');return value;
   }
+
+  async managedProcesses(deviceId:string,profile?:string,signal?:AbortSignal):Promise<ManagedProcess[]> { const args=['processes',deviceId,'list','--json']; if(profile)args.push('--profile',profile); const value=JSON.parse((await this.#run(args,signal)).trim()); if(value.protocolVersion!==PROCESS_PROTOCOL||!Array.isArray(value.result))throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported process protocol.'); return value.result; }
+  async createManagedProcess(deviceId:string,definition:Record<string,unknown>,options:{profile?:string;signal?:AbortSignal}={}):Promise<ManagedProcess> { const args=['processes',deviceId,'create','--json']; if(options.profile)args.push('--profile',options.profile); const value=JSON.parse((await this.#run(args,options.signal,JSON.stringify(definition))).trim()); if(value.protocolVersion!==PROCESS_PROTOCOL||!value.result?.id)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported process protocol.'); return value.result; }
+  async managedProcessAction(processId:string,action:'start'|'stop'|'restart',options:{profile?:string;signal?:AbortSignal}={}):Promise<unknown> { const args=['processes',processId,action,'--json']; if(options.profile)args.push('--profile',options.profile); const value=JSON.parse((await this.#run(args,options.signal)).trim()); if(value.protocolVersion!==PROCESS_PROTOCOL)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported process protocol.'); return value.result; }
+  async managedProcessLogs(processId:string,options:{profile?:string;runId?:string;signal?:AbortSignal}={}):Promise<ManagedProcessLogs> { const args=['processes',processId,'logs','--json']; if(options.runId)args.push('--run-id',options.runId); if(options.profile)args.push('--profile',options.profile); const value=JSON.parse((await this.#run(args,options.signal)).trim()); if(value.protocolVersion!==PROCESS_PROTOCOL||!value.result)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported process protocol.'); return value.result; }
 
   async namespace(profile?: string, signal?: AbortSignal): Promise<NamespaceSnapshot> {
     const args = ['status', '--json'];
