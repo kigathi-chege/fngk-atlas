@@ -19,7 +19,24 @@ class ManagementTerminal extends TerminalDouble {
   }
 }
 
+class LongRunningTerminal extends TerminalDouble {
+  sendCommand(command:string,requestId?:string){
+    this.commands.push({command,requestId});
+    queueMicrotask(()=>this.emit('event',{type:'output',bodyBase64:Buffer.from('Serving HTTP on 0.0.0.0 port 8080\n').toString('base64')}));
+    return true;
+  }
+}
+
 describe('live project lifecycle',()=>{
+  it('accepts a persistent server after output without waiting for command completion',async()=>{
+    const terminal=new LongRunningTerminal(),management=new ManagementTerminal('management-1');let opened=0;
+    const fngk:any={probe:async()=>({compatible:true,profile:'local'}),openTerminal:()=>{opened++;return opened===2?terminal:management}};
+    const service=new LiveProjectService(fngk,{startupMs:1000,ttlMs:60000});
+    const session=await service.start({contextId:'device:one',repositoryPath:'/home/user/Projects/signal/test-html',command:'python3 -m http.server 8080',port:8080});
+    expect(session.status).toBe('running');expect(session.output).toContain('Serving HTTP');
+    await service.stop(session.id);await service.close();
+  });
+
   it('runs visibly in a Device terminal and publishes and releases through FNGK',async()=>{
     const terminal=new TerminalDouble(),restartedTerminal=new TerminalDouble('terminal-2'),management:Array<ManagementTerminal>=[];let opened=0;
     const fngk:any={probe:async()=>({compatible:true,profile:'local'}),openTerminal:()=>{opened++;if(opened===2)return terminal;if(opened===5)return restartedTerminal;const session=new ManagementTerminal(`management-${management.length+1}`);management.push(session);return session}};
