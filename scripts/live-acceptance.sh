@@ -52,7 +52,7 @@ chmod 700 "$run_root/bin/fngk"
 
 signal_database="postgres://postgres:signal-live-test@$service_host:$live_postgres_port/signal"
 signal_origin="http://127.0.0.1:$signal_port"
-signal_env=(env NODE_ENV=test DATABASE_URL="$signal_database" REDIS_URL="redis://$service_host:$live_redis_port" CONNECTION_BROKER=redis SESSION_SECRET=live-acceptance-session-secret-long-enough SURFACE_DATA_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= TERMINAL_RECORDING_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= PLATFORM_DOMAIN=127.0.0.1 TUNNEL_BASE_DOMAIN=tunnel.test APP_ORIGIN="$signal_origin" AGENT_ORIGIN="$signal_origin" PORT="$signal_port" TERMINAL_ENABLED=true PERSISTENT_AGENT_ENABLED=true OPERATOR_TCP_ENABLED=true OPERATOR_TERMINAL_ENABLED=true NESTED_NAVIGATION_ENABLED=true PUBLIC_CONNECTION_WEBSOCKETS_ENABLED=true MANAGED_PROCESSES_ENABLED=true)
+signal_env=(env NODE_ENV=test DATABASE_URL="$signal_database" REDIS_URL="redis://$service_host:$live_redis_port" CONNECTION_BROKER=redis SESSION_SECRET=live-acceptance-session-secret-long-enough SURFACE_DATA_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= TERMINAL_RECORDING_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= PLATFORM_DOMAIN=127.0.0.1 TUNNEL_BASE_DOMAIN=lvh.me APP_ORIGIN="$signal_origin" AGENT_ORIGIN="$signal_origin" PORT="$signal_port" TERMINAL_ENABLED=true PERSISTENT_AGENT_ENABLED=true OPERATOR_TCP_ENABLED=true OPERATOR_TERMINAL_ENABLED=true NESTED_NAVIGATION_ENABLED=true PUBLIC_CONNECTION_WEBSOCKETS_ENABLED=true MANAGED_PROCESSES_ENABLED=true)
 echo "[live] building, migrating, and starting Signal"
 (cd "$signal_root" && env NODE_ENV=development SESSION_SECRET=build-only-session-secret-long-enough SURFACE_DATA_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= TERMINAL_RECORDING_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= npm run build >"$run_root/signal-build.log" 2>&1 && "${signal_env[@]}" npm run migrate >"$run_root/migrate.log" 2>&1)
 (cd "$signal_root" && "${signal_env[@]}" node dist/server.js >"$run_root/signal.log" 2>&1) & signal_pid=$!
@@ -72,20 +72,18 @@ curl -fsS -b "$cookie_jar" -X POST "$signal_origin/api/operator/authorize/$user_
 wait "$login_pid"
 
 echo "[live] starting paired root Device daemon"
-SIGNAL_CONFIG_PATH="$config_path" "$run_root/bin/fngk" daemon --profile live --scope user >"$run_root/daemon.log" 2>&1 & daemon_pid=$!
+PATH="$run_root/bin:$PATH" SIGNAL_CONFIG_PATH="$config_path" "$run_root/bin/fngk" daemon --profile live --scope user >"$run_root/daemon.log" 2>&1 & daemon_pid=$!
 namespace_json=''; for _ in $(seq 1 120); do namespace_json="$(SIGNAL_CONFIG_PATH="$config_path" "$run_root/bin/fngk" status --json --profile live 2>/dev/null || true)"; jq -e '.devices[]?|select(.online==true)' <<<"$namespace_json" >/dev/null 2>&1 && break; sleep .5; done
 device_id="$(jq -er '.devices[]|select(.online==true)|.id' <<<"$namespace_json" | head -1)"
 
 cp -R "$atlas_root/test/integration/fixture-repo/." "$run_root/fixture/"
 git -C "$run_root/fixture" init -q; git -C "$run_root/fixture" -c user.name='Atlas Live' -c user.email='atlas-live@example.test' add .; git -C "$run_root/fixture" -c user.name='Atlas Live' -c user.email='atlas-live@example.test' commit -qm fixture
-node "$run_root/fixture/src/server.js" >"$run_root/fixture.log" 2>&1 & fixture_pid=$!
-
 echo "[live] building and starting Atlas"
 (cd "$atlas_root" && npm run build >"$run_root/atlas-build.log" 2>&1)
-FNGK_BIN="$run_root/bin/fngk" SIGNAL_CONFIG_PATH="$config_path" ATLAS_DB="$run_root/atlas.db" ATLAS_HOST=127.0.0.1 ATLAS_PORT="$atlas_port" node "$atlas_root/dist/server/index.js" >"$run_root/atlas.log" 2>&1 & atlas_pid=$!
+FNGK_BIN="$run_root/bin/fngk" SIGNAL_CONFIG_PATH="$config_path" DBGATE_RUNTIME=container ATLAS_DB="$run_root/atlas.db" ATLAS_HOST=127.0.0.1 ATLAS_PORT="$atlas_port" node "$atlas_root/dist/server/index.js" >"$run_root/atlas.log" 2>&1 & atlas_pid=$!
 wait_http "http://127.0.0.1:$atlas_port/api/health"
 
-LIVE_ATLAS_URL="http://127.0.0.1:$atlas_port" LIVE_FIXTURE_ROOT="$run_root/fixture" node --import tsx "$atlas_root/test/integration/live-acceptance.ts" >"$evidence_dir/acceptance.json"
+LIVE_ATLAS_URL="http://127.0.0.1:$atlas_port" LIVE_FIXTURE_ROOT="$run_root/fixture" LIVE_DATABASE_HOST="$service_host" LIVE_DATABASE_PORT="$live_postgres_port" node --import tsx "$atlas_root/test/integration/live-acceptance.ts" >"$evidence_dir/acceptance.json"
 SIGNAL_CONFIG_PATH="$config_path" "$run_root/bin/fngk" version >"$evidence_dir/fngk-version.txt"
 git -c "safe.directory=$signal_root" -C "$signal_root" rev-parse HEAD >"$evidence_dir/signal-head.txt"
 git -c "safe.directory=$atlas_root" -C "$atlas_root" rev-parse HEAD >"$evidence_dir/atlas-head.txt"

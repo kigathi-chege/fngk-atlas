@@ -10,10 +10,14 @@ export class RuntimeDiscovery {
   async scan(contextId: string, routeId: string, signal?: AbortSignal): Promise<DiscoveredEntity[]> {
     const entities: DiscoveredEntity[] = [], metadata = (value: Record<string, unknown>) => ({ ...value, routeId });
     const attempt = async (command: string) => { if (signal?.aborted) throw Object.assign(new Error('Discovery cancelled.'), { code: 'cancelled' }); try { const result = await this.executor.execute(command, { timeoutMs: 10_000, signal }); return result.exitCode === 0 ? result.output.toString('utf8') : ''; } catch (error) { if (signal?.aborted) throw error; return ''; } };
+    const workingDirectories=new Map<number,string>();
+    for(const line of (await attempt(`for p in /proc/[0-9]*/cwd; do value=$(readlink "$p" 2>/dev/null) || continue; pid="\${p#/proc/}"; pid="\${pid%/cwd}"; printf '%s ' "$pid"; printf '%s' "$value" | base64 | tr -d '\\n'; printf '\\n'; done`)).split(/\r?\n/)){
+      const match=line.match(/^(\d+)\s+([A-Za-z0-9+/=]+)$/);if(!match)continue;try{workingDirectories.set(Number(match[1]),Buffer.from(match[2],'base64').toString('utf8'))}catch{}
+    }
     for (const line of (await attempt(`ps -eo pid=,ppid=,user=,comm=,args=`)).split(/\r?\n/)) {
       const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s*(.*)$/); if (!match) continue;
       const [, pid, ppid, user, executable, command] = match;
-      entities.push({ id: id(contextId, 'process', pid), contextId, type: 'process', name: executable, path: '', metadata: metadata({ pid: Number(pid), ppid: Number(ppid), user, executable, command: redactCommandLine(command) }) });
+      entities.push({ id: id(contextId, 'process', pid), contextId, type: 'process', name: executable, path: '', metadata: metadata({ pid: Number(pid), ppid: Number(ppid), user, executable, command: redactCommandLine(command),cwd:workingDirectories.get(Number(pid)) }) });
     }
     for (const line of (await attempt(`systemctl list-units --type=service --all --no-legend --no-pager`)).split(/\r?\n/)) {
       const fields = line.trim().split(/\s+/); if (!fields[0]?.endsWith('.service')) continue;

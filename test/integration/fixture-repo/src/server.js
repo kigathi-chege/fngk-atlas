@@ -6,4 +6,4 @@ export function classify(value) {
   return 'empty';
 }
 
-createServer((_request, response) => response.end(classify(12))).listen(0);
+createServer((_request, response) => response.end(classify(12))).listen(Number(process.env.PORT ?? 0), '0.0.0.0');

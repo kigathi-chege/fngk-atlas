@@ -15,7 +15,8 @@ export function correlateRuntime(index: { nodes: any[] }, runtime: any[]): Runti
       if (cwd === root || cwd.startsWith(`${root}/`)) edges.push(edge(process.id, repository.id, 'runtime_in', 'high', { kind: 'cwd', value: cwd }));
       for (const module of modules.filter(value => belongsTo(value, repository.id))) {
         const absolute = `${root}/${slash(String(module.path ?? ''))}`;
-        if (command.includes(absolute)) edges.push(edge(process.id, module.id, 'loads', 'high', { kind: 'command_path', value: absolute }));
+        const relative=slash(String(module.path??'')),resolvedFromCwd=cwd&&relative?`${cwd}/${relative}`:'';
+        if (command.includes(absolute)||(resolvedFromCwd===absolute&&command.includes(relative))) edges.push(edge(process.id, module.id, 'loads', 'high', { kind: 'command_path', value: absolute }));
       }
     }
   }

@@ -4,7 +4,8 @@ import WebSocket from 'ws';
 
 const atlas = process.env.LIVE_ATLAS_URL;
 const fixtureRoot = process.env.LIVE_FIXTURE_ROOT;
-if (!atlas || !fixtureRoot) throw new Error('LIVE_ATLAS_URL and LIVE_FIXTURE_ROOT are required');
+const databaseHost=process.env.LIVE_DATABASE_HOST,databasePort=Number(process.env.LIVE_DATABASE_PORT);
+if (!atlas || !fixtureRoot || !databaseHost || !databasePort) throw new Error('LIVE_ATLAS_URL, LIVE_FIXTURE_ROOT, LIVE_DATABASE_HOST, and LIVE_DATABASE_PORT are required');
 const evidence: Record<string, unknown> = {};
 const check = (condition: unknown, message: string): asserts condition => { if (!condition) throw new Error(message); };
 async function api(path: string, init?: RequestInit) {
@@ -22,6 +23,7 @@ async function waitFor(messages: any[], predicate: (message: any) => boolean, ti
   while (Date.now() < deadline) { const found = messages.find(predicate); if (found) return found; await new Promise(resolve => setTimeout(resolve, 25)); }
   throw new Error('timed out waiting for live protocol event');
 }
+async function waitForHttpText(url:string,wanted:string,timeoutMs=15_000){const deadline=Date.now()+timeoutMs;let last='';while(Date.now()<deadline){try{const response=await fetch(url);last=await response.text();if(response.ok&&last===wanted)return response}catch(error){last=(error as Error).message}await new Promise(resolve=>setTimeout(resolve,100))}throw new Error(`timed out waiting for ${url}: ${last.slice(0,500)}`)}
 
 const context = await api('/api/fngk/context?profile=live');
 check(context.response.ok && context.body.compatible, 'Atlas did not discover a compatible exact-head FNGK');
@@ -54,18 +56,34 @@ const savedText = `${current.body.text}\n// saved by Atlas live acceptance\n`;
 const saved = await api('/api/files/content', { method: 'PUT', body: JSON.stringify({ contextId, path: `${fixtureRoot}/src/server.js`, expectedFingerprint: current.body.fingerprint, contentBase64: Buffer.from(savedText).toString('base64') }) });
 check(saved.response.ok, 'conflict-safe remote save failed');
 
+let live=await api('/api/live-projects',{method:'POST',body:JSON.stringify({contextId,repositoryPath:fixtureRoot,command:'env PORT=8000 node src/server.js',port:8000,confirm:true})});
+check(live.response.status===201&&live.body.session?.status==='running'&&live.body.session?.url,`live project did not start and publish: ${JSON.stringify(live.body)}`);
+const liveResponse=await waitForHttpText(live.body.session.url,'large');
+const browser=await api(`/api/live-projects/${encodeURIComponent(live.body.session.id)}/diagnostics`,{method:'POST',body:'{}'});check(browser.response.ok&&browser.body.ok&&browser.body.consoleErrors.length===0,`Playwright diagnostics did not verify the public project: ${JSON.stringify(browser.body)}`);
+const interruptedProject=await api(`/api/live-projects/${encodeURIComponent(live.body.session.id)}/actions`,{method:'POST',body:JSON.stringify({action:'interrupt',confirm:true})});check(interruptedProject.body.interrupted,'live project interrupt was not delivered');
+const restartedProject=await api(`/api/live-projects/${encodeURIComponent(live.body.session.id)}/actions`,{method:'POST',body:JSON.stringify({action:'restart',confirm:true})});check(restartedProject.response.ok&&restartedProject.body.session?.id!==live.body.session.id,'live project did not restart in a fresh terminal');live={response:restartedProject.response,body:{session:restartedProject.body.session},text:restartedProject.text};
+await waitForHttpText(live.body.session.url,'large');
+
+const database=await api('/api/databases/sessions',{method:'POST',body:JSON.stringify({contextId:'local',engine:'postgres',host:databaseHost,port:databasePort,database:'signal',user:'postgres',password:'signal-live-test',readOnly:true})});
+check(database.response.status===201&&database.body.session?.status==='live','isolated DbGate session did not start');
+const cookie=database.response.headers.get('set-cookie')?.split(';')[0];check(cookie,'database session did not issue a scoped proxy cookie');
+const databasePage=await fetch(`${atlas}${database.body.session.proxyPath}`,{headers:{cookie}});check(databasePage.ok,'authenticated DbGate proxy was not reachable');
+
 const discovery = await websocket(`/api/discovery/scan?contextId=${encodedContext}&root=${encodedRoot}&maxEntries=200&maxDepth=5`);
 check(discovery.some(message => message.complete === true), 'bounded remote discovery did not complete');
 check(discovery.flatMap(message => message.entities ?? []).some((entity: any) => entity.type === 'process'), 'terminal discovery did not report runtime processes');
 const analysis = await websocket(`/api/analysis/repository?contextId=${encodedContext}&path=${encodedRoot}`);
 check(analysis.some(message => message.type === 'analysis_complete' && message.index?.summary?.functions >= 1), 'remote repository analysis did not complete');
 const execution = await api(`/api/graph?contextId=${encodedContext}&lens=execution&layers=loads,runtime_in,served_by,contains&budget=500`);
-check(execution.body.edges.some((edge: any) => edge.type === 'loads' && edge.evidence?.kind === 'command_path'), 'process-to-code evidence link is missing');
+if(!execution.body.edges.some((edge: any) => edge.type === 'loads' && edge.evidence?.kind === 'command_path')){
+  const runtime=await api(`/api/discovery/entities?contextId=${encodedContext}`);
+  throw new Error(`process-to-code evidence link is missing: ${JSON.stringify({processes:runtime.body.entities?.filter((item:any)=>item.type==='process'&&String(item.metadata?.command).includes('server.js')),modules:execution.body.nodes?.filter((item:any)=>item.type==='module'),edges:execution.body.edges?.filter((item:any)=>['loads','runtime_in'].includes(item.type))})}`);
+}
 
 const coverage = await api('/api/coverage/refresh', { method: 'POST', body: JSON.stringify({ contextId, repositoryPath: fixtureRoot, command: 'npm run coverage' }) });
-check(coverage.response.ok && coverage.body.coverage?.verified, 'coverage run was not verified');
-const code = await api(`/api/graph?contextId=${encodedContext}&lens=code&budget=500`);
-check(code.body.nodes.some((node: any) => node.type === 'function' && typeof node.crap === 'number' && node.coverage?.stale === false), 'verified coverage did not produce CRAP');
+check(coverage.response.ok && coverage.body.coverage?.verified&&coverage.body.coverage?.artifact,`coverage run was not verified: ${JSON.stringify(coverage.body)}`);
+const code = await api(`/api/graph?contextId=${encodedContext}&type=function&limit=500`);
+check(code.body.nodes.some((node: any) => node.type === 'function' && typeof node.crap === 'number' && node.coverage?.stale === false),`verified coverage did not produce CRAP: ${JSON.stringify({coverage:coverage.body.coverage,functions:code.body.nodes.filter((node:any)=>node.type==='function')})}`);
 
 const terminalMessages: any[] = [];
 const terminal = new WebSocket(`${atlas.replace(/^http/, 'ws')}/api/fngk/terminals?target=${encodeURIComponent(`device:${device.id}`)}&new=1`);
@@ -89,7 +107,9 @@ const activeAfter = await api('/api/contexts/terminals'); const nextSession = ac
 check(nextSession && nextSession !== priorSession, 'reconnect did not establish a fresh terminal session');
 await websocket(`/api/discovery/scan?contextId=${encodedContext}&root=${encodedRoot}&maxEntries=200&maxDepth=5`);
 const fresh = await api(`/api/discovery/entities?contextId=${encodedContext}`); check(fresh.body.entities.every((entity: any) => entity.stale === false), 'successful rescan did not refresh stale evidence');
+const stoppedLive=await api(`/api/live-projects/${encodeURIComponent(live.body.session.id)}`,{method:'DELETE',body:JSON.stringify({confirm:true})});check(stoppedLive.body.stopped,'live project did not stop');
+const stoppedDatabase=await api(`/api/databases/sessions/${encodeURIComponent(database.body.session.id)}`,{method:'DELETE',body:JSON.stringify({confirm:true})});check(stoppedDatabase.body.stopped,'database session did not stop');
 const leftovers = (await readdir(fixtureRoot)).filter(name => name.includes('.atlas-') || name.endsWith('.b64'));
 check(leftovers.length === 0, `helper artifacts remained: ${leftovers.join(', ')}`);
-evidence.acceptance = { rootRoute: root.body.route, conflict: conflict.body.error, processCodeEdges: execution.body.edges.filter((edge: any) => edge.type === 'loads').length, coverage: coverage.body.coverage, terminalEvents: terminalMessages.map(message => message.type), reconnect: { priorSession, nextSession }, helperArtifacts: leftovers };
+evidence.acceptance = { rootRoute: root.body.route, conflict: conflict.body.error, processCodeEdges: execution.body.edges.filter((edge: any) => edge.type === 'loads').length, coverage: coverage.body.coverage, terminalEvents: terminalMessages.map(message => message.type), liveProject:{url:live.body.session.url,browser:{status:browser.body.status,title:browser.body.title,consoleErrors:browser.body.consoleErrors.length}},database:{engine:database.body.session.engine,status:'stopped'},reconnect: { priorSession, nextSession }, helperArtifacts: leftovers };
 process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
