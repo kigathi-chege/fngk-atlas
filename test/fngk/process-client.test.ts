@@ -62,4 +62,9 @@ describe('FngkProcessClient', () => {
     const value=await new FngkProcessClient({binary:fixture}).sessionAction('session-1','rename',{profile:'work',title:'Build shell'});
     expect(value).toMatchObject({protocolVersion:'fngk.session.v1',action:'rename',result:{id:'session-1',title:'Build shell'}});
   });
+
+  it('continues managed process logs from the last consumed sequence',async()=>{
+    const value:any=await new FngkProcessClient({binary:fixture}).managedProcessLogs('process-1',{profile:'work',after:7,limit:50});
+    expect(value.argv).toEqual(['processes','process-1','logs','--json','--after','7','--limit','50','--profile','work']);
+  });
 });

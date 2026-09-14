@@ -28,6 +28,30 @@ class LongRunningTerminal extends TerminalDouble {
 }
 
 describe('live project lifecycle',()=>{
+  it('runs persistent workloads as managed processes and retains their run logs',async()=>{
+    const management:ManagementTerminal[]=[];
+    const fngk:any={
+      probe:async()=>({compatible:true,profile:'local'}),
+      openTerminal:()=>{const terminal=new ManagementTerminal(`management-${management.length+1}`);management.push(terminal);return terminal},
+      createManagedProcess:vi.fn(async()=>({id:'process-1',name:'Atlas live project'})),
+      managedProcessAction:vi.fn(async(_id:string,action:string)=>action==='start'?{id:'run-1',status:'running',pid:4318}:{stopped:true}),
+      managedProcessLogs:vi.fn(async()=>({run:{id:'run-1',status:'running',pid:4318},items:[{sequence:0,stream:'stdout',body_base64:Buffer.from('Serving HTTP on port 8080\n').toString('base64'),occurred_at:new Date().toISOString()}]}))
+    };
+    const service=new LiveProjectService(fngk,{startupMs:1000,ttlMs:60000});
+    const session=await service.start({contextId:'device:one',repositoryPath:'/srv/project',command:'python3 -m http.server 8080',port:8080});
+    expect(session).toMatchObject({status:'running',processId:'process-1',runId:'run-1',pid:4318,output:expect.stringContaining('Serving HTTP')});
+    expect(fngk.createManagedProcess).toHaveBeenCalledWith('one',expect.objectContaining({workingDirectory:'/srv/project',executable:'python3 -m http.server 8080',shell:true}),expect.objectContaining({profile:'local'}));
+    expect(management.every(terminal=>terminal.commands.every(({command})=>!command.includes('python3 -m http.server')))).toBe(true);
+    await service.stop(session.id);await service.close();
+  });
+
+  it('keeps an acknowledged managed process running when log polling is temporarily unavailable',async()=>{
+    const fngk:any={probe:async()=>({compatible:true,profile:'local'}),openTerminal:()=>new ManagementTerminal('management'),createManagedProcess:async()=>({id:'process-1'}),managedProcessAction:async(_id:string,action:string)=>action==='start'?{id:'run-1',status:'running',pid:4318}:{stopped:true},managedProcessLogs:async()=>{throw new Error('temporary log transport failure')}};
+    const service=new LiveProjectService(fngk,{startupMs:1000,ttlMs:60000});
+    await expect(service.start({contextId:'device:one',repositoryPath:'/srv/project',command:'npm start',port:8000})).resolves.toMatchObject({status:'running',processId:'process-1',runId:'run-1'});
+    await service.close();
+  });
+
   it('accepts a persistent server after output without waiting for command completion',async()=>{
     const terminal=new LongRunningTerminal(),management=new ManagementTerminal('management-1');let opened=0;
     const fngk:any={probe:async()=>({compatible:true,profile:'local'}),openTerminal:()=>{opened++;return opened===2?terminal:management}};

@@ -4,7 +4,7 @@ export const FILES_PROTOCOL = 'fngk.files.v1' as const;
 export const SESSION_PROTOCOL = 'fngk.session.v1' as const;
 export const PROCESS_PROTOCOL = 'fngk.process.v1' as const;
 export interface ManagedProcess { id:string; name:string; [key:string]:unknown }
-export interface ManagedProcessLogs { run:any; items:any[] }
+export interface ManagedProcessLogs { run:any; items:any[]; nextCursor?:number; hasMore?:boolean; argv?:string[] }
 
 export interface NativeFileBinding { id:string; name:string; resourceId:string; deviceId:string; deviceName:string; adapterId:string; root:string; readOnly:boolean; capabilities:string[]; provenance:string }
 export interface NativeFileBindings { protocolVersion:typeof FILES_PROTOCOL; profile:{name:string}; bindings:NativeFileBinding[] }
