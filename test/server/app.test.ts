@@ -1,173 +1,837 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { once } from 'node:events';
-import WebSocket from 'ws';
-import { afterEach, describe, expect, it } from 'vitest';
-import { createApp } from '../../src/server/app.js';
-import { FngkProcessClient } from '../../src/fngk/process-client.js';
-import {DiagnosticRegistry} from '../../src/diagnostics/registry.js';
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { once } from "node:events";
+import WebSocket from "ws";
+import { afterEach, describe, expect, it } from "vitest";
+import { createApp } from "../../src/server/app.js";
+import { FngkProcessClient } from "../../src/fngk/process-client.js";
+import { DiagnosticRegistry } from "../../src/diagnostics/registry.js";
 
-const fixture = path.resolve('test/fixtures/fngk.mjs');
+const fixture = path.resolve("test/fixtures/fngk.mjs");
 const cleanups: Array<() => Promise<void>> = [];
-afterEach(async () => { while (cleanups.length) await cleanups.pop()?.(); });
+afterEach(async () => {
+  while (cleanups.length) await cleanups.pop()?.();
+});
 
 async function harness() {
-  const directory = await mkdtemp(path.join(tmpdir(), 'fngk-atlas-server-'));
-  const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture }), dbPath: path.join(directory, 'atlas.db') });
-  cleanups.push(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
+  const directory = await mkdtemp(path.join(tmpdir(), "fngk-atlas-server-"));
+  const app = await createApp({
+    fngk: new FngkProcessClient({ binary: fixture }),
+    dbPath: path.join(directory, "atlas.db"),
+  });
+  cleanups.push(async () => {
+    await app.close();
+    await rm(directory, { recursive: true, force: true });
+  });
   return app;
 }
 
-describe('Atlas FNGK-native server', () => {
-  it('lists redacted diagnostic sessions for operator inspection', async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), 'fngk-atlas-diagnostics-'));
+describe("Atlas FNGK-native server", () => {
+  it("lists redacted diagnostic sessions for operator inspection", async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "fngk-atlas-diagnostics-"),
+    );
     const diagnostics = new DiagnosticRegistry();
-    const created = diagnostics.create({ kind: 'database', contextId: 'device:1', command: 'fngk resources resource-1 invoke --password secret' });
-    cleanups.push(async () => { await rm(directory, { recursive: true, force: true }); });
-    const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture }), dbPath: path.join(directory, 'atlas.db'), diagnosticRegistry: diagnostics });
-    cleanups.push(async () => { await app.close(); });
-    const response = await app.inject({ method: 'GET', url: '/api/diagnostics/sessions' });
+    const created = diagnostics.create({
+      kind: "database",
+      contextId: "device:1",
+      command: "fngk resources resource-1 invoke --password secret",
+    });
+    cleanups.push(async () => {
+      await rm(directory, { recursive: true, force: true });
+    });
+    const app = await createApp({
+      fngk: new FngkProcessClient({ binary: fixture }),
+      dbPath: path.join(directory, "atlas.db"),
+      diagnosticRegistry: diagnostics,
+    });
+    cleanups.push(async () => {
+      await app.close();
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/diagnostics/sessions",
+    });
     expect(response.statusCode).toBe(200);
-    expect(response.json().items).toContainEqual(expect.objectContaining({ id: created.id, kind: 'database', command: expect.not.stringContaining('secret') }));
+    expect(response.json().items).toContainEqual(
+      expect.objectContaining({
+        id: created.id,
+        kind: "database",
+        command: expect.not.stringContaining("secret"),
+      }),
+    );
   });
-  it('exposes process context and namespace without accepting credentials', async () => {
+  it("exposes process context and namespace without accepting credentials", async () => {
     const app = await harness();
-    const context = await app.inject({ method: 'GET', url: '/api/fngk/context?profile=work' });
+    const context = await app.inject({
+      method: "GET",
+      url: "/api/fngk/context?profile=work",
+    });
     expect(context.statusCode).toBe(200);
-    expect(context.json()).toMatchObject({ installed: true, compatible: true, profile: 'work' });
+    expect(context.json()).toMatchObject({
+      installed: true,
+      compatible: true,
+      profile: "work",
+    });
     expect(context.body).not.toMatch(/credential|cookie|operator-secret/);
 
-    const namespace = await app.inject({ method: 'GET', url: '/api/fngk/namespace?profile=work' });
-    expect(namespace.json()).toMatchObject({ protocolVersion: 'fngk.namespace.v1', profile: { name: 'work' } });
-    expect((await app.inject({method:'GET',url:'/api/fngk/sessions?profile=work'})).json()).toMatchObject({profile:{name:'work'},sessions:[]});
-    expect((await app.inject({method:'POST',url:'/api/fngk/sessions/session-1/actions',payload:{action:'stop'}})).statusCode).toBe(409);
-    expect((await app.inject({method:'POST',url:'/api/fngk/sessions/session-1/actions',payload:{action:'rename',title:'Build shell',profile:'work'}})).json()).toMatchObject({protocolVersion:'fngk.session.v1',action:'rename'});
-    const world = await app.inject({ method: 'GET', url: '/api/graph?lens=world&contextId=local' });
-    expect(world.statusCode).toBe(200);expect(world.json().nodes).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'profile' }),expect.objectContaining({ type: 'device', label: 'kigathi' })]));
-    const atlas=await app.inject({method:'GET',url:'/api/atlas/devices/local/overview?lens=overview&budget=100'});expect(atlas.statusCode).toBe(200);expect(atlas.json()).toMatchObject({protocolVersion:'atlas.world.v1',contextId:'local',nodes:expect.arrayContaining([expect.objectContaining({kind:'device'})])});
-    expect((await app.inject({method:'GET',url:'/api/atlas/interpreters'})).json().items).toEqual(expect.arrayContaining([expect.objectContaining({id:'atlas.compatibility',trusted:true}),expect.objectContaining({id:'atlas.workloads',trusted:true})]));
-    expect((await app.inject({ method: 'POST', url: '/api/fngk/connect', payload: { session: 'never-accept-this' } })).statusCode).toBe(404);
+    const namespace = await app.inject({
+      method: "GET",
+      url: "/api/fngk/namespace?profile=work",
+    });
+    expect(namespace.json()).toMatchObject({
+      protocolVersion: "fngk.namespace.v1",
+      profile: { name: "work" },
+    });
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/fngk/sessions?profile=work",
+        })
+      ).json(),
+    ).toMatchObject({ profile: { name: "work" }, sessions: [] });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/fngk/sessions/session-1/actions",
+          payload: { action: "stop" },
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/fngk/sessions/session-1/actions",
+          payload: { action: "rename", title: "Build shell", profile: "work" },
+        })
+      ).json(),
+    ).toMatchObject({ protocolVersion: "fngk.session.v1", action: "rename" });
+    const world = await app.inject({
+      method: "GET",
+      url: "/api/graph?lens=world&contextId=local",
+    });
+    expect(world.statusCode).toBe(200);
+    expect(world.json().nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "profile" }),
+        expect.objectContaining({ type: "device", label: "kigathi" }),
+      ]),
+    );
+    const atlas = await app.inject({
+      method: "GET",
+      url: "/api/atlas/devices/local/overview?lens=overview&budget=100",
+    });
+    expect(atlas.statusCode).toBe(200);
+    expect(atlas.json()).toMatchObject({
+      protocolVersion: "atlas.world.v1",
+      contextId: "local",
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ kind: "device" }),
+      ]),
+    });
+    const semantic = await app.inject({
+      method: "GET",
+      url: "/api/world/projection?contextId=local&lens=overview&budget=100",
+    });
+    expect(semantic.statusCode).toBe(200);
+    expect(semantic.json()).toMatchObject({
+      protocolVersion: "atlas.world.v1",
+      contextId: "local",
+      availableViews: expect.arrayContaining([
+        "overview",
+        "software",
+        "relationships",
+        "evidence",
+      ]),
+      synthesis: {
+        headline: expect.any(String),
+        facts: expect.any(Array),
+        attention: expect.any(Array),
+      },
+    });
+    expect(semantic.body).not.toMatch(/password|credential|cookie/i);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/world/search?contextId=local&q=kigathi",
+        })
+      ).json(),
+    ).toMatchObject({ items: expect.any(Array), errors: [] });
+    expect(
+      (
+        await app.inject({ method: "GET", url: "/api/atlas/interpreters" })
+      ).json().items,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "atlas.compatibility", trusted: true }),
+        expect.objectContaining({ id: "atlas.workloads", trusted: true }),
+      ]),
+    );
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/fngk/connect",
+          payload: { session: "never-accept-this" },
+        })
+      ).statusCode,
+    ).toBe(404);
   });
 
-  it('previews a production deployment without executing Device commands',async()=>{
-    const app=await harness(),response=await app.inject({method:'POST',url:'/api/deployments/plan',payload:{contextId:'device:device-1',repositoryPath:'/srv/web',environment:'production',commitSha:'a'.repeat(40),manifest:{protocolVersion:'fngk.project.v1',name:'web',commands:{install:'npm ci',build:'npm run build',start:'npm start'},port:8080,health:{protocol:'http',path:'/health',timeoutMs:30000},artifacts:[{path:'dist',kind:'web'}],restartPolicy:'on-failure',environments:{},routes:[{name:'web'}]}}});
-    expect(response.statusCode,response.body).toBe(200);expect(response.json()).toMatchObject({version:'atlas.deployment-plan.v1',phases:['verify','extract','install','build','start','health','artifacts','publish']});
+  it("previews a production deployment without executing Device commands", async () => {
+    const app = await harness(),
+      response = await app.inject({
+        method: "POST",
+        url: "/api/deployments/plan",
+        payload: {
+          contextId: "device:device-1",
+          repositoryPath: "/srv/web",
+          environment: "production",
+          commitSha: "a".repeat(40),
+          manifest: {
+            protocolVersion: "fngk.project.v1",
+            name: "web",
+            commands: {
+              install: "npm ci",
+              build: "npm run build",
+              start: "npm start",
+            },
+            port: 8080,
+            health: { protocol: "http", path: "/health", timeoutMs: 30000 },
+            artifacts: [{ path: "dist", kind: "web" }],
+            restartPolicy: "on-failure",
+            environments: {},
+            routes: [{ name: "web" }],
+          },
+        },
+      });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      version: "atlas.deployment-plan.v1",
+      phases: [
+        "verify",
+        "extract",
+        "install",
+        "build",
+        "start",
+        "health",
+        "artifacts",
+        "publish",
+      ],
+    });
   });
 
-  it('relays a terminal as WebSocket JSONL events', async () => {
+  it("relays a terminal as WebSocket JSONL events", async () => {
     const app = await harness();
-    const address = await app.listen({ host: '127.0.0.1', port: 0 });
-    const socket = new WebSocket(address.replace(/^http/, 'ws') + '/api/fngk/terminals?target=kigathi&new=1');
+    const address = await app.listen({ host: "127.0.0.1", port: 0 });
+    const socket = new WebSocket(
+      address.replace(/^http/, "ws") +
+        "/api/fngk/terminals?target=kigathi&new=1",
+    );
     const messages: any[] = [];
-    socket.on('message', raw => messages.push(JSON.parse(raw.toString())));
-    while (!messages.some(message => message.type === 'ready')) await once(socket, 'message');
-    socket.send(JSON.stringify({ type: 'command', requestId: 'test-1', command: 'npm test' }));
-    while (!messages.some(message => message.type === 'command_state')) await once(socket, 'message');
-    expect(messages).toContainEqual(expect.objectContaining({ type: 'command_state', requestId: 'test-1', status: 'succeeded' }));
-    socket.send(JSON.stringify({ type: 'detach', requestId: 'done' }));
-    await once(socket, 'close');
+    socket.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
+    while (!messages.some((message) => message.type === "ready"))
+      await once(socket, "message");
+    socket.send(
+      JSON.stringify({
+        type: "command",
+        requestId: "test-1",
+        command: "npm test",
+      }),
+    );
+    while (!messages.some((message) => message.type === "command_state"))
+      await once(socket, "message");
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "command_state",
+        requestId: "test-1",
+        status: "succeeded",
+      }),
+    );
+    socket.send(JSON.stringify({ type: "detach", requestId: "done" }));
+    await once(socket, "close");
   });
 
-  it('scopes terminal sessions to one Device and reports lifecycle counts', async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), 'fngk-atlas-sessions-'));
-    const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture, env: { FNGK_FIXTURE_MODE: 'session-list' } }), dbPath: path.join(directory, 'atlas.db') });
-    cleanups.push(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
+  it("scopes terminal sessions to one Device and reports lifecycle counts", async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "fngk-atlas-sessions-"),
+    );
+    const app = await createApp({
+      fngk: new FngkProcessClient({
+        binary: fixture,
+        env: { FNGK_FIXTURE_MODE: "session-list" },
+      }),
+      dbPath: path.join(directory, "atlas.db"),
+    });
+    cleanups.push(async () => {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    });
 
-    const response = await app.inject({ method: 'GET', url: '/api/fngk/sessions?deviceId=device-1' });
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/fngk/sessions?deviceId=device-1",
+    });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       sessions: [
-        { id: 'session-live', deviceId: 'device-1' },
-        { id: 'session-detached', deviceId: 'device-1' },
-        { id: 'session-archived', deviceId: 'device-1' },
+        { id: "session-live", deviceId: "device-1" },
+        { id: "session-detached", deviceId: "device-1" },
+        { id: "session-archived", deviceId: "device-1" },
       ],
       counts: { total: 3, active: 2, live: 1, detached: 1, archived: 1 },
     });
   });
 
-  it('requires explicit confirmation and streams a guided FNGK update', async () => {
+  it("requires explicit confirmation and streams a guided FNGK update", async () => {
     const app = await harness();
-    expect((await app.inject({ method: 'POST', url: '/api/fngk/update', payload: {} })).statusCode).toBe(409);
-    const response = await app.inject({ method: 'POST', url: '/api/fngk/update', payload: { confirm: true } });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/fngk/update",
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(409);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/fngk/update",
+      payload: { confirm: true },
+    });
     expect(response.statusCode).toBe(200);
-    const events = response.body.trim().split('\n').map(line => JSON.parse(line));
+    const events = response.body
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
     expect(events).toEqual([
-      expect.objectContaining({ type: 'output', line: 'downloaded' }),
-      expect.objectContaining({ type: 'output', line: 'installed' }),
-      expect.objectContaining({ type: 'complete', context: expect.objectContaining({ compatible: true }) }),
+      expect.objectContaining({ type: "output", line: "downloaded" }),
+      expect.objectContaining({ type: "output", line: "installed" }),
+      expect.objectContaining({
+        type: "complete",
+        context: expect.objectContaining({ compatible: true }),
+      }),
     ]);
   });
 
-  it('runs an explicitly confirmed Device adapter and publishes its semantic evidence',async()=>{
-    const directory=await mkdtemp(path.join(tmpdir(),'fngk-atlas-adapter-')),manifest:any={protocolVersion:'atlas.device-adapter.v1',id:'test.adapter',version:'1.0.0',publisher:'test',displayName:'Test adapter',command:"printf '%s\\n' '{\"kind\":\"database\",\"label\":\"PostgreSQL test\",\"sourceId\":\"db\"}'",interpreter:{protocolVersion:'atlas.interpreter.v1',ontologyVersion:'atlas.world.v1',id:'test.adapter.semantic',version:'1.0.0',publisher:'test',displayName:'Test adapter semantics',inputs:['database'],outputKinds:['workload','capability'],outputPredicates:['provides-capability'],rules:[{id:'db',when:{all:[{field:'kind',op:'eq',value:'database'}]},emit:{kind:'workload',capability:'relational-storage',explanation:'The confirmed test adapter observed a database.'}}]}};
-    const app=await createApp({fngk:new FngkProcessClient({binary:fixture}),dbPath:path.join(directory,'atlas.db'),deviceAdapters:[{manifest,trusted:false,source:'development'}]});cleanups.push(async()=>{await app.close();await rm(directory,{recursive:true,force:true})});
-    expect((await app.inject({method:'POST',url:'/api/atlas/device-adapters/test.adapter/run',payload:{contextId:'local'}})).statusCode).toBe(409);
-    const ran=await app.inject({method:'POST',url:'/api/atlas/device-adapters/test.adapter/run',payload:{contextId:'local',confirm:true}});expect(ran.statusCode).toBe(200);expect(ran.json()).toMatchObject({route:'terminal-preferred-command',observations:1,entities:2,assertions:1});
-    const searched=(await app.inject({method:'GET',url:'/api/search?contextId=local&q=PostgreSQL'})).json();expect(searched.items).toContainEqual(expect.objectContaining({type:'workload',label:'PostgreSQL test'}));
+  it("runs an explicitly confirmed Device adapter and publishes its semantic evidence", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fngk-atlas-adapter-")),
+      manifest: any = {
+        protocolVersion: "atlas.device-adapter.v1",
+        id: "test.adapter",
+        version: "1.0.0",
+        publisher: "test",
+        displayName: "Test adapter",
+        command:
+          'printf \'%s\\n\' \'{"kind":"database","label":"PostgreSQL test","sourceId":"db"}\'',
+        interpreter: {
+          protocolVersion: "atlas.interpreter.v1",
+          ontologyVersion: "atlas.world.v1",
+          id: "test.adapter.semantic",
+          version: "1.0.0",
+          publisher: "test",
+          displayName: "Test adapter semantics",
+          inputs: ["database"],
+          outputKinds: ["workload", "capability"],
+          outputPredicates: ["provides-capability"],
+          rules: [
+            {
+              id: "db",
+              when: { all: [{ field: "kind", op: "eq", value: "database" }] },
+              emit: {
+                kind: "workload",
+                capability: "relational-storage",
+                explanation: "The confirmed test adapter observed a database.",
+              },
+            },
+          ],
+        },
+      };
+    const app = await createApp({
+      fngk: new FngkProcessClient({ binary: fixture }),
+      dbPath: path.join(directory, "atlas.db"),
+      deviceAdapters: [{ manifest, trusted: false, source: "development" }],
+    });
+    cleanups.push(async () => {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/atlas/device-adapters/test.adapter/run",
+          payload: { contextId: "local" },
+        })
+      ).statusCode,
+    ).toBe(409);
+    const ran = await app.inject({
+      method: "POST",
+      url: "/api/atlas/device-adapters/test.adapter/run",
+      payload: { contextId: "local", confirm: true },
+    });
+    expect(ran.statusCode).toBe(200);
+    expect(ran.json()).toMatchObject({
+      route: "terminal-preferred-command",
+      observations: 1,
+      entities: 2,
+      assertions: 1,
+    });
+    const searched = (
+      await app.inject({
+        method: "GET",
+        url: "/api/search?contextId=local&q=PostgreSQL",
+      })
+    ).json();
+    expect(searched.items).toContainEqual(
+      expect.objectContaining({ type: "workload", label: "PostgreSQL test" }),
+    );
   });
 
-  it('uses the native Device database Surface without a TCP relay or sidecar',async()=>{
-    const app=await harness();
-    const surface=await app.inject({method:'GET',url:'/api/databases/surface?resourceId=resource-1'});expect(surface.statusCode).toBe(200);expect(surface.json()).toMatchObject({credentialPublicKey:'device-key'});
-    const bindings=await app.inject({method:'GET',url:'/api/databases/bindings?resourceId=resource-1'});expect(bindings.statusCode).toBe(200);expect(bindings.json()).toMatchObject({items:[]});
+  it("uses the native Device database Surface without a TCP relay or sidecar", async () => {
+    const app = await harness();
+    const surface = await app.inject({
+      method: "GET",
+      url: "/api/databases/surface?resourceId=resource-1",
+    });
+    expect(surface.statusCode).toBe(200);
+    expect(surface.json()).toMatchObject({ credentialPublicKey: "device-key" });
+    const bindings = await app.inject({
+      method: "GET",
+      url: "/api/databases/bindings?resourceId=resource-1",
+    });
+    expect(bindings.statusCode).toBe(200);
+    expect(bindings.json()).toMatchObject({ items: [] });
   });
 
-  it('browses, conflict-checks, saves, and scans the process-visible machine context', async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), 'fngk-atlas-local-context-'));
-    await import('node:fs/promises').then(async fs => { await fs.mkdir(path.join(directory, 'repo', '.git'), { recursive: true }); await fs.mkdir(path.join(directory, 'repo', 'coverage'), { recursive: true }); await fs.writeFile(path.join(directory, 'repo', 'package.json'), '{"name":"local","scripts":{"coverage":"vitest --coverage"}}'); await fs.writeFile(path.join(directory, 'repo', 'index.ts'), 'export function local(){return true;}'); await fs.writeFile(path.join(directory, 'repo', 'coverage', 'lcov.info'), 'SF:index.ts\nDA:1,1\nend_of_record\n'); });
-    const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture }), dbPath: path.join(directory, 'atlas.db'), localRoot: directory });
-    cleanups.push(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
-    const listed = await app.inject({ method: 'GET', url: '/api/files?contextId=local&path=/' });
-    expect(listed.json()).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({ name: 'repo', type: 'directory' })]), route: expect.objectContaining({ kind: 'direct' }) });
-    const opened = (await app.inject({ method: 'GET', url: '/api/files/content?contextId=local&path=/repo/index.ts' })).json();
-    expect(opened.text).toContain('return true');
-    const saved = await app.inject({ method: 'PUT', url: '/api/files/content', payload: { contextId: 'local', path: '/repo/index.ts', contentBase64: Buffer.from('export function local(){return false;}').toString('base64'), expectedFingerprint: opened.fingerprint } });
+  it("publishes database discovery and recorded operations into semantic Data and Activity views", async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "fngk-atlas-semantic-runtime-"),
+    );
+    const app = await createApp({
+      fngk: new FngkProcessClient({
+        binary: fixture,
+        env: { FNGK_FIXTURE_MODE: "database-resource" },
+      }),
+      dbPath: path.join(directory, "atlas.db"),
+    });
+    cleanups.push(async () => {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    });
+    const discovered = await app.inject({
+      method: "GET",
+      url: "/api/databases/discover?contextId=local",
+    });
+    expect(discovered.statusCode).toBe(200);
+    expect(discovered.json().items).toContainEqual(
+      expect.objectContaining({ engine: "postgres", source: "adapter" }),
+    );
+    const data = (
+      await app.inject({
+        method: "GET",
+        url: "/api/world/projection?contextId=local&lens=data&level=2&budget=100",
+      })
+    ).json();
+    expect(data.nodes).toContainEqual(
+      expect.objectContaining({
+        kind: "database",
+        label: expect.stringContaining("postgres"),
+      }),
+    );
+    await app.inject({
+      method: "POST",
+      url: "/api/databases/bindings",
+      payload: {
+        contextId: "local",
+        resourceId: "postgres-resource",
+        name: "Development",
+        environment: "development",
+      },
+    });
+    const activity = (
+      await app.inject({
+        method: "GET",
+        url: "/api/world/projection?contextId=local&lens=activity&level=2&budget=100",
+      })
+    ).json();
+    expect(activity.nodes).toContainEqual(
+      expect.objectContaining({
+        kind: "operation",
+        label: "database.profile.create",
+      }),
+    );
+  });
+
+  it("reports an invalid remote package manifest without failing the coverage surface", async () => {
+    const app = await harness();
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/coverage/commands?contextId=device%3Adevice-1&repositoryPath=%2Fsrv%2Fapp",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      commands: [],
+      errors: [expect.objectContaining({ code: "invalid_package_manifest" })],
+    });
+  });
+
+  it("browses, conflict-checks, saves, and scans the process-visible machine context", async () => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "fngk-atlas-local-context-"),
+    );
+    await import("node:fs/promises").then(async (fs) => {
+      await fs.mkdir(path.join(directory, "repo", ".git"), { recursive: true });
+      await fs.mkdir(path.join(directory, "repo", "coverage"), {
+        recursive: true,
+      });
+      await fs.writeFile(
+        path.join(directory, "repo", "package.json"),
+        '{"name":"local","scripts":{"coverage":"vitest --coverage"}}',
+      );
+      await fs.writeFile(
+        path.join(directory, "repo", "index.ts"),
+        "export function local(){return true;}",
+      );
+      await fs.writeFile(
+        path.join(directory, "repo", "coverage", "lcov.info"),
+        "SF:index.ts\nDA:1,1\nend_of_record\n",
+      );
+    });
+    const app = await createApp({
+      fngk: new FngkProcessClient({ binary: fixture }),
+      dbPath: path.join(directory, "atlas.db"),
+      localRoot: directory,
+    });
+    cleanups.push(async () => {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    });
+    const listed = await app.inject({
+      method: "GET",
+      url: "/api/files?contextId=local&path=/",
+    });
+    expect(listed.json()).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ name: "repo", type: "directory" }),
+      ]),
+      route: expect.objectContaining({ kind: "direct" }),
+    });
+    const opened = (
+      await app.inject({
+        method: "GET",
+        url: "/api/files/content?contextId=local&path=/repo/index.ts",
+      })
+    ).json();
+    expect(opened.text).toContain("return true");
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/api/files/content",
+      payload: {
+        contextId: "local",
+        path: "/repo/index.ts",
+        contentBase64: Buffer.from(
+          "export function local(){return false;}",
+        ).toString("base64"),
+        expectedFingerprint: opened.fingerprint,
+      },
+    });
     expect(saved.statusCode).toBe(200);
-    expect((await app.inject({ method: 'PUT', url: '/api/files/content', payload: { contextId: 'local', path: '/repo/index.ts', contentBase64: Buffer.from('stale').toString('base64'), expectedFingerprint: opened.fingerprint } })).statusCode).toBe(409);
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/api/files/content",
+          payload: {
+            contextId: "local",
+            path: "/repo/index.ts",
+            contentBase64: Buffer.from("stale").toString("base64"),
+            expectedFingerprint: opened.fingerprint,
+          },
+        })
+      ).statusCode,
+    ).toBe(409);
 
-    const address = await app.listen({ host: '127.0.0.1', port: 0 }), socket = new WebSocket(address.replace(/^http/, 'ws') + '/api/discovery/scan?contextId=local'), batches: any[] = [];
-    socket.on('message', raw => batches.push(JSON.parse(raw.toString()))); await once(socket, 'close');
-    expect(batches.flatMap(batch => batch.entities ?? [])).toContainEqual(expect.objectContaining({ type: 'repository', path: '/repo' }));
-    const evidence = (await app.inject({ method: 'GET', url: '/api/discovery/entities?contextId=local' })).json();
-    expect(evidence.entities).toContainEqual(expect.objectContaining({ type: 'package', path: '/repo/package.json' }));
-    const analysisSocket = new WebSocket(address.replace(/^http/, 'ws') + '/api/analysis/repository?contextId=local&path=/repo'), analysisMessages: any[] = [];
-    analysisSocket.on('message', raw => analysisMessages.push(JSON.parse(raw.toString()))); await once(analysisSocket, 'close');
-    expect(analysisMessages).toContainEqual(expect.objectContaining({ type: 'analysis_complete', index: expect.objectContaining({ summary: expect.objectContaining({ functions: 1 }) }), coverage: '/repo/coverage/lcov.info' }));
-    expect((await app.inject({ method: 'GET', url: '/api/coverage/commands?contextId=local&repositoryPath=/repo' })).json().commands).toContainEqual(expect.objectContaining({ command: 'npm run coverage', producesCoverage: true }));
-    const coverage = await app.inject({ method: 'POST', url: '/api/coverage/ingest', payload: { contextId: 'local', repositoryPath: '/repo', revision: 'abc' } });
-    expect(coverage.json()).toMatchObject({ evidence: { format: 'lcov', revision: 'abc' }, summary: { functions: 0 } });
-    const refreshed = await app.inject({ method: 'POST', url: '/api/coverage/refresh', payload: { contextId: 'local', repositoryPath: '/repo', command: 'true' } });
-    expect(refreshed.json()).toMatchObject({ run: { status: 'succeeded' }, coverage: { artifact: '/repo/coverage/lcov.info', verified: true } });
-    const graph = (await app.inject({ method: 'GET', url: '/api/graph' })).json();
-    expect(graph.nodes.find((node: any) => node.name === 'local')).toMatchObject({ coverage: { fraction: 1, stale: false }, crap: 1 });
-    const lens = (await app.inject({ method: 'GET', url: '/api/graph?lens=code&budget=2&layers=contains,calls' })).json();
-    expect(lens).toMatchObject({ counts: { visibleNodes: 3, totalNodes: expect.any(Number) }, breadcrumbs: [] });
-    expect(lens.nodes).toContainEqual(expect.objectContaining({ type: 'aggregate' }));
-    const machine = (await app.inject({ method: 'GET', url: '/api/graph?lens=machine&budget=500&contextId=local' })).json();
-    expect(machine.nodes).toContainEqual(expect.objectContaining({ type: 'process', metadata: expect.objectContaining({ pid: expect.any(Number) }) }));
-    const otherContext = (await app.inject({ method: 'GET', url: '/api/graph?lens=code&contextId=device:other' })).json();
-    expect(otherContext.index.contextId).toBe('device:other');
-    expect(otherContext.nodes.some((node: any) => node.type === 'function')).toBe(false);
+    const address = await app.listen({ host: "127.0.0.1", port: 0 }),
+      socket = new WebSocket(
+        address.replace(/^http/, "ws") + "/api/discovery/scan?contextId=local",
+      ),
+      batches: any[] = [];
+    socket.on("message", (raw) => batches.push(JSON.parse(raw.toString())));
+    await once(socket, "close");
+    expect(batches.flatMap((batch) => batch.entities ?? [])).toContainEqual(
+      expect.objectContaining({ type: "repository", path: "/repo" }),
+    );
+    const evidence = (
+      await app.inject({
+        method: "GET",
+        url: "/api/discovery/entities?contextId=local",
+      })
+    ).json();
+    expect(evidence.entities).toContainEqual(
+      expect.objectContaining({ type: "package", path: "/repo/package.json" }),
+    );
+    const analysisSocket = new WebSocket(
+        address.replace(/^http/, "ws") +
+          "/api/analysis/repository?contextId=local&path=/repo",
+      ),
+      analysisMessages: any[] = [];
+    analysisSocket.on("message", (raw) =>
+      analysisMessages.push(JSON.parse(raw.toString())),
+    );
+    await once(analysisSocket, "close");
+    expect(analysisMessages).toContainEqual(
+      expect.objectContaining({
+        type: "analysis_complete",
+        index: expect.objectContaining({
+          summary: expect.objectContaining({ functions: 1 }),
+        }),
+        coverage: "/repo/coverage/lcov.info",
+      }),
+    );
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/coverage/commands?contextId=local&repositoryPath=/repo",
+        })
+      ).json().commands,
+    ).toContainEqual(
+      expect.objectContaining({
+        command: "npm run coverage",
+        producesCoverage: true,
+      }),
+    );
+    const coverage = await app.inject({
+      method: "POST",
+      url: "/api/coverage/ingest",
+      payload: { contextId: "local", repositoryPath: "/repo", revision: "abc" },
+    });
+    expect(coverage.json()).toMatchObject({
+      evidence: { format: "lcov", revision: "abc" },
+      summary: { functions: 0 },
+    });
+    const refreshed = await app.inject({
+      method: "POST",
+      url: "/api/coverage/refresh",
+      payload: { contextId: "local", repositoryPath: "/repo", command: "true" },
+    });
+    expect(refreshed.json()).toMatchObject({
+      run: { status: "succeeded" },
+      coverage: { artifact: "/repo/coverage/lcov.info", verified: true },
+    });
+    const graph = (
+      await app.inject({ method: "GET", url: "/api/graph" })
+    ).json();
+    expect(
+      graph.nodes.find((node: any) => node.name === "local"),
+    ).toMatchObject({ coverage: { fraction: 1, stale: false }, crap: 1 });
+    const lens = (
+      await app.inject({
+        method: "GET",
+        url: "/api/graph?lens=code&budget=2&layers=contains,calls",
+      })
+    ).json();
+    expect(lens).toMatchObject({
+      counts: { visibleNodes: 3, totalNodes: expect.any(Number) },
+      breadcrumbs: [],
+    });
+    expect(lens.nodes).toContainEqual(
+      expect.objectContaining({ type: "aggregate" }),
+    );
+    const machine = (
+      await app.inject({
+        method: "GET",
+        url: "/api/graph?lens=machine&budget=500&contextId=local",
+      })
+    ).json();
+    expect(machine.nodes).toContainEqual(
+      expect.objectContaining({
+        type: "process",
+        metadata: expect.objectContaining({ pid: expect.any(Number) }),
+      }),
+    );
+    const otherContext = (
+      await app.inject({
+        method: "GET",
+        url: "/api/graph?lens=code&contextId=device:other",
+      })
+    ).json();
+    expect(otherContext.index.contextId).toBe("device:other");
+    expect(
+      otherContext.nodes.some((node: any) => node.type === "function"),
+    ).toBe(false);
 
-    expect((await app.inject({method:'POST',url:'/api/files',payload:{contextId:'local',path:'/repo/new',type:'directory'}})).statusCode).toBe(201);
-    expect((await app.inject({method:'POST',url:'/api/files',payload:{contextId:'local',path:'/repo/new/readme.txt',type:'file',contentBase64:Buffer.from('Atlas searchable content').toString('base64')}})).statusCode).toBe(201);
-    const firstSave=await app.inject({method:'POST',url:'/api/files/content',payload:{contextId:'local',path:'/repo/new/from-buffer.ts',contentBase64:Buffer.from('export const first = true;').toString('base64'),createOnly:true}});expect(firstSave.statusCode).toBe(201);expect(firstSave.json()).toMatchObject({fingerprint:expect.any(String),operation:{type:'file.create.content'}});
-    const conflictingSave=await app.inject({method:'POST',url:'/api/files/content',payload:{contextId:'local',path:'/repo/new/from-buffer.ts',contentBase64:Buffer.from('overwritten').toString('base64'),createOnly:true}});expect(conflictingSave.statusCode).toBe(409);
-    expect((await app.inject({method:'GET',url:'/api/files/content?contextId=local&path=/repo/new/from-buffer.ts'})).json().text).toBe('export const first = true;');
-    const searched=(await app.inject({method:'GET',url:'/api/files/search?contextId=local&path=/repo&query=searchable&mode=all'})).json();
-    expect(searched.matches).toContainEqual(expect.objectContaining({path:'/repo/new/readme.txt',line:1}));
-    expect((await app.inject({method:'PATCH',url:'/api/files',payload:{contextId:'local',path:'/repo/new/readme.txt',destination:'/repo/new/renamed.txt'}})).statusCode).toBe(200);
-    const trashed=await app.inject({method:'DELETE',url:'/api/files',payload:{contextId:'local',path:'/repo/new/renamed.txt'}});
-    expect(trashed.json()).toMatchObject({permanent:false,restoreAvailable:true,restorePath:expect.stringMatching(/^\/\.atlas-trash\//),route:expect.objectContaining({kind:'direct'})});
-    expect((await app.inject({method:'POST',url:'/api/files/restore',payload:{contextId:'local',path:trashed.json().restorePath}})).statusCode).toBe(200);
-    expect((await app.inject({method:'DELETE',url:'/api/files',payload:{contextId:'local',path:'/repo/new/renamed.txt',permanent:true,confirm:true}})).statusCode).toBe(200);
-    expect((await app.inject({method:'DELETE',url:'/api/files',payload:{contextId:'local',path:'/repo',permanent:true}})).statusCode).toBe(409);
-    expect((await app.inject({method:'DELETE',url:'/api/files',payload:{contextId:'local',path:'//',permanent:true,confirm:true}})).statusCode).toBe(400);
-    const operations=(await app.inject({method:'GET',url:'/api/operations?contextId=local'})).json();
-    expect(operations.items).toContainEqual(expect.objectContaining({type:'file.trash',summary:expect.objectContaining({path:'/repo/new/renamed.txt'})}));
-    const indexedSearch=(await app.inject({method:'GET',url:'/api/search?contextId=local&q=local'})).json();
-    expect(indexedSearch.items).toContainEqual(expect.objectContaining({type:'function',repositoryRoot:'/repo',contextId:'local'}));
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/files",
+          payload: { contextId: "local", path: "/repo/new", type: "directory" },
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/files",
+          payload: {
+            contextId: "local",
+            path: "/repo/new/readme.txt",
+            type: "file",
+            contentBase64: Buffer.from("Atlas searchable content").toString(
+              "base64",
+            ),
+          },
+        })
+      ).statusCode,
+    ).toBe(201);
+    const firstSave = await app.inject({
+      method: "POST",
+      url: "/api/files/content",
+      payload: {
+        contextId: "local",
+        path: "/repo/new/from-buffer.ts",
+        contentBase64: Buffer.from("export const first = true;").toString(
+          "base64",
+        ),
+        createOnly: true,
+      },
+    });
+    expect(firstSave.statusCode).toBe(201);
+    expect(firstSave.json()).toMatchObject({
+      fingerprint: expect.any(String),
+      operation: { type: "file.create.content" },
+    });
+    const conflictingSave = await app.inject({
+      method: "POST",
+      url: "/api/files/content",
+      payload: {
+        contextId: "local",
+        path: "/repo/new/from-buffer.ts",
+        contentBase64: Buffer.from("overwritten").toString("base64"),
+        createOnly: true,
+      },
+    });
+    expect(conflictingSave.statusCode).toBe(409);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/files/content?contextId=local&path=/repo/new/from-buffer.ts",
+        })
+      ).json().text,
+    ).toBe("export const first = true;");
+    const searched = (
+      await app.inject({
+        method: "GET",
+        url: "/api/files/search?contextId=local&path=/repo&query=searchable&mode=all",
+      })
+    ).json();
+    expect(searched.matches).toContainEqual(
+      expect.objectContaining({ path: "/repo/new/readme.txt", line: 1 }),
+    );
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
+          url: "/api/files",
+          payload: {
+            contextId: "local",
+            path: "/repo/new/readme.txt",
+            destination: "/repo/new/renamed.txt",
+          },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const trashed = await app.inject({
+      method: "DELETE",
+      url: "/api/files",
+      payload: { contextId: "local", path: "/repo/new/renamed.txt" },
+    });
+    expect(trashed.json()).toMatchObject({
+      permanent: false,
+      restoreAvailable: true,
+      restorePath: expect.stringMatching(/^\/\.atlas-trash\//),
+      route: expect.objectContaining({ kind: "direct" }),
+    });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/files/restore",
+          payload: { contextId: "local", path: trashed.json().restorePath },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: "/api/files",
+          payload: {
+            contextId: "local",
+            path: "/repo/new/renamed.txt",
+            permanent: true,
+            confirm: true,
+          },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: "/api/files",
+          payload: { contextId: "local", path: "/repo", permanent: true },
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: "/api/files",
+          payload: {
+            contextId: "local",
+            path: "//",
+            permanent: true,
+            confirm: true,
+          },
+        })
+      ).statusCode,
+    ).toBe(400);
+    const operations = (
+      await app.inject({
+        method: "GET",
+        url: "/api/operations?contextId=local",
+      })
+    ).json();
+    expect(operations.items).toContainEqual(
+      expect.objectContaining({
+        type: "file.trash",
+        summary: expect.objectContaining({ path: "/repo/new/renamed.txt" }),
+      }),
+    );
+    const indexedSearch = (
+      await app.inject({
+        method: "GET",
+        url: "/api/search?contextId=local&q=local",
+      })
+    ).json();
+    expect(indexedSearch.items).toContainEqual(
+      expect.objectContaining({
+        type: "function",
+        repositoryRoot: "/repo",
+        contextId: "local",
+      }),
+    );
   });
 });

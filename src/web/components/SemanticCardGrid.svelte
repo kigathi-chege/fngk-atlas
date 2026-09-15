@@ -1,0 +1,2 @@
+<script lang="ts">import SemanticCard from './SemanticCard.svelte';export let cards:any[]=[];export let emptyTitle='No semantic children resolved yet';export let onenter:(id:string)=>void=()=>{};export let oninspect:(card:any)=>void=()=>{};</script>
+<div class="semantic-card-grid">{#each cards as card (card.id)}<SemanticCard {card} {onenter} {oninspect}/>{:else}<div class="semantic-empty"><strong>{emptyTitle}</strong><p>Run a host scan or map a repository to give Atlas current evidence for this scope.</p></div>{/each}</div>

@@ -20,6 +20,7 @@ if (args[0] === 'version') {
       profile: { name: args[args.indexOf('--profile') + 1] ?? 'default' },
       devices: [{ id: 'device-1', name: 'kigathi', online: true }],
       connections: [],
+      resources: mode === 'database-resource' ? [{ id: 'postgres-resource', deviceId: 'device-1', name: 'PostgreSQL', kind: 'postgres.database', status: 'ready', availability: 'available', capabilities: ['schema.read'], attributes: { host: '127.0.0.1', port: 5432 }, lastObservedAt: '2026-09-12T12:00:00.000Z' }] : [],
       sessions: mode === 'session-list' ? [
         { id: 'session-live', title: 'Live shell', status: 'active', deviceId: 'device-1', deviceName: 'kigathi' },
         { id: 'session-detached', title: 'Detached shell', status: 'detached', deviceId: 'device-1', deviceName: 'kigathi' },

@@ -74,6 +74,11 @@ export class EvidenceStore {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   putProjection(key:string,entities:EvidenceEntity[],relationships:EvidenceRelationship[]=[]){const scanId=`projection:${key}`;this.putEntities(scanId,entities);this.putRelationships(scanId,relationships)}
+  syncProjection(key:string,contextId:string,entities:EvidenceEntity[],relationships:EvidenceRelationship[]=[]):void {
+    const scanId=`projection:${key}`;this.db.exec('BEGIN');
+    try{this.db.prepare("DELETE FROM atlas_search WHERE source='evidence' AND entity_id IN (SELECT id FROM atlas_entities WHERE context_id=? AND last_scan_id=?)").run(contextId,scanId);this.db.prepare('DELETE FROM atlas_relationships WHERE context_id=? AND last_scan_id=?').run(contextId,scanId);this.db.prepare('DELETE FROM atlas_entities WHERE context_id=? AND last_scan_id=?').run(contextId,scanId);this.db.exec('COMMIT')}catch(error){this.db.exec('ROLLBACK');throw error}
+    this.putProjection(key,entities,relationships);
+  }
 
   completeScan(id: string, value: { partial: boolean }): void {
     this.db.prepare(`UPDATE atlas_scans SET status='complete',partial=?,completed_at=? WHERE id=?`).run(value.partial ? 1 : 0, new Date().toISOString(), id);
