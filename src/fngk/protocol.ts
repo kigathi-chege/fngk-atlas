@@ -4,6 +4,7 @@ export const FILES_PROTOCOL = 'fngk.files.v1' as const;
 export const SESSION_PROTOCOL = 'fngk.session.v1' as const;
 export const PROCESS_PROTOCOL = 'fngk.process.v1' as const;
 export const DEPLOYMENT_PROTOCOL = 'fngk.deployment.v1' as const;
+export const DEPLOYMENT_PROTOCOL_V2 = 'fngk.deployment.v2' as const;
 export const SURFACE_PROTOCOL = 'fngk.surface.v1' as const;
 export const CONNECTION_PROTOCOL = 'fngk.connection.v1' as const;
 export interface ManagedProcess { id:string; name:string; [key:string]:unknown }

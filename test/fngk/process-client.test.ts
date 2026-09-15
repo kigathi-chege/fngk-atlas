@@ -82,6 +82,12 @@ describe('FngkProcessClient', () => {
     await expect(client.rollbackDeployment('deployment-1',{profile:'work'})).resolves.toMatchObject({target:{id:'release-1'}});
   });
 
+  it('delegates v2 plan transitions to Signal instead of a terminal',async()=>{
+    const client=new FngkProcessClient({binary:fixture,env:{FNGK_FIXTURE_DEPLOYMENT_PROTOCOL:'fngk.deployment.v2'}});
+    const value:any=await client.deploymentAction('deployment-1','execute',2,{profile:'work'});
+    expect(value).toMatchObject({input:{planRevision:2},argv:['deployments','deployment-1','execute','--json','--profile','work']});
+  });
+
   it('invokes native Device Surfaces without a relay or sidecar',async()=>{
     const client=new FngkProcessClient({binary:fixture});
     await expect(client.resourceSurface('resource-1',{profile:'work'})).resolves.toMatchObject({credentialPublicKey:'device-key'});

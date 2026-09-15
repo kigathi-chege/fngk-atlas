@@ -691,12 +691,24 @@ export async function createApp(
       return reply.code(result.statusCode).send(result.body);
     }
   });
+  app.post("/api/deployments/:id/actions",async(request,reply)=>{
+    const body=request.body as any,action=body?.action as 'approve'|'execute'|'cancel'|'retry';
+    if(!['approve','execute','cancel','retry'].includes(action))return reply.code(400).send({error:'invalid_deployment_action'});
+    if(body?.confirm!==true)return reply.code(409).send({error:'confirmation_required'});
+    const planRevision=Number(body?.planRevision);if(!Number.isInteger(planRevision)||planRevision<1)return reply.code(400).send({error:'invalid_plan_revision'});
+    try{const value=await fngk.deploymentAction(decodeURIComponent((request.params as any).id),action,planRevision,{profile:String(body?.profile??'')||undefined,signal:requestSignal(request)});return reply.code(action==='execute'?202:200).send(value)}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
+  });
   app.get("/api/deployments/:id/logs", async (request, reply) => {
     try {
       const value: any = await fngk.deployment(
           decodeURIComponent((request.params as any).id),
           { signal: requestSignal(request) },
-        ),
+        );
+      if(value.version==='fngk.deployment.v2'){
+        const after=Math.max(-1,Number((request.query as any).after??-1)),limit=Math.min(1000,Math.max(1,Number((request.query as any).limit??500))),items=(value.phaseLogs??[]).filter((item:any)=>Number(item.sequence)>after).slice(0,limit),nextCursor=items.length?Number(items.at(-1).sequence):after;
+        return{run:value.plan??null,items,nextCursor,hasMore:(value.phaseLogs??[]).some((item:any)=>Number(item.sequence)>nextCursor)};
+      }
+      const
         release = [...(value.releases ?? [])]
           .reverse()
           .find((item: any) => item.process_id),

@@ -45,8 +45,34 @@ Verification evidence:
 - Signal v2 persistence integration: 67 tests passed; one broker fixture skipped.
 - Signal contract tests, Go compatibility tests, TypeScript, and Svelte checks passed.
 
-## Gates 4–11
+## Gate 4 — Signal-owned deployment state machine
+
+**Status:** In progress; the retained execution boundary is implemented and verified, while reconnect reality reconciliation remains open.
+
+Implemented:
+
+- persisted phase-log storage with stable cursors;
+- authorized approve, execute, cancel, and retry transitions against an immutable plan revision;
+- asynchronous Signal-owned execution which survives the Atlas request lifecycle;
+- duplicate execute suppression and ordered retained phase attempts;
+- bounded FNGK phase execution with explicit absolute cwd, environment revision values, timeout, stdout/stderr caps, process-group cancellation, and non-blocking Device message handling;
+- Signal startup recovery for plans left in `executing`, preserving an interrupted attempt and creating a new attempt;
+- Atlas/FNGK action APIs so Atlas delegates v2 transitions instead of executing them through a terminal;
+- v2 deployment-log projection from the retained Signal phase ledger.
+
+Verified:
+
+- Signal: 261 unit tests, 67 integration tests (one broker fixture skipped), TypeScript/Svelte checks, and the full Go CLI suite;
+- Atlas: 4 legacy tests, 143 current tests, TypeScript, and Svelte checks.
+
+Remaining before Gate 4 can be checked complete:
+
+- persist and query Device-side phase reality across an FNGK daemon restart;
+- reconcile an uncertain/disconnected phase before replay rather than assuming it is safe to execute again;
+- add restart/disconnect acceptance proving no duplicate mutation.
+
+## Gates 5–11
 
 **Status:** Pending.
 
-The next gate moves phase ownership from the Atlas request lifecycle into a Signal-owned idempotent execution state machine with reconnect reconciliation. No UI replacement or adapter claim is complete until its real Device path passes the corresponding later gate.
+No runtime-manager, transfer, vault, adapter, single-journey UI, semantic-correlation, native PostgreSQL, or production-rollout claim is complete until its real Device path passes the corresponding later gate.

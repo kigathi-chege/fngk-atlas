@@ -239,6 +239,12 @@ describe("Atlas FNGK-native server", () => {
     });
   });
 
+  it("delegates retained deployment transitions through FNGK",async()=>{
+    const app=await harness(),response=await app.inject({method:'POST',url:'/api/deployments/deployment-1/actions',payload:{action:'execute',planRevision:2,confirm:true,profile:'work'}});
+    expect(response.statusCode,response.body).toBe(202);
+    expect(response.json()).toMatchObject({input:{planRevision:2},argv:['deployments','deployment-1','execute','--json','--profile','work']});
+  });
+
   it("relays a terminal as WebSocket JSONL events", async () => {
     const app = await harness();
     const address = await app.listen({ host: "127.0.0.1", port: 0 });
