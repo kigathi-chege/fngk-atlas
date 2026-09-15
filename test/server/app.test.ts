@@ -6,7 +6,6 @@ import WebSocket from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/server/app.js';
 import { FngkProcessClient } from '../../src/fngk/process-client.js';
-import {DbGateSupervisor} from '../../src/databases/sidecar.js';
 import {DiagnosticRegistry} from '../../src/diagnostics/registry.js';
 
 const fixture = path.resolve('test/fixtures/fngk.mjs');
@@ -24,13 +23,13 @@ describe('Atlas FNGK-native server', () => {
   it('lists redacted diagnostic sessions for operator inspection', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'fngk-atlas-diagnostics-'));
     const diagnostics = new DiagnosticRegistry();
-    const created = diagnostics.create({ kind: 'fngk-relay', contextId: 'device:1', command: 'fngk tcp device:1 5432 --password secret' });
+    const created = diagnostics.create({ kind: 'database', contextId: 'device:1', command: 'fngk resources resource-1 invoke --password secret' });
     cleanups.push(async () => { await rm(directory, { recursive: true, force: true }); });
     const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture }), dbPath: path.join(directory, 'atlas.db'), diagnosticRegistry: diagnostics });
     cleanups.push(async () => { await app.close(); });
     const response = await app.inject({ method: 'GET', url: '/api/diagnostics/sessions' });
     expect(response.statusCode).toBe(200);
-    expect(response.json().items).toContainEqual(expect.objectContaining({ id: created.id, kind: 'fngk-relay', command: expect.not.stringContaining('secret') }));
+    expect(response.json().items).toContainEqual(expect.objectContaining({ id: created.id, kind: 'database', command: expect.not.stringContaining('secret') }));
   });
   it('exposes process context and namespace without accepting credentials', async () => {
     const app = await harness();
@@ -49,6 +48,11 @@ describe('Atlas FNGK-native server', () => {
     const atlas=await app.inject({method:'GET',url:'/api/atlas/devices/local/overview?lens=overview&budget=100'});expect(atlas.statusCode).toBe(200);expect(atlas.json()).toMatchObject({protocolVersion:'atlas.world.v1',contextId:'local',nodes:expect.arrayContaining([expect.objectContaining({kind:'device'})])});
     expect((await app.inject({method:'GET',url:'/api/atlas/interpreters'})).json().items).toEqual(expect.arrayContaining([expect.objectContaining({id:'atlas.compatibility',trusted:true}),expect.objectContaining({id:'atlas.workloads',trusted:true})]));
     expect((await app.inject({ method: 'POST', url: '/api/fngk/connect', payload: { session: 'never-accept-this' } })).statusCode).toBe(404);
+  });
+
+  it('previews a production deployment without executing Device commands',async()=>{
+    const app=await harness(),response=await app.inject({method:'POST',url:'/api/deployments/plan',payload:{contextId:'device:device-1',repositoryPath:'/srv/web',environment:'production',commitSha:'a'.repeat(40),manifest:{protocolVersion:'fngk.project.v1',name:'web',commands:{install:'npm ci',build:'npm run build',start:'npm start'},port:8080,health:{protocol:'http',path:'/health',timeoutMs:30000},artifacts:[{path:'dist',kind:'web'}],restartPolicy:'on-failure',environments:{},routes:[{name:'web'}]}}});
+    expect(response.statusCode,response.body).toBe(200);expect(response.json()).toMatchObject({version:'atlas.deployment-plan.v1',phases:['verify','extract','install','build','start','health','artifacts','publish']});
   });
 
   it('relays a terminal as WebSocket JSONL events', async () => {
@@ -104,12 +108,10 @@ describe('Atlas FNGK-native server', () => {
     const searched=(await app.inject({method:'GET',url:'/api/search?contextId=local&q=PostgreSQL'})).json();expect(searched.items).toContainEqual(expect.objectContaining({type:'workload',label:'PostgreSQL test'}));
   });
 
-  it('proxies an isolated database sidecar without returning credentials',async()=>{
-    const directory=await mkdtemp(path.join(tmpdir(),'fngk-atlas-database-')),runtime=new DbGateSupervisor({command:process.execPath,args:[path.resolve('test/fixtures/dbgate-sidecar.mjs')],version:'7.2.3',uid:1000});
-    const app=await createApp({fngk:new FngkProcessClient({binary:fixture}),dbPath:path.join(directory,'atlas.db'),databaseRuntime:runtime});cleanups.push(async()=>{await app.close();await rm(directory,{recursive:true,force:true})});
-    const started=await app.inject({method:'POST',url:'/api/databases/sessions',payload:{contextId:'local',engine:'postgres',host:'127.0.0.1',port:5432,user:'atlas',password:'not-in-response',readOnly:true}});expect(started.statusCode).toBe(201);expect(started.body).not.toContain('not-in-response');const value=started.json(),cookie=started.headers['set-cookie'];
-    const proxied=await app.inject({method:'GET',url:value.session.proxyPath,headers:{cookie:String(cookie)}});expect(proxied.statusCode).toBe(200);expect(proxied.body).toContain('Database workbench');
-    expect((await app.inject({method:'GET',url:value.session.proxyPath})).statusCode).toBe(403);expect((await app.inject({method:'DELETE',url:`/api/databases/sessions/${value.session.id}`,payload:{}})).statusCode).toBe(409);
+  it('uses the native Device database Surface without a TCP relay or sidecar',async()=>{
+    const app=await harness();
+    const surface=await app.inject({method:'GET',url:'/api/databases/surface?resourceId=resource-1'});expect(surface.statusCode).toBe(200);expect(surface.json()).toMatchObject({credentialPublicKey:'device-key'});
+    const bindings=await app.inject({method:'GET',url:'/api/databases/bindings?resourceId=resource-1'});expect(bindings.statusCode).toBe(200);expect(bindings.json()).toMatchObject({items:[]});
   });
 
   it('browses, conflict-checks, saves, and scans the process-visible machine context', async () => {

@@ -36,6 +36,14 @@ if (args[0] === 'version') {
   process.stdout.write(JSON.stringify({protocolVersion:'fngk.session.v1',action:args[2],result:{id:args[1],title:args[args.indexOf('--title')+1],argv:args}})+'\n');
 } else if (args[0] === 'processes' && args[2] === 'logs' && args.includes('--json')) {
   process.stdout.write(JSON.stringify({protocolVersion:'fngk.process.v1',action:'logs',result:{run:{id:'run-1',status:'running'},items:[],nextCursor:7,hasMore:false,argv:args}})+'\n');
+} else if (args[0] === 'processes' && ['probe','publish','unpublish'].includes(args[2]) && args.includes('--json')) {
+  let raw='';process.stdin.setEncoding('utf8');process.stdin.on('data',value=>raw+=value);process.stdin.on('end',()=>process.stdout.write(JSON.stringify({protocolVersion:'fngk.process.v1',action:args[2],result:{argv:args,input:raw?JSON.parse(raw):{},...(args[2]==='publish'?{hostname:'preview.test'}:{ready:true})}})+'\n'));
+} else if (args[0] === 'deployments' && args.includes('--json')) {
+  let raw='';process.stdin.setEncoding('utf8');process.stdin.on('data',value=>raw+=value);process.stdin.on('end',()=>{const action=args[2];const base={argv:args,input:raw?JSON.parse(raw):undefined};const result=action==='create'?{...base,deployment:{id:'deployment-1'},release:{id:'release-1'}}:action==='rollback'?{...base,target:{id:'release-1'}}:action==='inspect'?{...base,deployment:{id:args[1]},releases:[],events:[]}:action==='list'?{...base,deployments:[]}:{...base,release:{id:action==='event'?args[1]:'release-2'}};process.stdout.write(JSON.stringify({protocolVersion:'fngk.deployment.v1',action,result})+'\n')});
+} else if (args[0] === 'resources' && args.includes('--json')) {
+  let raw='';process.stdin.setEncoding('utf8');process.stdin.on('data',value=>raw+=value);process.stdin.on('end',()=>{const action=args[2],base={argv:args,input:raw?JSON.parse(raw):undefined},result=action==='surface'?{...base,credentialPublicKey:'device-key',manifest:{}}:action==='bindings'?{...base,items:[]}:action==='invoke'?{...base,output:{columns:['datname'],rows:[['postgres']]}}:{...base,id:'binding-1'};process.stdout.write(JSON.stringify({protocolVersion:'fngk.surface.v1',action,result})+'\n')});
+} else if (args[0] === 'connections' && args.includes('--json')) {
+  let raw='';process.stdin.setEncoding('utf8');process.stdin.on('data',value=>raw+=value);process.stdin.on('end',()=>process.stdout.write(JSON.stringify({protocolVersion:'fngk.connection.v1',action:args[2],result:{connectionId:args[1],generated:'generated.test',effective:'generated.test',input:raw?JSON.parse(raw):undefined}})+'\n'));
 } else if (args[0] === 'tcp' && args.includes('--stdio-json')) {
   process.stdout.write(mode==='human-tcp'?'Signal TCP relay listening on 127.0.0.1:39153\n':JSON.stringify({protocolVersion:'fngk.tcp.v1',type:'ready',listenHost:'127.0.0.1',listenPort:32123,target:args[1],targetPort:Number(args[2]),argv:args})+'\n');
   setInterval(()=>{},60_000);

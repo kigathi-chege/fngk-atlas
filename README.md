@@ -17,9 +17,11 @@ Open <http://127.0.0.1:4317>. Set `ATLAS_PORT`, `ATLAS_HOST`, or `ATLAS_DB` to o
 
 For a real installed FNGK context, follow [the host handoff](docs/host-handoff.md) and use `npm run start:host`. The launcher refuses to start when `fngk status --json` is unavailable or incompatible, preventing a container-local filesystem from being mistaken for an authenticated FNGK Device.
 
-To enable the isolated database workbench, start Atlas with `DBGATE_RUNTIME=container`. Atlas launches the pinned, non-root DbGate sidecar only when a database session is requested; remote bytes travel through the selected Device's authenticated FNGK TCP relay. See [the database workbench guide](docs/database-workbench.md) for isolation, compatibility, and licensing details.
+The database workbench uses the selected Device's native, capability-scoped Surface. Atlas never opens a TCP relay or launches a database sidecar: schema, query, export, backup, and restore operations execute through the adopted database resource and remain in Signal's operation audit. See [the database workbench guide](docs/database-workbench.md).
 
 Live Project runs a chosen repository command in a dedicated, visible FNGK terminal, publishes its selected port through Signal's existing Connection/HKMN path, embeds the result, and offers opt-in Playwright diagnostics. It requires the exact-head `fngk.publish.v1` CLI protocol described in [the live project guide](docs/live-projects.md).
+
+The [deployment workbench](docs/deployments.md) builds immutable Device releases, gates publication on health, retains logs/artifacts/history, governs vanity and verified custom domains, and performs health-safe rollback through Signal's canonical managed-process and deployment protocols.
 
 From Docker, publish the service port to the host:
 

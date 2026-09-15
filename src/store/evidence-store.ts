@@ -73,13 +73,14 @@ export class EvidenceStore {
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
+  putProjection(key:string,entities:EvidenceEntity[],relationships:EvidenceRelationship[]=[]){const scanId=`projection:${key}`;this.putEntities(scanId,entities);this.putRelationships(scanId,relationships)}
 
   completeScan(id: string, value: { partial: boolean }): void {
     this.db.prepare(`UPDATE atlas_scans SET status='complete',partial=?,completed_at=? WHERE id=?`).run(value.partial ? 1 : 0, new Date().toISOString(), id);
     if (!value.partial) {
       const scan = this.db.prepare('SELECT context_id contextId FROM atlas_scans WHERE id=?').get(id) as { contextId?: string } | undefined;
       if (scan?.contextId) {
-        this.db.exec('BEGIN');try{this.db.prepare('DELETE FROM atlas_entities WHERE context_id=? AND last_scan_id<>?').run(scan.contextId, id);this.db.prepare('DELETE FROM atlas_relationships WHERE context_id=? AND last_scan_id<>?').run(scan.contextId, id);this.db.prepare("DELETE FROM atlas_search WHERE source='evidence' AND context_id=? AND entity_id NOT IN (SELECT id FROM atlas_entities WHERE context_id=?)").run(scan.contextId,scan.contextId);this.db.prepare(`INSERT INTO atlas_context_state(context_id,stale,reason,updated_at) VALUES(?,0,NULL,?) ON CONFLICT(context_id) DO UPDATE SET stale=0,reason=NULL,updated_at=excluded.updated_at`).run(scan.contextId, new Date().toISOString());this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
+        this.db.exec('BEGIN');try{this.db.prepare("DELETE FROM atlas_entities WHERE context_id=? AND last_scan_id<>? AND last_scan_id NOT LIKE 'projection:%'").run(scan.contextId, id);this.db.prepare("DELETE FROM atlas_relationships WHERE context_id=? AND last_scan_id<>? AND last_scan_id NOT LIKE 'projection:%'").run(scan.contextId, id);this.db.prepare("DELETE FROM atlas_search WHERE source='evidence' AND context_id=? AND entity_id NOT IN (SELECT id FROM atlas_entities WHERE context_id=?)").run(scan.contextId,scan.contextId);this.db.prepare(`INSERT INTO atlas_context_state(context_id,stale,reason,updated_at) VALUES(?,0,NULL,?) ON CONFLICT(context_id) DO UPDATE SET stale=0,reason=NULL,updated_at=excluded.updated_at`).run(scan.contextId, new Date().toISOString());this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}
       }
     }
   }

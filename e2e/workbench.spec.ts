@@ -60,16 +60,21 @@ test('keeps unsaved buffer bodies memory-only and drops stale restored tabs',asy
 
 test('opens Device database and live-project workbenches without starting privileged actions',async({page})=>{
   await page.goto('/');
+  await page.locator('.context-rail').getByRole('button',{name:/kigathi/}).click({button:'right'});await expect(page.getByRole('menuitem',{name:/Start dev run/})).toBeVisible();await expect(page.getByRole('menuitem',{name:/Open deployment workbench/})).toBeVisible();await page.keyboard.press('Escape');
   await page.locator('.context-rail').getByRole('button',{name:/kigathi/}).click();
   const sidebar=page.locator('.context-sidebar');
   await sidebar.getByRole('button',{name:'More actions'}).click();
-  await sidebar.getByRole('button',{name:'Live project'}).click();
+  await sidebar.getByRole('button',{name:'Dev run'}).click();
   await expect(page.getByRole('heading',{name:'Run on selected Device'})).toBeVisible();
   await sidebar.getByRole('button',{name:'More actions'}).click();
   await sidebar.getByRole('button',{name:'Databases'}).click();
-  await expect(page.locator('.database-panel')).toBeVisible();
-  await expect(page.getByRole('button',{name:'Open workbench'})).toBeVisible();
-  await expect(page.getByTitle('Database workbench')).toHaveCount(0);
+  await expect(page.locator('.native-database')).toBeVisible();
+  await expect(page.getByText('Device PostgreSQL resources')).toBeVisible();
+  await expect(page.getByText('DbGate')).toHaveCount(0);
+  await page.locator('.native-database').click({button:'right',position:{x:260,y:180}});await expect(page.getByRole('menuitem',{name:'Open deployment workbench'})).toBeVisible();await page.getByRole('menuitem',{name:'Open deployment workbench'}).click();
+  await expect(page.getByRole('tab',{name:'Deployment',exact:true})).toBeVisible();await expect(page.getByRole('tab',{name:'Deployment logs',exact:true})).toBeVisible();
+  expect(await page.evaluate(()=>{const group=(selector:string)=>document.querySelector(selector)?.closest('.dv-groupview');return group('.atlas-tab[data-panel-id$=":logs"]')===group('.atlas-tab[data-panel-id="atlas.operations"]')&&group('.atlas-tab[data-panel-id$=":overview"]')!==group('.atlas-tab[data-panel-id="atlas.operations"]')})).toBe(true);
+  await page.keyboard.press('Control+Shift+p');await page.getByLabel('Command search').fill('intelligence');await page.getByRole('button',{name:'Context: Open intelligence'}).click();expect(await page.evaluate(()=>document.querySelector('.atlas-tab[data-panel-id="atlas.intelligence"]')?.closest('.dv-groupview')===document.querySelector('.atlas-tab[data-panel-id="atlas.filesystem"]')?.closest('.dv-groupview'))).toBe(true);
 });
 
 test('keeps the persistent shell polished and reachable at desktop and narrow widths',async({page})=>{

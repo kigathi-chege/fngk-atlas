@@ -4,8 +4,8 @@ import WebSocket from 'ws';
 
 const atlas = process.env.LIVE_ATLAS_URL;
 const fixtureRoot = process.env.LIVE_FIXTURE_ROOT;
-const databaseHost=process.env.LIVE_DATABASE_HOST,databasePort=Number(process.env.LIVE_DATABASE_PORT);
-if (!atlas || !fixtureRoot || !databaseHost || !databasePort) throw new Error('LIVE_ATLAS_URL, LIVE_FIXTURE_ROOT, LIVE_DATABASE_HOST, and LIVE_DATABASE_PORT are required');
+const postgresPort=Number(process.env.LIVE_POSTGRES_PORT);
+if (!atlas || !fixtureRoot || !postgresPort) throw new Error('LIVE_ATLAS_URL, LIVE_FIXTURE_ROOT, and LIVE_POSTGRES_PORT are required');
 const evidence: Record<string, unknown> = {};
 const check = (condition: unknown, message: string): asserts condition => { if (!condition) throw new Error(message); };
 async function api(path: string, init?: RequestInit) {
@@ -24,6 +24,8 @@ async function waitFor(messages: any[], predicate: (message: any) => boolean, ti
   throw new Error('timed out waiting for live protocol event');
 }
 async function waitForHttpText(url:string,wanted:string,timeoutMs=15_000){const deadline=Date.now()+timeoutMs;let last='';while(Date.now()<deadline){try{const response=await fetch(url);last=await response.text();if(response.ok&&last===wanted)return response}catch(error){last=(error as Error).message}await new Promise(resolve=>setTimeout(resolve,100))}throw new Error(`timed out waiting for ${url}: ${last.slice(0,500)}`)}
+const base64=(value:Uint8Array)=>Buffer.from(value).toString('base64');
+async function encryptSurfaceSecret(secret:string,publicKey:string){const recipient=await crypto.subtle.importKey('raw',Buffer.from(publicKey,'base64'),{name:'ECDH',namedCurve:'P-256'},false,[]),pair=await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveBits']),shared=new Uint8Array(await crypto.subtle.deriveBits({name:'ECDH',public:recipient},pair.privateKey,256)),salt=crypto.getRandomValues(new Uint8Array(16)),material=new Uint8Array(shared.length+salt.length);material.set(shared);material.set(salt,shared.length);const key=await crypto.subtle.importKey('raw',await crypto.subtle.digest('SHA-256',material),'AES-GCM',false,['encrypt']),nonce=crypto.getRandomValues(new Uint8Array(12)),ciphertext=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv:nonce},key,new TextEncoder().encode(secret))),ephemeralPublicKey=new Uint8Array(await crypto.subtle.exportKey('raw',pair.publicKey));return{ephemeralPublicKey:base64(ephemeralPublicKey),salt:base64(salt),nonce:base64(nonce),ciphertext:base64(ciphertext)}}
 
 const context = await api('/api/fngk/context?profile=live');
 check(context.response.ok && context.body.compatible, 'Atlas did not discover a compatible exact-head FNGK');
@@ -61,13 +63,19 @@ check(live.response.status===201&&live.body.session?.status==='running'&&live.bo
 const liveResponse=await waitForHttpText(live.body.session.url,'large');
 const browser=await api(`/api/live-projects/${encodeURIComponent(live.body.session.id)}/diagnostics`,{method:'POST',body:'{}'});check(browser.response.ok&&browser.body.ok&&browser.body.consoleErrors.length===0,`Playwright diagnostics did not verify the public project: ${JSON.stringify(browser.body)}`);
 const interruptedProject=await api(`/api/live-projects/${encodeURIComponent(live.body.session.id)}/actions`,{method:'POST',body:JSON.stringify({action:'interrupt',confirm:true})});check(interruptedProject.body.interrupted,'live project interrupt was not delivered');
-const restartedProject=await api(`/api/live-projects/${encodeURIComponent(live.body.session.id)}/actions`,{method:'POST',body:JSON.stringify({action:'restart',confirm:true})});check(restartedProject.response.ok&&restartedProject.body.session?.id!==live.body.session.id,'live project did not restart in a fresh terminal');live={response:restartedProject.response,body:{session:restartedProject.body.session},text:restartedProject.text};
+const restartedProject=await api(`/api/live-projects/${encodeURIComponent(live.body.session.id)}/actions`,{method:'POST',body:JSON.stringify({action:'restart',confirm:true})});check(restartedProject.response.ok&&restartedProject.body.session?.id!==live.body.session.id,`live project did not restart as a fresh managed process: ${JSON.stringify(restartedProject.body)}`);live={response:restartedProject.response,body:{session:restartedProject.body.session},text:restartedProject.text};
 await waitForHttpText(live.body.session.url,'large');
 
-const database=await api('/api/databases/sessions',{method:'POST',body:JSON.stringify({contextId:'local',engine:'postgres',host:databaseHost,port:databasePort,database:'signal',user:'postgres',password:'signal-live-test',readOnly:true})});
-check(database.response.status===201&&database.body.session?.status==='live','isolated DbGate session did not start');
-const cookie=database.response.headers.get('set-cookie')?.split(';')[0];check(cookie,'database session did not issue a scoped proxy cookie');
-const databasePage=await fetch(`${atlas}${database.body.session.proxyPath}`,{headers:{cookie}});check(databasePage.ok,'authenticated DbGate proxy was not reachable');
+const database=await api(`/api/databases/discover?contextId=${encodedContext}`);
+const postgresResource=database.body.items?.find((item:any)=>item.engine==='postgres'&&item.port===postgresPort&&item.evidence?.nativeResourceId);
+check(database.response.ok&&postgresResource,`native database discovery did not observe adopted PostgreSQL :${postgresPort}: ${JSON.stringify(database.body)}`);
+const databaseSurface=await api(`/api/databases/surface?resourceId=${encodeURIComponent(postgresResource.evidence.nativeResourceId)}`);
+check(databaseSurface.response.ok&&databaseSurface.body.credentialPublicKey,'native PostgreSQL Surface did not expose a Device credential key');
+const secretEnvelope=await encryptSurfaceSecret('signal-live-test',databaseSurface.body.credentialPublicKey);
+const databaseBinding=await api('/api/databases/bindings',{method:'POST',body:JSON.stringify({contextId,resourceId:postgresResource.evidence.nativeResourceId,name:'live-acceptance',environment:'development',config:{host:'127.0.0.1',port:postgresPort,database:'signal',username:'postgres',sslMode:'disable',credentialSource:'ephemeral'},persistCredential:false,secretEnvelope})});
+check(databaseBinding.response.status===201&&databaseBinding.body.id,`native PostgreSQL profile was not created: ${JSON.stringify(databaseBinding.body)}`);
+const databaseCatalog=await api(`/api/databases/bindings/${encodeURIComponent(databaseBinding.body.id)}/invoke`,{method:'POST',body:JSON.stringify({contextId,capability:'database.catalog',input:{section:'databases',database:'signal'},secretEnvelope})});
+check(databaseCatalog.response.ok&&databaseCatalog.body.output?.rows?.some((row:any[])=>row.includes('signal')),`native PostgreSQL catalog did not list the Signal database: ${JSON.stringify(databaseCatalog.body)}`);
 
 const discovery = await websocket(`/api/discovery/scan?contextId=${encodedContext}&root=${encodedRoot}&maxEntries=200&maxDepth=5`);
 check(discovery.some(message => message.complete === true), 'bounded remote discovery did not complete');
@@ -108,8 +116,7 @@ check(nextSession && nextSession !== priorSession, 'reconnect did not establish 
 await websocket(`/api/discovery/scan?contextId=${encodedContext}&root=${encodedRoot}&maxEntries=200&maxDepth=5`);
 const fresh = await api(`/api/discovery/entities?contextId=${encodedContext}`); check(fresh.body.entities.every((entity: any) => entity.stale === false), 'successful rescan did not refresh stale evidence');
 const stoppedLive=await api(`/api/live-projects/${encodeURIComponent(live.body.session.id)}`,{method:'DELETE',body:JSON.stringify({confirm:true})});check(stoppedLive.body.stopped,'live project did not stop');
-const stoppedDatabase=await api(`/api/databases/sessions/${encodeURIComponent(database.body.session.id)}`,{method:'DELETE',body:JSON.stringify({confirm:true})});check(stoppedDatabase.body.stopped,'database session did not stop');
 const leftovers = (await readdir(fixtureRoot)).filter(name => name.includes('.atlas-') || name.endsWith('.b64'));
 check(leftovers.length === 0, `helper artifacts remained: ${leftovers.join(', ')}`);
-evidence.acceptance = { rootRoute: root.body.route, conflict: conflict.body.error, processCodeEdges: execution.body.edges.filter((edge: any) => edge.type === 'loads').length, coverage: coverage.body.coverage, terminalEvents: terminalMessages.map(message => message.type), liveProject:{url:live.body.session.url,browser:{status:browser.body.status,title:browser.body.title,consoleErrors:browser.body.consoleErrors.length}},database:{engine:database.body.session.engine,status:'stopped'},reconnect: { priorSession, nextSession }, helperArtifacts: leftovers };
+evidence.acceptance = { rootRoute: root.body.route, conflict: conflict.body.error, processCodeEdges: execution.body.edges.filter((edge: any) => edge.type === 'loads').length, coverage: coverage.body.coverage, terminalEvents: terminalMessages.map(message => message.type), liveProject:{url:live.body.session.url,browser:{status:browser.body.status,title:browser.body.title,consoleErrors:browser.body.consoleErrors.length}},database:{nativeDiscovery:true,postgresResources:database.body.items.filter((item:any)=>item.engine==='postgres').length,catalogDatabases:databaseCatalog.body.output.rows.length},reconnect: { priorSession, nextSession }, helperArtifacts: leftovers };
 process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);

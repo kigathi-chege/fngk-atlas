@@ -9,7 +9,7 @@
 </script>
 <nav class="activity-rail context-rail" aria-label="Atlas activity">
   <button class="rail-brand" title="FNGK Atlas" aria-label="FNGK Atlas"><img src="/brand/fngk-mark.svg" alt=""/></button>
-  <div class="rail-contexts" aria-label="FNGK contexts">{#each contexts as item}<button class:active={item.id===selected} class:offline={!item.online} title={label(item)} aria-label={label(item)} onclick={()=>choose(item.id)}><Monitor size={18}/><i class:online={item.online}></i></button>{/each}</div>
+  <div class="rail-contexts" aria-label="FNGK contexts">{#each contexts as item}<button class:active={item.id===selected} class:offline={!item.online} data-context-id={item.id} data-context-kind={item.kind??'context'} title={label(item)} aria-label={label(item)} onclick={()=>choose(item.id)}><Monitor size={18}/><i class:online={item.online}></i></button>{/each}</div>
   <span class="rail-spacer"></span>
   <button title="Search" aria-label="Search" onclick={()=>window.dispatchEvent(new Event('atlas:focus-search'))}><Search size={17}/></button>
   <button title="Open filesystem" aria-label="Open filesystem" onclick={()=>window.dispatchEvent(new CustomEvent('atlas:open-root',{detail:{contextId:selected,path:'/'}}))}><FolderOpen size={17}/></button>

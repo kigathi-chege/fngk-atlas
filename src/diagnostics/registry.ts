@@ -2,7 +2,7 @@ import {EventEmitter} from 'node:events';
 import {randomUUID} from 'node:crypto';
 import {redactCommandLine} from '../discovery/redaction.js';
 
-export type DiagnosticKind='live-project'|'fngk-relay'|'dbgate';
+export type DiagnosticKind='live-project'|'database';
 export type DiagnosticStatus='starting'|'running'|'failed'|'unknown'|'stopped'|'expired';
 export type DiagnosticSession={
   id:string;kind:DiagnosticKind;contextId?:string;status:DiagnosticStatus;createdAt:string;updatedAt:string;

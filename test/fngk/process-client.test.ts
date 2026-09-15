@@ -67,4 +67,30 @@ describe('FngkProcessClient', () => {
     const value:any=await new FngkProcessClient({binary:fixture}).managedProcessLogs('process-1',{profile:'work',after:7,limit:50});
     expect(value.argv).toEqual(['processes','process-1','logs','--json','--after','7','--limit','50','--profile','work']);
   });
+
+  it('probes and publishes a managed process without opening a terminal',async()=>{
+    const value:any=await new FngkProcessClient({binary:fixture}).managedProcessOperation('process-1','probe',{port:8080,protocol:'http',path:'/'},{profile:'work'});
+    expect(value).toMatchObject({input:{port:8080,protocol:'http',path:'/'},argv:['processes','process-1','probe','--json','--profile','work']});
+  });
+
+  it('uses the retained deployment protocol for plans, releases, events, and rollback',async()=>{
+    const client=new FngkProcessClient({binary:fixture});
+    const created:any=await client.createDeployment('device-1',{name:'web',repositoryPath:'/srv/web',environment:'production',commitSha:'a'.repeat(40),manifest:{version:'fngk.project.v1'}},{profile:'work'});
+    expect(created).toMatchObject({deployment:{id:'deployment-1'},release:{id:'release-1'}});
+    const event:any=await client.deploymentEvent('release-1',{event:'health.passed',status:'healthy'},{profile:'work'});
+    expect(event.argv).toEqual(['deployments','release-1','event','--json','--profile','work']);
+    await expect(client.rollbackDeployment('deployment-1',{profile:'work'})).resolves.toMatchObject({target:{id:'release-1'}});
+  });
+
+  it('invokes native Device Surfaces without a relay or sidecar',async()=>{
+    const client=new FngkProcessClient({binary:fixture});
+    await expect(client.resourceSurface('resource-1',{profile:'work'})).resolves.toMatchObject({credentialPublicKey:'device-key'});
+    const value:any=await client.invokeResourceBinding('binding-1',{capability:'database.catalog',input:{section:'databases'}},{profile:'work'});
+    expect(value).toMatchObject({output:{rows:[['postgres']]},argv:['resources','binding-1','invoke','--json','--profile','work']});
+  });
+
+  it('governs deployment hostnames through the Connection protocol',async()=>{
+    const client=new FngkProcessClient({binary:fixture}),domains:any=await client.connectionDomains('connection-1',{profile:'work'}),custom:any=await client.attachConnectionDomain('connection-1','app.example.com',{profile:'work'});
+    expect(domains).toMatchObject({connectionId:'connection-1',generated:'generated.test'});expect(custom.input).toEqual({hostname:'app.example.com'});
+  });
 });
