@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { once } from "node:events";
@@ -237,6 +237,24 @@ describe("Atlas FNGK-native server", () => {
         "publish",
       ],
     });
+  });
+
+  it("interprets bounded project metadata without reading environment secrets", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fngk-atlas-interpret-"));
+    const repository = path.join(directory, "app");
+    await mkdir(repository);
+    await writeFile(path.join(repository, "package.json"), JSON.stringify({name:"fixture",dependencies:{fastify:"5",pg:"8"},scripts:{start:"node server.js"}}));
+    await writeFile(path.join(repository, ".env"), "DATABASE_URL=never-return-this\n");
+    const app = await createApp({
+      fngk: new FngkProcessClient({ binary: fixture }),
+      dbPath: path.join(directory, "atlas.db"),
+      localRoot: directory,
+    });
+    cleanups.push(async () => { await app.close(); await rm(directory, {recursive:true,force:true}); });
+    const response = await app.inject({method:"POST",url:"/api/deployments/interpret",payload:{contextId:"local",repositoryPath:"/app",environment:"production"}});
+    expect(response.statusCode,response.body).toBe(200);
+    expect(response.json()).toMatchObject({protocolVersion:"atlas.deployment-proposal.v1",manifest:{protocolVersion:"fngk.project.v2",adapter:{id:"fastify"}},matches:expect.arrayContaining([expect.objectContaining({id:"fastify"}),expect.objectContaining({id:"postgres"})])});
+    expect(response.body).not.toContain("never-return-this");
   });
 
   it("delegates retained deployment transitions through FNGK",async()=>{

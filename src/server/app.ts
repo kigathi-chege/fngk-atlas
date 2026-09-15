@@ -42,6 +42,7 @@ import {
   type CalculatorProvider,
 } from "../intelligence/service.js";
 import { DeploymentService } from "../deployments/service.js";
+import { interpretDeploymentProject } from "../deployments/adapters.js";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -547,6 +548,60 @@ export async function createApp(
         stop ? "terminal_stopped" : "terminal_disconnected",
       );
     return { released, contextId: id, stopped: stop };
+  });
+
+  app.post("/api/deployments/interpret", async (request, reply) => {
+    const body = request.body as {
+        contextId?: string;
+        repositoryPath?: string;
+        environment?: "development" | "staging" | "production";
+      },
+      contextId = String(body.contextId ?? "local"),
+      repositoryPath = path.posix.normalize(
+        String(body.repositoryPath ?? ""),
+      ),
+      environment = body.environment ?? "development";
+    if (!repositoryPath.startsWith("/") || repositoryPath === "/")
+      return reply.code(400).send({ error: "invalid_repository_path" });
+    if (!(["development", "staging", "production"] as const).includes(environment))
+      return reply.code(400).send({ error: "invalid_environment" });
+    const metadataName = /^(?:package\.json|composer\.json|artisan|svelte\.config\.(?:js|ts|mjs|cjs)|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|package-lock\.json|Dockerfile(?:\.[A-Za-z0-9._-]+)?|(?:docker-)?compose\.ya?ml|ecosystem\.config\.(?:js|cjs|mjs)|crontab|[A-Za-z0-9._-]*supervisor[A-Za-z0-9._-]*\.conf)$/i;
+    try {
+      const files = await readThroughFiles(contextId, async (service) => {
+        const page = await service.list(
+            { contextId, path: repositoryPath },
+            { limit: 200 },
+          ),
+          selected = page.items
+            .filter(
+              (item) =>
+                item.type !== "directory" && metadataName.test(item.name),
+            )
+            .slice(0, 64),
+          collected: Record<string, string> = {};
+        let totalBytes = 0;
+        for (const item of selected) {
+          const opened = await service.read({ contextId, path: item.path });
+          if (
+            opened.tooLarge ||
+            opened.binary ||
+            !opened.text ||
+            opened.bytes > 256 * 1024 ||
+            totalBytes + opened.bytes > 1024 * 1024
+          )
+            continue;
+          collected[item.name] = opened.text;
+          totalBytes += opened.bytes;
+        }
+        return collected;
+      });
+      return interpretDeploymentProject({ files, environment });
+    } catch (error) {
+      const result = processError(error);
+      return reply
+        .code(result.statusCode === 500 ? 400 : result.statusCode)
+        .send(result.body);
+    }
   });
 
   app.post("/api/deployments/plan", async (request, reply) => {
