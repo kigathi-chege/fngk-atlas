@@ -75,6 +75,7 @@ The browser suite builds the web assets, launches a disposable fixture server an
 
 Run this on the host, from the Atlas checkout:
 
+```bash
   cd ~/Projects/signal/fngk-atlas
 
   npm run build:fngk-head
@@ -87,26 +88,34 @@ Run this on the host, from the Atlas checkout:
 
   /tmp/fngk-atlas-update/fngk version
   type -a fngk
+  ```
 
   Install it into the executable your shell actually uses. Since your ~/.local/bin likely comes first:
 
+```bash
   cp ~/.local/bin/fngk ~/.local/bin/fngk.atlas-backup 2>/dev/null || true
   install -m 0755 /tmp/fngk-atlas-update/fngk ~/.local/bin/fngk
   hash -r
+```
 
   Then converge the user daemon:
 
+```bash
   fngk version
   fngk install --profile local
   fngk status --json --profile local | jq '{profile,devices,connections}'
+```
 
   You should see the updated version and the local Device online. If Atlas is already running, restart it afterward:
 
+```bash
   npm run start:host
+```
 
   Do not run fngk update; that targets released artifacts. The exact-head artifact is the one built by npm run build:fngk-head.
 
   If type -a fngk shows /usr/local/bin/fngk is the active first entry instead, install there with:
 
+```bash
   sudo cp /usr/local/bin/fngk /usr/local/bin/fngk.atlas-backup
   sudo install -m 0755 /tmp/fngk-atlas-update/fngk /usr/local/bin/fngk

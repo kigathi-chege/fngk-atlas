@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 atlas_root="$(cd -- "$script_dir/.." && pwd)"
-signal_root="$(cd -- "${SIGNAL_SOURCE:-$atlas_root/../../../signal-atlas-deployment-protocol}" && pwd)"
+signal_root="$(cd -- "${SIGNAL_SOURCE:-$atlas_root/../signal-atlas-deployment-protocol}" && pwd)"
 output_dir="${FNGK_HEAD_OUTPUT:-$atlas_root/output/fngk-head}"
 image="fngk-atlas-cli-head"
 container=''
