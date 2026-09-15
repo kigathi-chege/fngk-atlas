@@ -57,6 +57,8 @@ Implemented:
 - duplicate execute suppression and ordered retained phase attempts;
 - bounded FNGK phase execution with explicit absolute cwd, environment revision values, timeout, stdout/stderr caps, process-group cancellation, and non-blocking Device message handling;
 - Signal startup recovery for plans left in `executing`, preserving an interrupted attempt and creating a new attempt;
+- a private Device-side phase journal keyed by plan/phase and command digest, allowing completed results to be deduplicated and queried after reconnect;
+- reconnect reconciliation which resumes only after FNGK reports a matching successful phase, waits for a still-running phase, and fails safely with recovery instructions when reality is missing, changed, or unknown;
 - Atlas/FNGK action APIs so Atlas delegates v2 transitions instead of executing them through a terminal;
 - v2 deployment-log projection from the retained Signal phase ledger.
 
@@ -67,9 +69,7 @@ Verified:
 
 Remaining before Gate 4 can be checked complete:
 
-- persist and query Device-side phase reality across an FNGK daemon restart;
-- reconcile an uncertain/disconnected phase before replay rather than assuming it is safe to execute again;
-- add restart/disconnect acceptance proving no duplicate mutation.
+- run the exact Signal/FNGK socket path through a forced daemon restart and Device disconnect in disposable live acceptance, proving no duplicate mutation.
 
 ## Gates 5–11
 
