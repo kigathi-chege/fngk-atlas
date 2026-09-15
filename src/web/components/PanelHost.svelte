@@ -1,6 +1,18 @@
 <script lang="ts">
-  import GraphPanel from './GraphPanel.svelte';import SemanticAtlas from './SemanticAtlas.svelte';import FilePanel from './FilePanel.svelte';import TerminalPanel from './TerminalPanel.svelte';import DatabasePanel from './DatabasePanel.svelte';import LiveProjectPanel from './LiveProjectPanel.svelte';import DeploymentPanel from './DeploymentPanel.svelte';import LogsPanel from './LogsPanel.svelte';import IntelligencePanel from './IntelligencePanel.svelte';import OutputPanel from './OutputPanel.svelte';import DetailsPanel from './DetailsPanel.svelte';import MetricsPanel from './MetricsPanel.svelte';import Navigator from './Navigator.svelte';import FilesystemTree from './FilesystemTree.svelte';
   import {onMount} from 'svelte';import type {Readable} from 'svelte/store';import type {WorkbenchState} from '../lib/workbench-state.js';
-  export let kind='graph';export let paramsStore:Readable<Record<string,unknown>>;export let state:WorkbenchState;let params:Record<string,unknown>={};let ready=false;onMount(()=>paramsStore.subscribe(value=>{params=value;ready=true;}));
+  export let kind='graph';export let paramsStore:Readable<Record<string,unknown>>;export let state:WorkbenchState;
+  let params:Record<string,unknown>={},ready=false,Component:any,loadError='';
+  const loaders:Record<string,()=>Promise<any>>={atlas:()=>import('./SemanticAtlas.svelte'),navigator:()=>import('./Navigator.svelte'),filesystem:()=>import('./FilesystemTree.svelte'),graph:()=>import('./GraphPanel.svelte'),file:()=>import('./FilePanel.svelte'),terminal:()=>import('./TerminalPanel.svelte'),database:()=>import('./DatabasePanel.svelte'),'live-project':()=>import('./LiveProjectPanel.svelte'),deployment:()=>import('./DeploymentPanel.svelte'),logs:()=>import('./LogsPanel.svelte'),intelligence:()=>import('./IntelligencePanel.svelte'),details:()=>import('./DetailsPanel.svelte'),metrics:()=>import('./MetricsPanel.svelte'),output:()=>import('./OutputPanel.svelte')};
+  onMount(()=>{const unsubscribe=paramsStore.subscribe(value=>{params=value;ready=true}),loader=loaders[kind];if(loader)void loader().then(value=>Component=value.default).catch(error=>loadError=(error as Error).message);return unsubscribe});
 </script>
-{#if ready}{#if kind==='atlas'}<SemanticAtlas {state}/>{:else if kind==='workspace'}<section class="workspace-placeholder" aria-label="Empty workspace"></section>{:else if kind==='operations'}<section class="operations-placeholder" aria-label="Empty operations dock"></section>{:else if kind==='navigator'}<Navigator {state}/>{:else if kind==='filesystem'}<FilesystemTree {state}/>{:else if kind==='graph'}<GraphPanel {state}/>{:else if kind==='file'}{#key `${params.contextId}:${params.path??params.bufferId}`}<FilePanel {params}/>{/key}{:else if kind==='terminal'}<TerminalPanel {params} {state}/>{:else if kind==='database'}<DatabasePanel {params} {state}/>{:else if kind==='live-project'}<LiveProjectPanel {params} {state}/>{:else if kind==='deployment'}<DeploymentPanel {params} {state}/>{:else if kind==='logs'}<LogsPanel {params}/>{:else if kind==='intelligence'}<IntelligencePanel {state}/>{:else if kind==='details'}<DetailsPanel {state}/>{:else if kind==='metrics'}<MetricsPanel {state}/>{:else}<OutputPanel {state}/>{/if}{/if}
+{#if ready}
+  {#if kind==='workspace'}<section class="workspace-placeholder" aria-label="Empty workspace"></section>
+  {:else if kind==='operations'}<section class="operations-placeholder" aria-label="Empty operations dock"></section>
+  {:else if loadError}<div class="panel-error">{loadError}</div>
+  {:else if Component}
+    {#if kind==='atlas'||kind==='navigator'||kind==='filesystem'||kind==='graph'||kind==='intelligence'||kind==='details'||kind==='metrics'||kind==='output'}<Component {state}/>
+    {:else if kind==='terminal'||kind==='database'||kind==='live-project'||kind==='deployment'}<Component {params} {state}/>
+    {:else if kind==='file'}{#key `${params.contextId}:${params.path??params.bufferId}`}<Component {params}/>{/key}
+    {:else if kind==='logs'}<Component {params}/>{/if}
+  {:else}<div class="semantic-state">Loading panel…</div>{/if}
+{/if}

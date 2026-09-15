@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.setTimeout(45_000);
+const openWorkbench=async(page:any)=>{await page.goto('/');await expect(page.locator('.dv-dockview')).toBeVisible();await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('atlas.workbench.v5')??'null')?.version)).toBe(5)};
 
 test("opens on the semantic Device atlas and preserves deep navigation in browser history", async ({
   page,
@@ -10,7 +11,7 @@ test("opens on the semantic Device atlas and preserves deep navigation in browse
     if (message.type() === "error") errors.push(message.text());
   });
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("/");
+  await openWorkbench(page);
   await expect(page.getByRole("tab", { name: "Device Atlas" })).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Atlas views" }),
@@ -46,7 +47,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
     if (socket.url().includes("/api/fngk/terminals"))
       terminalSockets.push(socket.url());
   });
-  await page.goto("/");
+  await openWorkbench(page);
   await expect(
     page.getByText("FNGK Atlas", { exact: true }).first(),
   ).toBeVisible();
@@ -365,7 +366,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
 test("keeps unsaved buffer bodies memory-only and drops stale restored tabs", async ({
   page,
 }) => {
-  await page.goto("/");
+  await openWorkbench(page);
   await page.keyboard.press("Control+n");
   await expect(
     page.getByText("Untitled-1", { exact: true }).first(),
@@ -386,7 +387,7 @@ test("keeps unsaved buffer bodies memory-only and drops stale restored tabs", as
 test("opens Device database and live-project workbenches without starting privileged actions", async ({
   page,
 }) => {
-  await page.goto("/");
+  await openWorkbench(page);
   await page
     .locator(".context-rail")
     .getByRole("button", { name: /kigathi/ })
@@ -462,7 +463,7 @@ test("keeps the persistent shell polished and reachable at desktop and narrow wi
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
+  await openWorkbench(page);
   await page
     .locator(".context-rail")
     .getByRole("button", { name: "Atlas process host" })
@@ -584,7 +585,7 @@ test("discards the legacy workbench schema and restores a full-height six-pixel 
       }),
     ),
   );
-  await page.goto("/");
+  await openWorkbench(page);
   const geometry = await page.evaluate(() => {
     const box = (element: Element | null) => {
       const value = element?.getBoundingClientRect();
@@ -623,7 +624,7 @@ test("keeps sidebar widths and the center workspace when central tabs close", as
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/");
+  await openWorkbench(page);
   const widths = await page.evaluate(() => ({
     left: document
       .querySelector(".context-sidebar")
@@ -665,6 +666,7 @@ test("keeps sidebar widths and the center workspace when central tabs close", as
   expect(after.right).toBe(widths.right);
   await page.getByRole("button", { name: "Minimize Filesystem" }).click();
   await page.getByRole("button", { name: "Restore Filesystem" }).click();
+  await expect(page.locator('.tree-explorer')).toBeVisible();
   const restored = await page.evaluate(() => {
     const right = document
         .querySelector(".tree-explorer")

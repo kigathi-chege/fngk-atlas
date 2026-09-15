@@ -27,16 +27,26 @@ export class EffectiveContextService {
   #remote = new Map<string, TerminalFileTransport>();
   #adapters = new Map<string, AdapterFileTransport[]>();
   #profile: string | undefined;
-  constructor(readonly fngk: FngkProcessClient, options: { localRoot?: string } = {}) {
+  #contextSnapshot: { expiresAt: number; value: any } | undefined;
+  #contextPromise: Promise<any> | undefined;
+  readonly contextCacheMs: number;
+  constructor(readonly fngk: FngkProcessClient, options: { localRoot?: string; contextCacheMs?: number } = {}) {
     this.direct = new DirectTransport({ id: 'direct:local', contextId: 'local', root: options.localRoot ?? '/' });
+    this.contextCacheMs = Math.max(0, options.contextCacheMs ?? 10_000);
   }
-  async contexts() {
-    const state = await this.fngk.probe();
-    this.#profile=state.profile;
-    if(state.compatible)await this.#refreshAdapters(state.profile).catch(()=>{});
-    const local = { id: 'local', name: 'Atlas process host', kind: 'local', online: true, root: this.direct.root, workspaceRoot: process.cwd(), routes: [this.#evidence(this.direct)] };
-    const devices = (state.namespace?.devices ?? []).map(device => {const id=`device:${device.id}`,routes=[...(this.#remote.has(id)?[this.#remote.get(id)!]:[]),...(this.#adapters.get(id)??[])];return { id, name: device.name, kind: 'fngk-device', online: device.online ?? false, device, routes:routes.map(value=>this.#evidence(value)) }});
-    return { state, contexts: [local, ...devices] };
+  async contexts(options: { force?: boolean } = {}) {
+    if(!options.force&&this.#contextSnapshot&&this.#contextSnapshot.expiresAt>Date.now())return this.#contextSnapshot.value;
+    if(this.#contextPromise)return this.#contextPromise;
+    const pending=(async()=>{
+      const state = await this.fngk.probe();
+      this.#profile=state.profile;
+      if(state.compatible)await this.#refreshAdapters(state.profile).catch(()=>{});
+      const local = { id: 'local', name: 'Atlas process host', kind: 'local', online: true, root: this.direct.root, workspaceRoot: process.cwd(), routes: [this.#evidence(this.direct)] };
+      const devices = (state.namespace?.devices ?? []).map(device => {const id=`device:${device.id}`,routes=[...(this.#remote.has(id)?[this.#remote.get(id)!]:[]),...(this.#adapters.get(id)??[])];return { id, name: device.name, kind: 'fngk-device', online: device.online ?? false, device, routes:routes.map(value=>this.#evidence(value)) }});
+      const value={state,contexts:[local,...devices]};this.#contextSnapshot={value,expiresAt:Date.now()+this.contextCacheMs};return value;
+    })();
+    this.#contextPromise=pending;
+    try{return await pending}finally{if(this.#contextPromise===pending)this.#contextPromise=undefined}
   }
   #evidence(route: FileTransport) { return { id: route.id, kind: route.kind, deviceId: route.deviceId, effectiveIdentity: route.effectiveIdentity, privilege: route.privilege, observedAt: route.observedAt, available: route.available, operations: route.operations }; }
   async #refreshAdapters(profile?:string){const bindings=await this.fngk.fileBindings(profile),next=new Map<string,AdapterFileTransport[]>();for(const binding of bindings.bindings){const id=`device:${binding.deviceId}`,values=next.get(id)??[];values.push(nativeFileTransport(this.fngk,binding,bindings.profile.name));next.set(id,values);}this.#adapters=next;}
@@ -53,8 +63,8 @@ export class EffectiveContextService {
     const executor = new FngkTerminalCommandExecutor(terminal);
     let identity = 'remote-shell', privilege: FileTransport['privilege'] = 'unknown';
     try { const result = await executor.execute('id -u'); const uid = result.output.toString('utf8').trim(); if (/^\d+$/.test(uid)) { identity = `uid:${uid}`; privilege = uid === '0' ? 'root' : 'user'; } } catch {}
-    const route = new TerminalFileTransport({ id: `terminal:${device.id}`, contextId, deviceId: device.id, identity, privilege, executor });
-    const invalidate=()=>{if(this.#remote.get(contextId)===route)this.#remote.delete(contextId);};
+    let route!:TerminalFileTransport;const invalidate=()=>{if(this.#remote.get(contextId)===route)this.#remote.delete(contextId);};
+    route = new TerminalFileTransport({ id: `terminal:${device.id}`, contextId, deviceId: device.id, identity, privilege, executor,onUnavailable:invalidate });
     terminal.once('close',invalidate);
     terminal.once('error',invalidate);
     this.#remote.set(contextId, route); return route;
@@ -68,5 +78,5 @@ export class EffectiveContextService {
     if (route.executor instanceof FngkTerminalCommandExecutor) stop ? route.executor.session.stop('atlas-release') : route.executor.session.detach('atlas-release');
     this.#remote.delete(contextId); return true;
   }
-  close(): void { for (const route of this.#remote.values()) route.executor instanceof FngkTerminalCommandExecutor && route.executor.session.detach('atlas-shutdown'); this.#remote.clear(); }
+  close(): void { for (const route of this.#remote.values()) route.executor instanceof FngkTerminalCommandExecutor && route.executor.session.detach('atlas-shutdown'); this.#remote.clear();this.#contextSnapshot=undefined; }
 }

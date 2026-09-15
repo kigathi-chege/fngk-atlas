@@ -11,6 +11,7 @@ import { Store } from "../store.js";
 import { runFunction } from "../sandbox.js";
 import { observeLocalProcesses } from "../runtime.js";
 import { FngkProcessClient, FngkProcessError } from "../fngk/process-client.js";
+import { redact } from "../fngk/redaction.js";
 import type { TerminalInput } from "../fngk/protocol.js";
 import { EffectiveContextService } from "./context-service.js";
 import { HostDiscovery } from "../discovery/host-discovery.js";
@@ -28,6 +29,7 @@ import { diagnoseBrowser } from "../diagnostics/browser-diagnostics.js";
 import { DiagnosticRegistry } from "../diagnostics/registry.js";
 import { WorldStore } from "../world/store.js";
 import { WorldService } from "../world/service.js";
+import { backgroundRefresh } from "../world/background-refresh.js";
 import { loadInterpreterRegistry } from "../world/registry.js";
 import {
   loadDeviceAdapters,
@@ -67,6 +69,7 @@ interface CreateAppOptions {
   diagnosticRegistry?: DiagnosticRegistry;
   calculatorProvider?: CalculatorProvider;
   deviceAdapters?: RegisteredDeviceAdapter[];
+  worldRefreshMode?: 'inline'|'worker';
 }
 
 function processError(error: unknown): {
@@ -76,6 +79,7 @@ function processError(error: unknown): {
   const details = error as {
     diagnosticSessionId?: string;
     liveProjectSession?: unknown;
+    causes?: Array<{code?:string;message?:string}>;
   };
   const extra = {
     ...(details.diagnosticSessionId
@@ -84,6 +88,7 @@ function processError(error: unknown): {
     ...(details.liveProjectSession
       ? { liveProjectSession: details.liveProjectSession }
       : {}),
+    ...(Array.isArray(details.causes)?{routeCauses:details.causes.slice(0,8).map(value=>({code:String(value.code??'route_failed').slice(0,80),message:redact(String(value.message??'Route failed.')).slice(0,500)}))}:{}),
   };
   if (error instanceof FngkProcessError) {
     const statusCode =
@@ -152,6 +157,8 @@ export async function createApp(
   const contexts = new EffectiveContextService(fngk, {
     localRoot: options.localRoot,
   });
+  const retryableFileFailure=(error:unknown)=>{const value=error as {code?:string;causes?:Array<{code?:string}>};return value.code==='route_unavailable'&&value.causes?.some(cause=>['terminal_closed','timeout','process_error','process_failed','invalid_json','unsupported_protocol'].includes(String(cause.code)))===true};
+  const readThroughFiles=async<T>(contextId:string,operation:(service:Awaited<ReturnType<EffectiveContextService['files']>>)=>Promise<T>)=>{try{return await operation(await contexts.files(contextId))}catch(error){if(contextId==='local'||!retryableFileFailure(error))throw error;contexts.release(contextId);return await operation(await contexts.files(contextId))}};
   const evidence = new EvidenceStore(databaseFile);
   let interpreterTrust: Record<string, string> = {};
   try {
@@ -173,6 +180,7 @@ export async function createApp(
     }));
   const worldStore = new WorldStore(databaseFile),
     world = new WorldService(worldStore, extensionInterpreters);
+  const worldRefreshMode=options.worldRefreshMode??(process.env.NODE_ENV==='test'?'inline':'worker');
   const calculatorProvider =
       options.calculatorProvider ??
       (process.env.ATLAS_CALCULATOR_URL
@@ -292,7 +300,9 @@ export async function createApp(
     string,
     { sourceKey: string; deviceKey: string; checkedAt: number }
   >();
-  const refreshWorld = async (contextId: string) => {
+  const worldRefreshes = new Map<string, Promise<any>>();
+  let worldRefreshTail:Promise<void>=Promise.resolve();
+  const computeWorld = async (contextId: string, force = false) => {
     const index = resolveIndex(undefined, contextId),
       runtimeNodes = [
         ...evidence.entities(contextId),
@@ -342,6 +352,7 @@ export async function createApp(
       ].join(":");
     const previous = worldRefreshState.get(contextId);
     if (
+      !force &&
       previous?.sourceKey === sourceKey &&
       Date.now() - previous.checkedAt < 5_000
     )
@@ -349,17 +360,19 @@ export async function createApp(
     let device: any;
     try {
       device = (await contexts.contexts()).contexts.find(
-        (value) => value.id === contextId,
+        (value:any) => value.id === contextId,
       );
     } catch {}
     const deviceKey = [device?.id, device?.online, device?.name].join(":");
-    if (previous?.sourceKey !== sourceKey || previous.deviceKey !== deviceKey)
-      world.refresh(
-        contextId,
-        [...(index?.nodes ?? []), ...runtimeNodes],
-        [...(index?.edges ?? []), ...runtimeEdges],
-        device,
-      );
+    if (force||previous?.sourceKey !== sourceKey || previous.deviceKey !== deviceKey){
+      const nodes=[...(index?.nodes??[]),...runtimeNodes],edges=[...(index?.edges??[]),...runtimeEdges];
+      if(worldRefreshMode==='worker'&&databaseFile!==':memory:'){
+        const pending=worldRefreshTail.catch(()=>{}).then(()=>backgroundRefresh({databaseFile,contextId,nodes,edges,device,extensions:extensionInterpreters}));
+        worldRefreshTail=pending;
+        await pending;
+      }
+      else world.refresh(contextId,nodes,edges,device);
+    }
     worldRefreshState.set(contextId, {
       sourceKey,
       deviceKey,
@@ -367,11 +380,17 @@ export async function createApp(
     });
     return index;
   };
+  const refreshWorld = (contextId:string,options:{force?:boolean}={})=>{
+    const existing=worldRefreshes.get(contextId);if(existing)return existing;
+    const pending=computeWorld(contextId,options.force===true).finally(()=>{if(worldRefreshes.get(contextId)===pending)worldRefreshes.delete(contextId)});
+    worldRefreshes.set(contextId,pending);return pending;
+  };
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 << 20 });
   await app.register(websocket);
   app.addHook("onClose", async () => {
     await liveProjects.close();
     contexts.close();
+    await worldRefreshTail.catch(() => {});
     worldStore.close();
     evidence.close();
     store.close();
@@ -419,9 +438,9 @@ export async function createApp(
       return reply.code(result.statusCode).send(result.body);
     }
   });
-  app.get("/api/contexts", async (_request, reply) => {
+  app.get("/api/contexts", async (request, reply) => {
     try {
-      return await contexts.contexts();
+      return await contexts.contexts({force:String((request.query as {refresh?:string}).refresh??'')==='1'});
     } catch (error) {
       const result = processError(error);
       return reply.code(result.statusCode).send(result.body);
@@ -1215,12 +1234,10 @@ export async function createApp(
       limit?: string;
     };
     try {
-      const page = await (
-        await contexts.files(query.contextId ?? "local")
-      ).list(
+      const contextId=query.contextId??'local',page = await readThroughFiles(contextId,service=>service.list(
         { contextId: query.contextId ?? "local", path: query.path ?? "/" },
         { cursor: query.cursor, limit: Number(query.limit) || 100 },
-      );
+      ));
       return { ...page, route: routeEvidence(page.route) };
     } catch (error) {
       const result = processError(error);
@@ -1231,9 +1248,7 @@ export async function createApp(
     const query = request.query as { contextId?: string; path?: string };
     if (!query.path) return reply.code(400).send({ error: "path_required" });
     try {
-      const value = await (
-        await contexts.files(query.contextId ?? "local")
-      ).read({ contextId: query.contextId ?? "local", path: query.path });
+      const contextId=query.contextId??'local',value = await readThroughFiles(contextId,service=>service.read({ contextId, path: query.path! }));
       return {
         ...value,
         contentBase64: value.content?.toString("base64"),
@@ -1365,15 +1380,13 @@ export async function createApp(
     if (!query.query?.trim()) return { matches: [], route: null };
     const contextId = query.contextId ?? "local";
     try {
-      const value = await (
-        await contexts.files(contextId)
-      ).search({ contextId, path: query.path ?? "/" }, query.query, {
+      const value = await readThroughFiles(contextId,service=>service.search({ contextId, path: query.path ?? "/" }, query.query!, {
         mode: query.mode ?? "all",
         limit: Number(query.limit) || 200,
         maxEntries: Number(query.maxEntries) || 5_000,
         maxDepth: Number(query.maxDepth) || 12,
         signal: requestSignal(request, reply),
-      });
+      }));
       return {
         ...value,
         route: routeEvidence(value.route),
@@ -1549,7 +1562,6 @@ export async function createApp(
         source: "live project session",
         rank: 5,
       }));
-    if (contextId) await refreshWorld(contextId).catch(() => {});
     const semantic = contextId
       ? worldStore
           .search(contextId, q, limit)
@@ -1597,7 +1609,6 @@ export async function createApp(
         cursor?: string;
       };
     try {
-      await refreshWorld(contextId);
       return world.projection(contextId, {
         lens: query.lens ?? "overview",
         level: Number(query.level) || 0,
@@ -1614,7 +1625,6 @@ export async function createApp(
       contextId = String(
         (request.query as { contextId?: string }).contextId ?? "",
       );
-    if (contextId) await refreshWorld(contextId).catch(() => {});
     const value = worldStore.entity(id);
     return value ?? reply.code(404).send({ error: "entity_not_found" });
   });
@@ -1629,7 +1639,6 @@ export async function createApp(
       },
       contextId = String(query.contextId ?? "");
     if (!contextId) return reply.code(400).send({ error: "context_required" });
-    await refreshWorld(contextId).catch(() => {});
     if (!worldStore.entity(id))
       return reply.code(404).send({ error: "entity_not_found" });
     return world.projection(contextId, {
@@ -1668,7 +1677,6 @@ export async function createApp(
       contextId = String(query.contextId ?? "");
     if (!contextId) return reply.code(400).send({ error: "context_required" });
     try {
-      await refreshWorld(contextId);
       return world.projection(contextId, {
         rootId: query.rootId,
         lens: query.lens ?? "overview",
@@ -1691,7 +1699,6 @@ export async function createApp(
       q = String(query.q ?? "").trim();
     if (!contextId || !q) return { items: [], errors: [] };
     try {
-      await refreshWorld(contextId);
       return {
         items: worldStore.search(
           contextId,
@@ -1725,7 +1732,6 @@ export async function createApp(
       },
       contextId = String(query.contextId ?? "");
     if (!contextId) return reply.code(400).send({ error: "context_required" });
-    await refreshWorld(contextId).catch(() => {});
     if (!worldStore.entity(id))
       return reply.code(404).send({ error: "entity_not_found" });
     return world.projection(contextId, {
@@ -1761,8 +1767,12 @@ export async function createApp(
     const contextId = String(
       (request.body as { contextId?: string })?.contextId ?? "local",
     );
-    await refreshWorld(contextId);
+    await refreshWorld(contextId,{force:true});
     return { contextId, interpreters: worldStore.interpreters() };
+  });
+  app.post("/api/world/refresh",async(request,reply)=>{
+    const contextId=String((request.body as {contextId?:string})?.contextId??'local');
+    try{await refreshWorld(contextId,{force:true});return{contextId,refreshed:true,projection:world.projection(contextId,{lens:'overview',level:0,budget:100})}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
   });
   app.get("/api/atlas/device-adapters", async () => ({
     protocolVersion: "atlas.device-adapter.v1",
@@ -1817,7 +1827,6 @@ export async function createApp(
   app.get("/api/intelligence/context", async (request) => {
     const query = request.query as { contextId?: string; selectionId?: string },
       contextId = String(query.contextId ?? "local");
-    await refreshWorld(contextId);
     return intelligence.context(contextId, query.selectionId);
   });
   app.post("/api/intelligence/analyze", async (request, reply) => {
@@ -1828,7 +1837,6 @@ export async function createApp(
       },
       contextId = String(body.contextId ?? "local");
     try {
-      await refreshWorld(contextId);
       return await intelligence.analyze(
         String(body.question ?? ""),
         contextId,
@@ -2268,12 +2276,13 @@ export async function createApp(
   });
 
   app.get("/api/state", async (request) => {
-    const contextId =
-        String((request.query as { contextId?: string }).contextId ?? "") ||
+    const query=request.query as {contextId?:string;fngk?:string},
+      contextId =
+        String(query.contextId ?? "") ||
         undefined,
       index = resolveIndex(undefined, contextId);
     return {
-      fngk: await fngk.probe(),
+      ...(query.fngk==='0'?{}:{fngk:await fngk.probe()}),
       index: index
         ? {
             id: index.id,

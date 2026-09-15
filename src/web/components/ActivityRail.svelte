@@ -1,9 +1,9 @@
 <script lang="ts">
-  import {onMount} from 'svelte';import {api} from '../lib/api.js';import {chooseContext,type WorkbenchState} from '../lib/workbench-state.js';
+  import {onMount} from 'svelte';import {chooseContext,type WorkbenchState} from '../lib/workbench-state.js';import {loadContextCatalog} from '../lib/context-catalog.js';
   import Monitor from '@lucide/svelte/icons/monitor';import Search from '@lucide/svelte/icons/search';import FolderOpen from '@lucide/svelte/icons/folder-open';import SquareTerminal from '@lucide/svelte/icons/square-terminal';import Command from '@lucide/svelte/icons/command';import RefreshCw from '@lucide/svelte/icons/refresh-cw';
   export let state:WorkbenchState;let contexts:any[]=[];let selected=state.snapshot().contextId;let loading=false;
   const label=(item:any)=>`${item.name}${item.device?.agentMode?` · ${item.device.agentMode}`:''}${item.device?.id?` · ${item.device.id.slice(0,8)}`:''}`;
-  async function load(){loading=true;try{const value=await api<any>('/api/contexts');contexts=value.contexts??[];selected=chooseContext(contexts,state.snapshot());state.setContext(selected,false);}finally{loading=false}}
+  async function load(force=false){loading=true;try{const value=await loadContextCatalog(force);contexts=value.contexts??[];selected=chooseContext(contexts,state.snapshot());state.setContext(selected,false);}finally{loading=false}}
   function choose(id:string){selected=id;state.setContext(id);window.dispatchEvent(new CustomEvent('atlas:context',{detail:id}));}
   onMount(()=>{const unsubscribe=state.subscribe(value=>selected=value.contextId);void load();return unsubscribe});
 </script>
@@ -15,5 +15,5 @@
   <button title="Open filesystem" aria-label="Open filesystem" onclick={()=>window.dispatchEvent(new CustomEvent('atlas:open-root',{detail:{contextId:selected,path:'/'}}))}><FolderOpen size={17}/></button>
   <button title="Open terminal" aria-label="Open terminal" onclick={()=>window.dispatchEvent(new Event('atlas:open-terminal'))}><SquareTerminal size={17}/></button>
   <button title="Open command palette" aria-label="Open command palette" onclick={()=>window.dispatchEvent(new Event('atlas:shortcuts'))}><Command size={17}/></button>
-  <button class:loading title="Refresh FNGK namespace" aria-label="Refresh FNGK namespace" onclick={load}><RefreshCw size={15}/></button>
+  <button class:loading title="Refresh FNGK namespace" aria-label="Refresh FNGK namespace" onclick={()=>load(true)}><RefreshCw size={15}/></button>
 </nav>

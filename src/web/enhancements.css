@@ -65,6 +65,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 /* The workbench canvas owns all spacing. Sashes remain hit targets, but never draw
    divider rules through the gutters. */
 .atlas-shell>.workbench{padding:0;background:var(--atlas-bg);min-height:0;overflow:hidden}
+.atlas-shell>.atlas-boot{grid-column:1/-1;grid-row:2;display:grid;place-items:center;color:var(--atlas-muted);background:var(--atlas-bg)}
 .root-dock{height:100%;min-height:0;overflow:hidden}
 .atlas-dock .dv-view-container>.dv-view{padding:0}
 .atlas-dock .dv-groupview{border-radius:8px!important}

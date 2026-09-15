@@ -7,7 +7,7 @@ export interface RepositoryTarget { contextId: string; path: string; revision?: 
 export interface AnalysisBatch { nodes: any[]; edges: any[]; complete: boolean; index: RepositoryIndex }
 export interface RepositoryIndex { id: string; contextId: string; root: string; revision?: string; fingerprint: string; nodes: any[]; edges: any[]; summary: Record<string, unknown> }
 const sourceExtensions = new Set(['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.svelte', '.py', '.php', '.go']);
-const ignored = new Set(['.git', 'node_modules', 'vendor', 'dist', 'build', 'web-dist', '.svelte-kit', 'coverage', '.next', '.cache', 'target', '__pycache__', '.atlas']);
+const ignored = new Set(['.git', '.worktrees', 'node_modules', 'vendor', 'dist', 'build', 'web-dist', '.svelte-kit', 'coverage', '.next', '.cache', 'target', '__pycache__', '.atlas']);
 const digest = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 20);
 const idFor = (root: string, kind: string, key: string) => `${kind}:${digest(`${root}\0${key}`)}`;
 const normalize = (value: string) => value.replaceAll('\\', '/').replace(/^\.\//, '');

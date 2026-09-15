@@ -153,7 +153,6 @@ export class WorldService {
       ],
     };
     this.store.register(legacyManifest);
-    this.store.sync(contextId, legacyManifest, compatibility);
     const inputs: InterpreterInput[] = observations
       .filter(
         (value) => value.kind !== "relationship" && value.kind !== "device",

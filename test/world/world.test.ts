@@ -292,6 +292,17 @@ describe("semantic Device atlas", () => {
       ]),
     );
   });
+  it("does not rewrite unchanged entities, assertions, observations, or search rows",async()=>{
+    const directory=await mkdtemp(path.join(tmpdir(),'atlas-world-')),store=new WorldStore(path.join(directory,'atlas.db')),world=new WorldService(store);
+    cleanups.push(async()=>{store.close();await rm(directory,{recursive:true,force:true})});
+    const nodes=[{id:'process:postgres',type:'process',label:'postgres',metadata:{command:'/usr/bin/postgres'}}];
+    world.refresh('local',nodes,[],{name:'host',online:true});
+    const before=(store.db.prepare('SELECT total_changes() value').get() as any).value,changes=store.timeline('local',undefined,500).length,search=(store.db.prepare('SELECT count(*) value FROM atlas_world_search').get() as any).value;
+    world.refresh('local',nodes,[],{name:'host',online:true});
+    const after=(store.db.prepare('SELECT total_changes() value').get() as any).value;
+    expect(store.timeline('local',undefined,500)).toHaveLength(changes);expect((store.db.prepare('SELECT count(*) value FROM atlas_world_search').get() as any).value).toBe(search);
+    expect(after-before).toBeLessThan(20);
+  });
   it("keeps breadcrumbs canonical and dependencies lateral", () => {
     const entities: any[] = [
         { id: "device", parentId: undefined },

@@ -11,10 +11,11 @@ afterEach(async () => { while (directories.length) await rm(directories.pop()!, 
 
 describe('transport-neutral repository analysis', () => {
   it('streams stable modules, functions, arguments, imports, calls, and sizes from a FileService', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'atlas-analysis-source-')); directories.push(root); await mkdir(path.join(root, 'repo', 'src'), { recursive: true });
+    const root = await mkdtemp(path.join(tmpdir(), 'atlas-analysis-source-')); directories.push(root); await mkdir(path.join(root, 'repo', 'src'), { recursive: true });await mkdir(path.join(root,'repo','.worktrees','duplicate'),{recursive:true});
     await writeFile(path.join(root, 'repo', 'package.json'), '{"name":"remote-fixture","dependencies":{"zod":"1.0.0"}}');
     await writeFile(path.join(root, 'repo', 'src', 'b.ts'), 'export function double(value:number){ return value * 2 }');
     await writeFile(path.join(root, 'repo', 'src', 'a.ts'), "import {double} from './b'; app.get('/health', handler); bus.emit('calculated'); db.query('select * from jobs'); export function calculate(value:number, fallback=0){ if(value > 0) return double(value); return fallback }");
+    await writeFile(path.join(root,'repo','.worktrees','duplicate','copy.ts'),'export function duplicate(){ return true }');
     const files = new FileService([new DirectTransport({ id: 'direct', contextId: 'remote', root })]);
     const collect = async () => { const batches = []; for await (const batch of analyzeRepository({ contextId: 'remote', path: '/repo' }, files)) batches.push(batch); return batches.at(-1)!.index; };
     const first = await collect(), second = await collect(), calculate = first.nodes.find((node: any) => node.type === 'function' && node.name === 'calculate');
@@ -23,5 +24,6 @@ describe('transport-neutral repository analysis', () => {
     expect(first.nodes).toEqual(expect.arrayContaining([expect.objectContaining({type:'endpoint',label:'/health',confidence:'inferred'}),expect.objectContaining({type:'event',label:'calculated'}),expect.objectContaining({type:'table',label:'jobs'})]));
     expect(first.edges).toEqual(expect.arrayContaining([expect.objectContaining({type:'handles',confidence:'inferred'}),expect.objectContaining({type:'emits'}),expect.objectContaining({type:'queries'})]));
     expect(second.nodes.find((node: any) => node.name === 'calculate').id).toBe(calculate.id);
+    expect(first.nodes.some((node:any)=>String(node.path).includes('.worktrees'))).toBe(false);
   });
 });

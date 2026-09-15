@@ -28,6 +28,18 @@ async function harness() {
 }
 
 describe("Atlas FNGK-native server", () => {
+  it('serves semantic projections without probing FNGK or recomputing evidence',async()=>{
+    const directory=await mkdtemp(path.join(tmpdir(),'fngk-atlas-readonly-world-')),fngk={probe:async()=>{throw new Error('projection attempted FNGK discovery')}};
+    const app=await createApp({fngk:fngk as any,dbPath:path.join(directory,'atlas.db')});cleanups.push(async()=>{await app.close();await rm(directory,{recursive:true,force:true})});
+    const response=await app.inject({method:'GET',url:'/api/world/projection?contextId=local&lens=overview'});
+    expect(response.statusCode).toBe(200);expect(response.json()).toMatchObject({protocolVersion:'atlas.world.v1',contextId:'local'});
+    const state=await app.inject({method:'GET',url:'/api/state?contextId=local&fngk=0'});
+    expect(state.statusCode).toBe(200);expect(state.json()).not.toHaveProperty('fngk');
+  });
+  it('returns redacted route causes for actionable filesystem failures',async()=>{
+    const app=await harness(),response=await app.inject({method:'GET',url:'/api/files/content?contextId=local&path=%2Fdefinitely-not-an-atlas-file'});
+    expect(response.statusCode).toBe(409);expect(response.json()).toMatchObject({error:'route_unavailable',routeCauses:expect.arrayContaining([expect.objectContaining({code:'ENOENT'})])});
+  });
   it("lists redacted diagnostic sessions for operator inspection", async () => {
     const directory = await mkdtemp(
       path.join(tmpdir(), "fngk-atlas-diagnostics-"),
@@ -121,6 +133,7 @@ describe("Atlas FNGK-native server", () => {
         expect.objectContaining({ type: "device", label: "kigathi" }),
       ]),
     );
+    expect((await app.inject({method:'POST',url:'/api/world/refresh',payload:{contextId:'local'}})).statusCode).toBe(200);
     const atlas = await app.inject({
       method: "GET",
       url: "/api/atlas/devices/local/overview?lens=overview&budget=100",
@@ -433,6 +446,7 @@ describe("Atlas FNGK-native server", () => {
     expect(discovered.json().items).toContainEqual(
       expect.objectContaining({ engine: "postgres", source: "adapter" }),
     );
+    await app.inject({method:'POST',url:'/api/world/refresh',payload:{contextId:'local'}});
     const data = (
       await app.inject({
         method: "GET",
@@ -455,6 +469,7 @@ describe("Atlas FNGK-native server", () => {
         environment: "development",
       },
     });
+    await app.inject({method:'POST',url:'/api/world/refresh',payload:{contextId:'local'}});
     const activity = (
       await app.inject({
         method: "GET",

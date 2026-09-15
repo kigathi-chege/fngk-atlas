@@ -6,16 +6,17 @@ import type { CommandExecutor } from './terminal-command.js';
 import type { FileSearchMatch, FileSearchOptions, FileStat, FileTransport } from './file-transport.js';
 import { posixQuote } from './posix.js';
 
-export interface TerminalFileTransportOptions { id: string; contextId: string; deviceId: string; identity?: string; privilege?: AccessRoute['privilege']; executor: CommandExecutor }
+export interface TerminalFileTransportOptions { id: string; contextId: string; deviceId: string; identity?: string; privilege?: AccessRoute['privilege']; executor: CommandExecutor; onUnavailable?:(error:unknown)=>void }
 
 export class TerminalFileTransport implements FileTransport {
   readonly kind = 'terminal' as const; readonly id: string; readonly contextId: string; readonly deviceId: string;
   readonly effectiveIdentity: string; readonly privilege: AccessRoute['privilege']; readonly observedAt = new Date().toISOString(); readonly available = true;
   readonly operations: Operation[] = ['list', 'stat', 'read', 'write', 'search', 'create', 'move', 'trash', 'restore', 'delete', 'execute', 'processes', 'containers'];
   readonly executor: CommandExecutor;
-  constructor(options: TerminalFileTransportOptions) { this.id = options.id; this.contextId = options.contextId; this.deviceId = options.deviceId; this.effectiveIdentity = options.identity ?? 'remote-shell'; this.privilege = options.privilege ?? 'unknown'; this.executor = options.executor; }
+  readonly onUnavailable?: (error:unknown)=>void;
+  constructor(options: TerminalFileTransportOptions) { this.id = options.id; this.contextId = options.contextId; this.deviceId = options.deviceId; this.effectiveIdentity = options.identity ?? 'remote-shell'; this.privilege = options.privilege ?? 'unknown'; this.executor = options.executor;this.onUnavailable=options.onUnavailable; }
   covers(target: AccessTarget): boolean { return target.contextId === this.contextId && Boolean(target.path?.startsWith('/')); }
-  async #run(command: string): Promise<Buffer> { const result = await this.executor.execute(command); if (result.exitCode !== 0) throw Object.assign(new Error(`Remote command failed with exit code ${result.exitCode}.`), { code: 'remote_command_failed', exitCode: result.exitCode }); return result.output; }
+  async #run(command: string): Promise<Buffer> { try{const result = await this.executor.execute(command); if (result.exitCode !== 0) throw Object.assign(new Error(`Remote command failed with exit code ${result.exitCode}.`), { code: 'remote_command_failed', exitCode: result.exitCode }); return result.output;}catch(error){if((error as {code?:string}).code!=='remote_command_failed')this.onUnavailable?.(error);throw error} }
 
   async list(logicalPath: string): Promise<TransportEntry[]> {
     const format = `%f\\0%y\\0%s\\0%T@\\0%m\\0`;
