@@ -263,6 +263,14 @@ describe("Atlas FNGK-native server", () => {
     expect(response.json()).toMatchObject({input:{planRevision:2},argv:['deployments','deployment-1','execute','--json','--profile','work']});
   });
 
+  it("brokers deployment secret envelopes to the selected Device",async()=>{
+    const app=await harness(),contextId='device:device-1',envelope={ephemeralPublicKey:'key',salt:'salt',nonce:'nonce',ciphertext:'opaque'};
+    const key=await app.inject({method:'GET',url:`/api/deployment-secrets/key?contextId=${encodeURIComponent(contextId)}&profile=work`});expect(key.statusCode,key.body).toBe(200);expect(key.json()).toMatchObject({credentialPublicKey:'device-public-key'});
+    expect((await app.inject({method:'POST',url:'/api/deployment-secrets',payload:{contextId,secretEnvelope:envelope}})).statusCode).toBe(409);
+    const stored=await app.inject({method:'POST',url:'/api/deployment-secrets',payload:{contextId,secretEnvelope:envelope,confirm:true,profile:'work'}});expect(stored.statusCode,stored.body).toBe(201);expect(stored.json()).toMatchObject({vaultBindingId:'deployment-vault:reference',input:{secretEnvelope:envelope}});expect(stored.json().argv.join(' ')).not.toContain('opaque');
+    const rotated=await app.inject({method:'PUT',url:`/api/deployment-secrets/${encodeURIComponent('deployment-vault:reference')}`,payload:{contextId,secretEnvelope:{...envelope,ciphertext:'rotated'},confirm:true,profile:'work'}});expect(rotated.statusCode,rotated.body).toBe(200);expect(rotated.json().argv).toContain('secret-rotate');
+  });
+
   it("relays a terminal as WebSocket JSONL events", async () => {
     const app = await harness();
     const address = await app.listen({ host: "127.0.0.1", port: 0 });

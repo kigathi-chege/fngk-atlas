@@ -88,6 +88,10 @@ Implemented:
 - Docker Compose production roles require declared durable restart policies and healthy running containers;
 - Signal persists observed runtime state and includes runtime activation output in the retained phase-log ledger;
 - repeated phase-log ingestion is idempotent during recovery.
+- deployment environment secret metadata is forwarded to runtime reconciliation while plaintext is resolved only inside the destination Device;
+- browser-to-Device secret envelopes use a Device-owned P-256 key and are never retained by Signal or Atlas;
+- deployment vault bindings support create, rotation, reference-safe deletion, and mode-0600 encrypted Device storage;
+- PostgreSQL and deployment secrets now share one Device envelope implementation rather than parallel cryptographic code.
 
 Verified:
 
@@ -100,7 +104,7 @@ Remaining before Gate 5 can be checked complete:
 
 - FNGK-native ephemeral role reconciliation and explicit lifecycle limitations;
 - source snapshot materialization/transfer and digest verification;
-- generic environment-vault import, binding, injection, and rotation;
+- `.env` classification/import, environment-profile revision UI, consumer-aware rotation reloads, and Device cleanup reconciliation;
 - schedule reconciliation for systemd timers, adopted cron, and PM2 cron;
 - storage provisioning, capacity/backup evidence, and deletion-protection workflows;
 - unified application/manager/schedule log cursors and download/search behavior;

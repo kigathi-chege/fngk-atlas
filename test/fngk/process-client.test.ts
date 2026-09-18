@@ -88,6 +88,13 @@ describe('FngkProcessClient', () => {
     expect(value).toMatchObject({input:{planRevision:2},argv:['deployments','deployment-1','execute','--json','--profile','work']});
   });
 
+  it('brokers deployment secret envelopes without putting plaintext in argv',async()=>{
+    const client=new FngkProcessClient({binary:fixture}),envelope={ephemeralPublicKey:'key',salt:'salt',nonce:'nonce',ciphertext:'ciphertext'};
+    await expect(client.deploymentSecretKey('device-1',{profile:'work'})).resolves.toMatchObject({credentialPublicKey:'device-public-key'});
+    const stored:any=await client.storeDeploymentSecret('device-1',envelope,{profile:'work'});expect(stored).toMatchObject({vaultBindingId:'deployment-vault:reference',input:{secretEnvelope:envelope}});expect(stored.argv.join(' ')).not.toContain('ciphertext');
+    const rotated:any=await client.rotateDeploymentSecret('device-1','deployment-vault:reference',envelope,{profile:'work'});expect(rotated.argv).toEqual(['deployments','device-1','secret-rotate','--json','--binding','deployment-vault:reference','--profile','work']);
+  });
+
   it('invokes native Device Surfaces without a relay or sidecar',async()=>{
     const client=new FngkProcessClient({binary:fixture});
     await expect(client.resourceSurface('resource-1',{profile:'work'})).resolves.toMatchObject({credentialPublicKey:'device-key'});
