@@ -5,16 +5,16 @@ const node=(dependencies:Record<string,string>,scripts:Record<string,string>={bu
 
 describe('deployment adapter registry',()=>{
   it.each([
-    ['SvelteKit',{'package.json':node({'@sveltejs/kit':'2','@sveltejs/adapter-node':'5'}),'svelte.config.js':`import adapter from '@sveltejs/adapter-node'`},'sveltekit','node build'],
-    ['Fastify',{'package.json':node({fastify:'5'})},'fastify','npm run start'],
-    ['Next',{'package.json':node({next:'15'}, {build:'next build',start:'next start'})},'next','npm run start'],
-    ['Nuxt',{'package.json':node({nuxt:'4'}, {build:'nuxt build',start:'node .output/server/index.mjs'})},'nuxt','node .output/server/index.mjs'],
-  ])('proposes one generic journey for %s',(name,files,adapter,command)=>{
+    ['SvelteKit',{'package.json':node({'@sveltejs/kit':'2','@sveltejs/adapter-node':'5'}),'svelte.config.js':`import adapter from '@sveltejs/adapter-node'`},'sveltekit','node',['build']],
+    ['Fastify',{'package.json':node({fastify:'5'})},'fastify','npm',['run','start']],
+    ['Next',{'package.json':node({next:'15'}, {build:'next build',start:'next start'})},'next','npm',['run','start']],
+    ['Nuxt',{'package.json':node({nuxt:'4'}, {build:'nuxt build',start:'node .output/server/index.mjs'})},'nuxt','node',['.output/server/index.mjs']],
+  ])('proposes one generic journey for %s',(name,files,adapter,command,args)=>{
     const proposal=interpretDeploymentProject({files,environment:'production'});
     expect(proposal.protocolVersion).toBe('atlas.deployment-proposal.v1');
     expect(proposal.matches).toEqual(expect.arrayContaining([expect.objectContaining({id:adapter})]));
-    expect(proposal.manifest.roles[0]).toMatchObject({kind:'application',command,runtime:{durability:'supervised'}});
-    expect(proposal.runtimeRoles[0]).toMatchObject({protocolVersion:'fngk.runtime.v1',environmentRevision:1});
+    expect(proposal.manifest.roles[0]).toMatchObject({kind:'application',command,arguments:args,runtime:{durability:'supervised'}});
+    expect(proposal.runtimeRoles[0]).toMatchObject({protocolVersion:'fngk.runtime.v1',environmentRevision:1,user:'device-agent'});
   });
 
   it('models Laravel web, queue, scheduler, writable storage, and migrations',()=>{

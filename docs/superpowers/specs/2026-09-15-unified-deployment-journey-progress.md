@@ -71,7 +71,42 @@ Remaining before Gate 4 can be checked complete:
 
 - run the exact Signal/FNGK socket path through a forced daemon restart and Device disconnect in disposable live acceptance, proving no duplicate mutation.
 
-## Gates 5–11
+## Gate 5 — Runtime managers, transfer, vault, storage, and logs
+
+**Status:** In progress; retained runtime activation now has a real reconciliation boundary.
+
+Implemented:
+
+- Atlas project interpretation emits structured runtime executables and arguments instead of passing supervisor shell strings;
+- runtime roles execute as the explicit Device-agent identity and retain their environment revision;
+- Signal no longer marks an empty `activate` phase successful without reconciling retained runtime roles;
+- FNGK reconciles PM2, systemd user services, Docker Compose, and explicitly configured Supervisor programs;
+- production reconciliation verifies manager installation and boot/restart ownership without installing packages, invoking `sudo`, or guessing privileged configuration paths;
+- manager observations return stable external identity, definition digest, state, PID/restart information where available, health, log sources, and boot verification;
+- PM2 reconciliation is idempotent by deployment, release, role, and definition identity, preventing duplicate processes after reconnect;
+- systemd and Supervisor environment/definition files are private and live outside immutable release contents;
+- Docker Compose production roles require declared durable restart policies and healthy running containers;
+- Signal persists observed runtime state and includes runtime activation output in the retained phase-log ledger;
+- repeated phase-log ingestion is idempotent during recovery.
+
+Verified:
+
+- full FNGK Go suite, including manager-missing, boot-ownership, path containment, private-definition, health, and duplicate-suppression tests;
+- Signal TypeScript/Svelte checks;
+- disposable Signal integration suite: 67 passed, one broker-only fixture skipped;
+- Atlas adapter tests and TypeScript checks.
+
+Remaining before Gate 5 can be checked complete:
+
+- FNGK-native ephemeral role reconciliation and explicit lifecycle limitations;
+- source snapshot materialization/transfer and digest verification;
+- generic environment-vault import, binding, injection, and rotation;
+- schedule reconciliation for systemd timers, adopted cron, and PM2 cron;
+- storage provisioning, capacity/backup evidence, and deletion-protection workflows;
+- unified application/manager/schedule log cursors and download/search behavior;
+- exact-Device acceptance for every manager, including restart and drift recovery.
+
+## Gates 6–11
 
 **Status:** Pending.
 
