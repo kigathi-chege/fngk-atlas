@@ -6,6 +6,12 @@ import type {
   InterpreterOutput,
 } from "./types.js";
 import { worldId } from "./interpreter.js";
+export { resolveOperationalWorld } from "./resolution-policy.js";
+export type {
+  IdentityConflict,
+  ResolvedWorkload,
+  ResolvedWorld,
+} from "./resolution-policy.js";
 
 type ResolvedOutput = InterpreterOutput & {
   mapping: Record<string, string>;
