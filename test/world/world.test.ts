@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   runInterpreter,
@@ -24,6 +25,58 @@ afterEach(async () => {
   while (cleanups.length) await cleanups.pop()?.();
 });
 describe("semantic Device atlas", () => {
+  it("migrates the semantic world to v2 while preserving observations", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "atlas-world-v1-"));
+    const file = path.join(directory, "atlas.db");
+    cleanups.push(async () => {
+      await rm(directory, { recursive: true, force: true });
+    });
+    const legacy = new DatabaseSync(file);
+    legacy.exec(`
+      CREATE TABLE atlas_world_observations(id TEXT PRIMARY KEY,context_id TEXT NOT NULL,kind TEXT NOT NULL,source TEXT NOT NULL,source_id TEXT NOT NULL,observed_at TEXT NOT NULL,scan_id TEXT,route_json TEXT NOT NULL,facts_json TEXT NOT NULL,sensitivity TEXT NOT NULL);
+      CREATE TABLE atlas_world_entities(id TEXT PRIMARY KEY,context_id TEXT NOT NULL,kind TEXT NOT NULL,namespace TEXT NOT NULL,label TEXT NOT NULL,aliases_json TEXT NOT NULL,parent_id TEXT,workload_id TEXT,attributes_json TEXT NOT NULL,first_observed_at TEXT NOT NULL,last_observed_at TEXT NOT NULL,stale INTEGER NOT NULL DEFAULT 0,content_hash TEXT NOT NULL);
+      CREATE TABLE atlas_world_interpreters(id TEXT PRIMARY KEY,version TEXT NOT NULL,publisher TEXT NOT NULL,manifest_json TEXT NOT NULL,trusted INTEGER NOT NULL,source TEXT NOT NULL,status TEXT NOT NULL,error TEXT,updated_at TEXT NOT NULL);
+      INSERT INTO atlas_world_observations VALUES('observation:one','local','process','runtime','process:1','2026-09-20T00:00:00.000Z',NULL,'{}','{"pid":1}','safe-metadata');
+      INSERT INTO atlas_world_entities VALUES('compat:one','local','process','atlas.compatibility','node','[]',NULL,NULL,'{}','2026-09-20T00:00:00.000Z','2026-09-20T00:00:00.000Z',0,'legacy');
+      INSERT INTO atlas_world_interpreters VALUES('atlas.compatibility','1','atlas','{}',1,'builtin','healthy',NULL,'2026-09-20T00:00:00.000Z');
+    `);
+    legacy.close();
+
+    const migrated = new WorldStore(file);
+    expect(migrated.schemaVersion()).toBe(2);
+    expect(migrated.observations("local")).toHaveLength(1);
+    expect(migrated.entities("local")).toEqual([]);
+    expect(migrated.interpreters().map((item) => item.id)).not.toContain(
+      "atlas.compatibility",
+    );
+    migrated.sync("local", { ...workloadInterpreter, id: "atlas.v2.fixture" }, {
+      entities: [
+        {
+          id: "workload:v2",
+          contextId: "local",
+          kind: "workload",
+          namespace: "atlas.v2.fixture",
+          label: "V2 workload",
+          aliases: [],
+          attributes: {},
+          firstObservedAt: "2026-09-20T00:00:00.000Z",
+          lastObservedAt: "2026-09-20T00:00:00.000Z",
+          stale: false,
+        },
+      ],
+      assertions: [],
+      views: [],
+    });
+    migrated.close();
+
+    const reopened = new WorldStore(file);
+    expect(reopened.schemaVersion()).toBe(2);
+    expect(reopened.observations("local")).toHaveLength(1);
+    expect(reopened.entities("local").map((item) => item.id)).toEqual([
+      "workload:v2",
+    ]);
+    reopened.close();
+  });
   it("resolves service and process observations into one stable workload", () => {
     const inputs = [
       {

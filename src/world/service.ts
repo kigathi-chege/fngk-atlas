@@ -70,7 +70,7 @@ export class WorldService {
           id: deviceId,
           contextId,
           kind: "device",
-          namespace: "atlas.core",
+          namespace: legacyManifest.id,
           label:
             device?.name ??
             (contextId === "local"
