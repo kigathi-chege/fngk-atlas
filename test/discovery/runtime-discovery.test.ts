@@ -9,7 +9,7 @@ describe("runtime census", () => {
         if (command.startsWith("ps "))
           return {
             output: Buffer.from(
-              "12 1 root node node server.js --token super-secret\n",
+              "12 1 root node 12.5 2048 300 Ssl node server.js --token super-secret\n",
             ),
             exitCode: 0,
           };
@@ -58,6 +58,10 @@ describe("runtime census", () => {
             pid: 12,
             cwd: "/srv/signal",
             systemdUnit: "signal.service",
+            cpuPercent: 12.5,
+            rssBytes: 2_097_152,
+            elapsedSeconds: 300,
+            processState: "Ssl",
             command: expect.stringContaining("[redacted]"),
           }),
         }),

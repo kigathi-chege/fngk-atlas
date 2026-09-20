@@ -59,11 +59,24 @@ export class RuntimeDiscovery {
       if (match) systemdUnits.set(Number(match[1]), match[2]);
     }
     for (const line of (
-      await attempt(`ps -eo pid=,ppid=,user=,comm=,args=`)
+      await attempt(`ps -eo pid=,ppid=,user=,comm=,pcpu=,rss=,etimes=,stat=,args=`)
     ).split(/\r?\n/)) {
-      const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s*(.*)$/);
+      const match = line
+        .trim()
+        .match(/^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/);
       if (!match) continue;
-      const [, pid, ppid, user, executable, command] = match;
+      const [
+        ,
+        pid,
+        ppid,
+        user,
+        executable,
+        cpuPercent,
+        rssKiB,
+        elapsedSeconds,
+        processState,
+        command,
+      ] = match;
       entities.push({
         id: id(contextId, "process", pid),
         contextId,
@@ -76,6 +89,10 @@ export class RuntimeDiscovery {
           user,
           executable,
           command: redactCommandLine(command),
+          cpuPercent: Number(cpuPercent),
+          rssBytes: Number(rssKiB) * 1024,
+          elapsedSeconds: Number(elapsedSeconds),
+          processState,
           cwd: workingDirectories.get(Number(pid)),
           systemdUnit: systemdUnits.get(Number(pid)),
         }),
@@ -138,6 +155,8 @@ export class RuntimeDiscovery {
         metadata: metadata({
           protocol: fields[0],
           state: fields[1],
+          address,
+          port: Number(address.match(/:(\d+)$/)?.[1]),
           pid: pid ? Number(pid) : undefined,
         }),
       });

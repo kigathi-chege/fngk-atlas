@@ -16,6 +16,7 @@ import type { RegisteredInterpreter } from "./registry.js";
 import { adaptWorldObservations } from "./observation-adapters.js";
 import { runBuiltInSpecialists } from "./specialists.js";
 import { normalizePredicate } from "./relationships.js";
+import { normalizeObservation } from "./normalization.js";
 
 const kindMap: Record<string, string> = {
   filesystem: "data-store",
@@ -157,16 +158,7 @@ export class WorldService {
       .filter(
         (value) => value.kind !== "relationship" && value.kind !== "device",
       )
-      .map((value) => ({
-        id: value.id,
-        contextId,
-        kind: value.kind,
-        label: String(value.facts.label ?? value.sourceId),
-        attributes: { ...value.facts, legacyId: value.sourceId },
-        observedAt: value.observedAt,
-        stale: Boolean((value.facts as any).stale),
-        source: value.source,
-      }));
+      .map(normalizeObservation);
     const semantic = resolveWorkloads(inputs, () => at);
     semantic.assertions = semantic.assertions.filter(
       (value) => value.predicate !== "realized-by",
@@ -191,8 +183,9 @@ export class WorldService {
         for (const inputId of entity.attributes
           .memberObservationIds as string[]) {
           const source = inputs.find((value) => value.id === inputId),
+            observation = observations.find((value) => value.id === inputId),
             realized =
-              source && mapped.get(String(source.attributes.legacyId ?? ""));
+              source && observation && mapped.get(observation.sourceId);
           if (realized) {
             const technical = entities.find((value) => value.id === realized);
             if (technical) technical.workloadId = entity.id;
