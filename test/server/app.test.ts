@@ -32,7 +32,7 @@ describe("Atlas FNGK-native server", () => {
     const directory=await mkdtemp(path.join(tmpdir(),'fngk-atlas-readonly-world-')),fngk={probe:async()=>{throw new Error('projection attempted FNGK discovery')}};
     const app=await createApp({fngk:fngk as any,dbPath:path.join(directory,'atlas.db')});cleanups.push(async()=>{await app.close();await rm(directory,{recursive:true,force:true})});
     const response=await app.inject({method:'GET',url:'/api/world/projection?contextId=local&lens=overview'});
-    expect(response.statusCode).toBe(200);expect(response.json()).toMatchObject({protocolVersion:'atlas.world.v1',contextId:'local'});
+    expect(response.statusCode).toBe(200);expect(response.json()).toMatchObject({protocolVersion:'atlas.world.v2',contextId:'local'});
     const state=await app.inject({method:'GET',url:'/api/state?contextId=local&fngk=0'});
     expect(state.statusCode).toBe(200);expect(state.json()).not.toHaveProperty('fngk');
   });
@@ -140,7 +140,7 @@ describe("Atlas FNGK-native server", () => {
     });
     expect(atlas.statusCode).toBe(200);
     expect(atlas.json()).toMatchObject({
-      protocolVersion: "atlas.world.v1",
+      protocolVersion: "atlas.world.v2",
       contextId: "local",
       nodes: expect.arrayContaining([
         expect.objectContaining({ kind: "device" }),
@@ -152,7 +152,7 @@ describe("Atlas FNGK-native server", () => {
     });
     expect(semantic.statusCode).toBe(200);
     expect(semantic.json()).toMatchObject({
-      protocolVersion: "atlas.world.v1",
+      protocolVersion: "atlas.world.v2",
       contextId: "local",
       availableViews: expect.arrayContaining([
         "overview",
@@ -381,7 +381,7 @@ describe("Atlas FNGK-native server", () => {
           'printf \'%s\\n\' \'{"kind":"database","label":"PostgreSQL test","sourceId":"db"}\'',
         interpreter: {
           protocolVersion: "atlas.interpreter.v1",
-          ontologyVersion: "atlas.world.v1",
+          ontologyVersion: "atlas.world.v2",
           id: "test.adapter.semantic",
           version: "1.0.0",
           publisher: "test",

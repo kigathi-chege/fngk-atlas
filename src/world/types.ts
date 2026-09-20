@@ -1,4 +1,4 @@
-export const ATLAS_WORLD_VERSION = "atlas.world.v1" as const;
+export const ATLAS_WORLD_VERSION = "atlas.world.v2" as const;
 export const ATLAS_INTERPRETER_VERSION = "atlas.interpreter.v1" as const;
 
 export type AssertionClass =
@@ -7,6 +7,7 @@ export type CoreKind =
   | "device"
   | "environment"
   | "identity"
+  | "topology-region"
   | "workload"
   | "capability"
   | "service"
@@ -114,6 +115,74 @@ export interface AtlasAttentionItem {
   severity: "info" | "warning" | "critical";
   stale: boolean;
 }
+export type OperationalHealth =
+  | "healthy"
+  | "degraded"
+  | "critical"
+  | "unknown"
+  | "stale";
+export type OperationalPhase =
+  | "idle"
+  | "starting"
+  | "running"
+  | "stopping"
+  | "failed"
+  | "unknown";
+export type TopologyRegionId =
+  | "applications"
+  | "data"
+  | "infrastructure"
+  | "development"
+  | "system"
+  | "external";
+export interface AtlasObservatoryItem {
+  id: string;
+  label: string;
+  kind: string;
+  health: OperationalHealth;
+  phase: OperationalPhase;
+  purpose: string;
+  active: boolean;
+  stale: boolean;
+  confidence: number;
+  facts: Array<{ label: string; value: string }>;
+}
+export interface AtlasObservatoryRegion {
+  id: TopologyRegionId;
+  label: string;
+  health: OperationalHealth;
+  items: AtlasObservatoryItem[];
+  collapsedCount: number;
+}
+export interface AtlasObservatoryFlow {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  label: string;
+  active: boolean;
+  health: OperationalHealth;
+  confidence: number;
+  stale: boolean;
+}
+export interface AtlasObservatoryHistoryItem {
+  id: string;
+  entityId: string;
+  text: string;
+  at: string;
+  severity: "info" | "warning" | "critical";
+}
+export interface AtlasObservatory {
+  identity: { id: string; label: string; online: boolean };
+  health: OperationalHealth;
+  phase: OperationalPhase;
+  summary: string;
+  regions: AtlasObservatoryRegion[];
+  flows: AtlasObservatoryFlow[];
+  attention: AtlasAttentionItem[];
+  history: AtlasObservatoryHistoryItem[];
+  measuredAt: string;
+  stale: boolean;
+}
 export interface AtlasSynthesis {
   headline: string;
   facts: Array<{
@@ -168,6 +237,7 @@ export interface AtlasProjection {
     confidence?: number;
   }>;
   synthesis?: AtlasSynthesis;
+  observatory?: AtlasObservatory;
   breadcrumbs: Array<{ id: string; label: string; kind: string }>;
   availableViews: string[];
   availableExpansions: Array<{ level: number; label: string }>;

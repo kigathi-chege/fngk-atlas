@@ -276,7 +276,7 @@ describe("semantic Device atlas", () => {
       lens: "overview",
       budget: 1,
     });
-    expect(projection.protocolVersion).toBe("atlas.world.v1");
+    expect(projection.protocolVersion).toBe("atlas.world.v2");
     expect(projection.nodes.length).toBeLessThanOrEqual(1);
     expect(
       projection.cards?.some((value) => value.title === "Signal API"),
