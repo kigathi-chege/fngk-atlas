@@ -346,11 +346,18 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
   await expect(
     page.getByText("Filesystem", { exact: true }).first(),
   ).toBeVisible();
+  await expect(page.locator(".tree-explorer")).toBeVisible();
   expect(
     await page.evaluate(
-      () =>
-        document.querySelector(".tree-explorer")?.closest(".dv-groupview") !==
-        document.querySelector(".graph-panel")?.closest(".dv-groupview"),
+      () => {
+        const filesystem = document
+          .querySelector(".tree-explorer")
+          ?.closest(".dv-groupview");
+        const workspace = document
+          .querySelector('[aria-label="Empty workspace"]')
+          ?.closest(".dv-groupview");
+        return Boolean(filesystem && workspace && filesystem !== workspace);
+      },
     ),
   ).toBe(true);
   await page
@@ -424,19 +431,19 @@ test("opens Device database and live-project workbenches without starting privil
     .getByRole("menuitem", { name: "Open deployment workbench" })
     .click();
   await expect(
-    page.getByRole("tab", { name: "Deployment", exact: true }),
+    page.getByRole("tab", { name: "Deployment journey", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("tab", { name: "Deployment logs", exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "What should Atlas deploy?" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Deployment stages" })).toBeVisible();
   expect(
     await page.evaluate(() => {
       const group = (selector: string) =>
         document.querySelector(selector)?.closest(".dv-groupview");
       return (
-        group('.atlas-tab[data-panel-id$=":logs"]') ===
-          group('.atlas-tab[data-panel-id="atlas.operations"]') &&
-        group('.atlas-tab[data-panel-id$=":overview"]') !==
+        group('.atlas-tab[data-panel-id$=":journey"]') !==
           group('.atlas-tab[data-panel-id="atlas.operations"]')
       );
     }),
@@ -457,6 +464,73 @@ test("opens Device database and live-project workbenches without starting privil
           ?.closest(".dv-groupview"),
     ),
   ).toBe(true);
+});
+
+test("reopens a retained deployment in its operational stage", async ({ page }) => {
+  await page.route("**/api/deployments?**", (route) =>
+    route.fulfill({
+      json: {
+        deployments: [
+          { id: "deployment-retained", name: "web", status: "healthy" },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/deployments/deployment-retained", (route) =>
+    route.fulfill({
+      json: {
+        version: "fngk.deployment.v2",
+        deployment: {
+          id: "deployment-retained",
+          name: "web",
+          status: "healthy",
+        },
+        plan: { revision: 1, status: "succeeded" },
+        phases: [{ phase_id: "publish", state: "succeeded", attempt: 1 }],
+        phaseLogs: [],
+        releases: [{ number: 1, connection_id: "connection-1" }],
+        events: [
+          {
+            event: "route.published",
+            detail: { url: "https://web.example.test" },
+          },
+        ],
+        runtimeRoles: [{ role_id: "web", observed_state: "running" }],
+      },
+    }),
+  );
+  await page.route(
+    "**/api/deployments/deployment-retained/logs?**",
+    (route) =>
+      route.fulfill({
+        json: {
+          items: [
+            {
+              phase_id: "activate",
+              stream: "stdout",
+              body_base64: btoa("server ready\n"),
+            },
+          ],
+          nextCursor: 1,
+          hasMore: false,
+        },
+      }),
+  );
+  await openWorkbench(page);
+  await page
+    .locator(".context-rail")
+    .getByRole("button", { name: /kigathi/ })
+    .click({ button: "right" });
+  await page
+    .getByRole("menuitem", { name: /Open deployment workbench/ })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "web is healthy" }),
+  ).toBeVisible();
+  await expect(page.getByText("server ready")).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "https://web.example.test" }),
+  ).toBeVisible();
 });
 
 test("keeps the persistent shell polished and reachable at desktop and narrow widths", async ({

@@ -263,6 +263,8 @@ describe("Atlas FNGK-native server", () => {
     expect(response.json()).toMatchObject({input:{planRevision:2},argv:['deployments','deployment-1','execute','--json','--profile','work']});
   });
 
+  it("creates a retained v2 journey through FNGK rather than Atlas-local execution",async()=>{const app=await harness(),response=await app.inject({method:'POST',url:'/api/deployments',payload:{contextId:'device:device-1',confirm:true,profile:'work',protocolVersion:'fngk.deployment.v2',name:'web'}});expect(response.statusCode,response.body).toBe(201);expect(response.json()).toMatchObject({deployment:{id:'deployment-1'},release:{id:'release-1'},input:{protocolVersion:'fngk.deployment.v2',name:'web'},argv:['deployments','device-1','create','--json','--profile','work']})});
+
   it("brokers deployment secret envelopes to the selected Device",async()=>{
     const app=await harness(),contextId='device:device-1',envelope={ephemeralPublicKey:'key',salt:'salt',nonce:'nonce',ciphertext:'opaque'};
     const key=await app.inject({method:'GET',url:`/api/deployment-secrets/key?contextId=${encodeURIComponent(contextId)}&profile=work`});expect(key.statusCode,key.body).toBe(200);expect(key.json()).toMatchObject({credentialPublicKey:'device-public-key'});
@@ -270,6 +272,8 @@ describe("Atlas FNGK-native server", () => {
     const stored=await app.inject({method:'POST',url:'/api/deployment-secrets',payload:{contextId,secretEnvelope:envelope,confirm:true,profile:'work'}});expect(stored.statusCode,stored.body).toBe(201);expect(stored.json()).toMatchObject({vaultBindingId:'deployment-vault:reference',input:{secretEnvelope:envelope}});expect(stored.json().argv.join(' ')).not.toContain('opaque');
     const rotated=await app.inject({method:'PUT',url:`/api/deployment-secrets/${encodeURIComponent('deployment-vault:reference')}`,payload:{contextId,secretEnvelope:{...envelope,ciphertext:'rotated'},confirm:true,profile:'work'}});expect(rotated.statusCode,rotated.body).toBe(200);expect(rotated.json().argv).toContain('secret-rotate');
   });
+
+  it("requests a verified immutable source snapshot from the selected Device",async()=>{const app=await harness(),response=await app.inject({method:'POST',url:'/api/deployment-sources/snapshot',payload:{contextId:'device:device-1',path:'/srv/app',profile:'work'}});expect(response.statusCode,response.body).toBe(201);expect(response.json()).toMatchObject({protocolVersion:'fngk.source.v1',kind:'device-directory',verified:true,input:{path:'/srv/app'}})});
 
   it("relays a terminal as WebSocket JSONL events", async () => {
     const app = await harness();

@@ -95,6 +95,8 @@ describe('FngkProcessClient', () => {
     const rotated:any=await client.rotateDeploymentSecret('device-1','deployment-vault:reference',envelope,{profile:'work'});expect(rotated.argv).toEqual(['deployments','device-1','secret-rotate','--json','--binding','deployment-vault:reference','--profile','work']);
   });
 
+  it('requests a verified Device-side source snapshot',async()=>{const value:any=await new FngkProcessClient({binary:fixture}).snapshotDeploymentSource('device-1','/srv/app',{profile:'work'});expect(value).toMatchObject({protocolVersion:'fngk.source.v1',kind:'device-directory',verified:true,input:{path:'/srv/app'},argv:['deployments','device-1','source-snapshot','--json','--profile','work']})});
+
   it('invokes native Device Surfaces without a relay or sidecar',async()=>{
     const client=new FngkProcessClient({binary:fixture});
     await expect(client.resourceSurface('resource-1',{profile:'work'})).resolves.toMatchObject({credentialPublicKey:'device-key'});

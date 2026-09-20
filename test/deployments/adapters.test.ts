@@ -15,6 +15,7 @@ describe('deployment adapter registry',()=>{
     expect(proposal.matches).toEqual(expect.arrayContaining([expect.objectContaining({id:adapter})]));
     expect(proposal.manifest.roles[0]).toMatchObject({kind:'application',command,arguments:args,runtime:{durability:'supervised'}});
     expect(proposal.runtimeRoles[0]).toMatchObject({protocolVersion:'fngk.runtime.v1',environmentRevision:1,user:'device-agent'});
+    expect(proposal.manifest.phases.slice(-2).map(phase=>phase.kind)).toEqual(['health','publish']);
   });
 
   it('models Laravel web, queue, scheduler, writable storage, and migrations',()=>{

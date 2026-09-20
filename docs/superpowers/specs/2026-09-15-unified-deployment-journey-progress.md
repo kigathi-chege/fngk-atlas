@@ -1,7 +1,7 @@
 # Unified Deployment Journey implementation progress
 
 **Specification:** `2026-09-15-unified-deployment-journey-design.md`  
-**Updated:** 2026-09-15
+**Updated:** 2026-09-20
 
 This file records evidence against the numbered review gates in section 14 of the specification. A checked gate means its scoped behavior is committed and verified; it does not imply later operational gates are complete.
 
@@ -92,6 +92,13 @@ Implemented:
 - browser-to-Device secret envelopes use a Device-owned P-256 key and are never retained by Signal or Atlas;
 - deployment vault bindings support create, rotation, reference-safe deletion, and mode-0600 encrypted Device storage;
 - PostgreSQL and deployment secrets now share one Device envelope implementation rather than parallel cryptographic code.
+- a same-Device directory source can be captured as a deterministic, content-addressed tar snapshot with `.gitignore`/`.fngkignore` filtering, unconditional `.env*` exclusion, symlink rejection, file/byte budgets, private Device cache storage, and a retained digest;
+- the prepare phase verifies and atomically materializes that snapshot into the immutable release path and is idempotent for an already verified release;
+- health phases now execute a bounded Device-local HTTP/TCP readiness probe instead of being silently skipped;
+- publish phases now create or restore a retained Signal Connection, attach it to the release, and retain the public URL as phase output and deployment evidence;
+- all Device deployment responses are correlated through the Device command registry, closing the timeout path that previously affected real phase, runtime, source, and secret commands;
+- Atlas exposes one progressive Deployment journey in the main workflow area instead of opening eight panels, with source verification, environment/vault configuration, exact-plan review, retained phase logs, route/domain controls, browser diagnostics, and explicit Operations-terminal handoff;
+- reopening the journey restores an existing deployment directly into its retained execution or operational state.
 
 Verified:
 
@@ -99,19 +106,41 @@ Verified:
 - Signal TypeScript/Svelte checks;
 - disposable Signal integration suite: 67 passed, one broker-only fixture skipped;
 - Atlas adapter tests and TypeScript checks.
+- Signal disposable integration: 68 passed and one broker-only fixture skipped, including materialization, readiness, publication, retained URL/release linkage, and retry/reconciliation behavior;
+- Atlas focused API/adapter tests and focused Playwright checks for single-panel placement and retained-deployment restoration.
 
 Remaining before Gate 5 can be checked complete:
 
 - FNGK-native ephemeral role reconciliation and explicit lifecycle limitations;
-- source snapshot materialization/transfer and digest verification;
+- Device-to-Device, Git, upload, artifact, and prior-release acquisition (the implemented cache locator is intentionally same-Device only);
 - `.env` classification/import, environment-profile revision UI, consumer-aware rotation reloads, and Device cleanup reconciliation;
 - schedule reconciliation for systemd timers, adopted cron, and PM2 cron;
 - storage provisioning, capacity/backup evidence, and deletion-protection workflows;
 - unified application/manager/schedule log cursors and download/search behavior;
 - exact-Device acceptance for every manager, including restart and drift recovery.
 
-## Gates 6–11
+## Gate 6 — Single deployment journey
+
+**Status:** In progress; the prior panel collection has been replaced by one functional progressive journey.
+
+Implemented:
+
+- Understand, Source, Destination, Configure, Review, Deploy, and Operate stages in one central workflow panel;
+- retained execution survives Atlas closure and is restored on reopening;
+- inline phase state and retained stdout/stderr evidence;
+- Device-vault secret creation without browser, Atlas, or Signal plaintext retention;
+- public route, vanity/custom-domain controls, browser diagnostics, and an explicit terminal handoff to Operations.
+
+Remaining before Gate 6 can be checked complete:
+
+- destination selection and verified Device-to-Device transfer;
+- provider-neutral Git, upload, artifact, and prior-release source selectors;
+- structured `.env` import/diff/revision UX;
+- first-class schedule, storage, artifact, rollback, and release-history controls in the same progressive surface;
+- full live acceptance using an exact-head Signal/FNGK pair and a real deployable fixture.
+
+## Gates 7–11
 
 **Status:** Pending.
 
-No runtime-manager, transfer, vault, adapter, single-journey UI, semantic-correlation, native PostgreSQL, or production-rollout claim is complete until its real Device path passes the corresponding later gate.
+No cross-Device transfer, complete adapter, semantic-correlation, native PostgreSQL, or production-rollout claim is complete until its real Device path passes the corresponding later gate.
