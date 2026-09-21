@@ -57,6 +57,50 @@ test("orients a first-time user with the Machine Observatory", async ({ page }) 
   }
 });
 
+test("uses only canonical observatory APIs", async ({ page }) => {
+  const forbidden: string[] = [];
+  await page.route(/\/api\/(?:atlas\/|graph(?:\?|$)|world\/search)/, async (route) => {
+    forbidden.push(route.request().url());
+    await route.abort();
+  });
+  await page.route("**/api/world/projection?**", async (route) => {
+    const url = new URL(route.request().url()),
+      rootId = url.searchParams.get("rootId"),
+      lens = url.searchParams.get("lens") ?? "overview",
+      workload = { id: "workload:web", contextId: "local", kind: "workload", namespace: "atlas.resolver.v2", label: "Web", aliases: [], attributes: { health: "healthy", phase: "running", purpose: "Serve the application" }, firstObservedAt: "2026-09-20T12:00:00.000Z", lastObservedAt: "2026-09-20T12:00:00.000Z", stale: false },
+      nodes = rootId ? [workload, ...(lens === "runtime" ? [{ ...workload, id: "process:web", kind: "process", label: "node", workloadId: workload.id }] : lens === "software" ? [{ ...workload, id: "function:main", kind: "function", label: "main", workloadId: workload.id, attributes: { path: "src/main.ts" } }] : [])] : [];
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      protocolVersion: "atlas.world.v2", contextId: "local", rootId: rootId ?? "device:kigathi", lens, level: 0, nodes, edges: [], aggregates: [], cards: [],
+      breadcrumbs: rootId ? [{ id: "device:kigathi", label: "kigathi", kind: "device" }, { id: workload.id, label: workload.label, kind: workload.kind }] : [{ id: "device:kigathi", label: "kigathi", kind: "device" }],
+      availableViews: ["overview", "runtime", "software", "relationships", "evidence"], availableExpansions: [], errors: [], synthesis: { headline: rootId ? "Web" : "kigathi", facts: [], attention: [], counters: {} },
+      observatory: rootId ? undefined : { identity: { id: "device:kigathi", label: "kigathi", online: true }, health: "healthy", phase: "running", summary: "One primary workload is running.", measuredAt: "2026-09-20T12:00:00.000Z", stale: false, regions: [{ id: "applications", label: "Applications", health: "healthy", collapsedCount: 0, items: [{ id: workload.id, label: workload.label, kind: workload.kind, health: "healthy", phase: "running", purpose: "Serve the application", active: true, stale: false, confidence: .98, facts: [] }] }, { id: "data", label: "Data", health: "healthy", collapsedCount: 0, items: [] }, { id: "infrastructure", label: "Infrastructure", health: "healthy", collapsedCount: 0, items: [] }, { id: "development", label: "Development", health: "healthy", collapsedCount: 0, items: [] }, { id: "system", label: "System", health: "healthy", collapsedCount: 0, items: [] }, { id: "external", label: "External", health: "healthy", collapsedCount: 0, items: [] }], flows: [], attention: [], history: [] },
+    }) });
+  });
+  await page.route("**/api/world/entities/**", async (route) => {
+    const timeline = route.request().url().includes("/timeline");
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(timeline ? { items: [] } : { entity: { id: "workload:web", contextId: "local", kind: "workload", namespace: "atlas.resolver.v2", label: "Web", attributes: { health: "healthy", phase: "running", purpose: "Serve the application" }, stale: false }, assertions: [], relatedEntities: [], views: [{ id: "web.specialist", title: "Web runtime", appliesTo: ["workload"], sections: [{ kind: "properties", title: "Framework", fields: ["purpose"] }] }] }) });
+  });
+  await page.route("**/api/search?**", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ type: "function", entityId: "function:main", contextId: "local", label: "main", path: "src/main.ts", workloadId: "workload:web", source: "semantic graph" }] }) }));
+  await page.route("**/api/state?**", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ index: { id: "index:web", root: "/repo" }, indexes: [{ id: "index:web", root: "/repo" }], runs: [] }) }));
+  await page.route("**/api/software/functions?**", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ id: "function:main", label: "main", qualifiedName: "main", path: "src/main.ts", line: 1, complexity: 2, coverage: { fraction: 1, stale: false }, crap: 2, stale: false }] }) }));
+  await openWorkbench(page);
+  await page.getByRole("button", { name: "Inspect Web" }).click();
+  await expect(page.locator(".semantic-details").getByRole("heading", { name: "Web" })).toBeVisible();
+  await page.getByRole("button", { name: /Web, healthy, running/ }).click();
+  await expect(page.getByRole("heading", { name: "Web" }).first()).toBeVisible();
+  await expect(page.getByText("Components & capabilities", { exact: true })).toBeVisible();
+  await expect(page.getByText("Web runtime", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Runtime", exact: true }).click();
+  await expect(page.getByText("node", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Software", exact: true }).click();
+  await expect(page.getByText("main", { exact: true }).first()).toBeVisible();
+  await page.getByLabel("Search selected context").fill("main");
+  await expect(page.locator(".search-results").getByText("main", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "Functions & coverage" }).click();
+  await expect(page.locator(".metrics-table").getByText("main", { exact: true })).toBeVisible();
+  expect(forbidden).toEqual([]);
+});
+
 test("opens on the semantic Device atlas and preserves deep navigation in browser history", async ({
   page,
 }) => {

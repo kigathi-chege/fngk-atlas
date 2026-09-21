@@ -1,6 +1,6 @@
 export type UnifiedSearchScope='context'|'all';
 export interface UnifiedSearchRequest {query:string;contextId:string;scope:UnifiedSearchScope;limit?:number}
-export interface UnifiedSearchItem {id:string;type:string;label:string;contextId?:string;path?:string;line?:number;detail?:string;provenance:string;score?:number;action?:string}
+export interface UnifiedSearchItem {id:string;type:string;label:string;contextId?:string;path?:string;line?:number;detail?:string;provenance:string;score?:number;action?:string;entityId?:string;workloadId?:string;namespace?:string;repositoryRoot?:string}
 export type UnifiedSearchProvider=(request:UnifiedSearchRequest,signal:AbortSignal)=>Promise<UnifiedSearchItem[]>;
 export interface UnifiedSearchResult {items:UnifiedSearchItem[];stale:boolean;errors:string[]}
 
