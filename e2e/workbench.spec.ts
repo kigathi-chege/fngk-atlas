@@ -3,6 +3,60 @@ import { expect, test } from "@playwright/test";
 test.setTimeout(45_000);
 const openWorkbench=async(page:any)=>{await page.goto('/');await expect(page.locator('.dv-dockview')).toBeVisible();await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('atlas.workbench.v5')??'null')?.version)).toBe(5)};
 
+test("orients a first-time user with the Machine Observatory", async ({ page }) => {
+  await page.route("**/api/world/projection?**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        protocolVersion: "atlas.world.v2",
+        contextId: "local",
+        rootId: "device:kigathi",
+        lens: "overview",
+        level: 0,
+        nodes: [],
+        edges: [],
+        aggregates: [],
+        breadcrumbs: [{ id: "device:kigathi", label: "kigathi", kind: "device" }],
+        availableViews: ["overview", "runtime", "software", "relationships", "evidence"],
+        availableExpansions: [],
+        errors: [],
+        synthesis: { headline: "kigathi", facts: [], attention: [], counters: {} },
+        observatory: {
+          identity: { id: "device:kigathi", label: "kigathi", online: true },
+          health: "degraded",
+          phase: "running",
+          summary: "Two primary workloads are running. One item requires attention.",
+          measuredAt: "2026-09-20T12:00:00.000Z",
+          stale: false,
+          regions: [
+            { id: "applications", label: "Applications", health: "degraded", collapsedCount: 0, items: [{ id: "workload:web", label: "Web", kind: "workload", health: "healthy", phase: "running", purpose: "Serves HTTP", active: true, stale: false, confidence: .98, facts: [] }, { id: "workload:worker", label: "Failed worker", kind: "workload", health: "critical", phase: "failed", purpose: "Runs background jobs", active: false, stale: false, confidence: .96, facts: [] }] },
+            { id: "data", label: "Data", health: "healthy", collapsedCount: 0, items: [{ id: "workload:postgres", label: "PostgreSQL", kind: "workload", health: "healthy", phase: "running", purpose: "Stores application data", active: true, stale: false, confidence: .99, facts: [] }] },
+            { id: "infrastructure", label: "Infrastructure", health: "healthy", collapsedCount: 0, items: [] },
+            { id: "development", label: "Development", health: "healthy", collapsedCount: 0, items: [] },
+            { id: "system", label: "System", health: "unknown", collapsedCount: 180, items: [] },
+            { id: "external", label: "External", health: "healthy", collapsedCount: 0, items: [] },
+          ],
+          flows: [{ id: "flow:web:postgres", sourceId: "workload:web", targetId: "workload:postgres", sourceLabel: "Web", targetLabel: "PostgreSQL", label: "queries", active: true, health: "healthy", confidence: .95, stale: false }],
+          attention: [{ id: "health:worker", text: "Failed worker requires immediate attention.", entityIds: ["workload:worker"], severity: "critical", stale: false }],
+          history: [{ id: "change:1", entityId: "workload:worker", text: "Failed worker changed.", at: "2026-09-20T11:59:00.000Z", severity: "warning" }],
+        },
+      }),
+    });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openWorkbench(page);
+  await expect(page.getByRole("heading", { name: "kigathi" })).toBeVisible();
+  await expect(page.getByText("Applications", { exact: true })).toBeVisible();
+  await expect(page.getByText("Web → PostgreSQL", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /failed worker/i }).first()).toBeVisible();
+  await expect(page.getByText("180 inactive system services", { exact: true })).toBeVisible();
+  await expect(page.locator("[data-observatory-region]" )).toHaveCount(6);
+  for (const size of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(size);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  }
+});
+
 test("opens on the semantic Device atlas and preserves deep navigation in browser history", async ({
   page,
 }) => {
