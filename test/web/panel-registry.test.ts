@@ -19,10 +19,10 @@ describe('Atlas panel registry',()=>{
 
   it('updates one descriptor per identifier and can forget it',()=>{
     const registry=new PanelRegistry();
-    registry.remember({id:'atlas.graph',kind:'graph',title:'Architecture'});
-    registry.remember({id:'atlas.graph',kind:'graph',title:'System architecture'});
-    expect(registry.all()).toHaveLength(1);expect(registry.get('atlas.graph')?.title).toBe('System architecture');
-    registry.forget('atlas.graph');expect(registry.get('atlas.graph')).toBeUndefined();
+    registry.remember({id:'atlas.observatory',kind:'atlas',title:'Machine Observatory'});
+    registry.remember({id:'atlas.observatory',kind:'atlas',title:'Device Atlas'});
+    expect(registry.all()).toHaveLength(1);expect(registry.get('atlas.observatory')?.title).toBe('Device Atlas');
+    registry.forget('atlas.observatory');expect(registry.get('atlas.observatory')).toBeUndefined();
   });
 
   it('keeps a dirty buffer reconstructable without persisting its body',()=>{

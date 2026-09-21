@@ -8,7 +8,6 @@ import {
   canonicalBreadcrumb,
   relationshipNeighborhood,
 } from "./relationships.js";
-import { salientFacts } from "./salience.js";
 import { synthesizeWorld } from "./synthesis.js";
 import { buildObservatory } from "./observatory.js";
 import type { WorldSample } from "./store.js";
@@ -301,48 +300,6 @@ export function projectWorld(
       .filter((value) => value.kind === kind)
       .some((value) => value.stale),
   }));
-  const cardEntities =
-    lens === "overview"
-      ? entities.filter((value) =>
-          root?.kind === "device"
-            ? value.kind === "workload" &&
-              (value.parentId === rootId ||
-                byId.get(value.parentId ?? "")?.parentId === rootId)
-            : value.id !== rootId &&
-              (value.parentId === rootId || value.workloadId === rootId),
-        )
-      : [];
-  const cards = cardEntities.slice(0, 80).map((value) => {
-    const caps = assertions
-        .filter(
-          (item) =>
-            item.subjectId === value.id &&
-            item.predicate === "provides-capability",
-        )
-        .map((item) => byId.get(item.objectId ?? "")?.label)
-        .filter(Boolean) as string[],
-      confidence = Math.max(
-        ...assertions
-          .filter(
-            (item) => item.subjectId === value.id || item.objectId === value.id,
-          )
-          .map((item) => item.confidence),
-        0.5,
-      );
-    return {
-      id: value.id,
-      kind: value.kind,
-      title: value.label,
-      status: (value.stale ? "stale" : "current") as "current" | "stale",
-      purpose: caps.length
-        ? caps.join(" · ")
-        : value.kind === "workload"
-          ? "Observed workload"
-          : `${value.kind.replaceAll("-", " ")} evidence`,
-      facts: salientFacts(value, assertions, entities),
-      confidence,
-    };
-  });
   return {
     protocolVersion: ATLAS_WORLD_VERSION,
     contextId,
@@ -352,7 +309,6 @@ export function projectWorld(
     nodes,
     edges,
     aggregates,
-    cards: lens === "overview" ? cards : undefined,
     synthesis: synthesizeWorld(rootId, entities, assertions),
     observatory:
       lens === "overview"

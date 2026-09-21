@@ -29,6 +29,19 @@ async function harness() {
 }
 
 describe("Atlas FNGK-native server", () => {
+  it("does not expose legacy graph or Atlas alias routes", async () => {
+    const app = await harness(),
+      legacyGraph = "/api/" + "graph",
+      legacyInterpreterAlias = "/api/" + "atlas/interpreters";
+    expect(
+      (await app.inject({ method: "GET", url: legacyGraph })).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await app.inject({ method: "GET", url: legacyInterpreterAlias })
+      ).statusCode,
+    ).toBe(404);
+  });
   it("serves canonical observatory routes", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "fngk-atlas-canonical-")),
       dbPath = path.join(directory, "atlas.db"),
@@ -224,30 +237,7 @@ describe("Atlas FNGK-native server", () => {
         })
       ).json(),
     ).toMatchObject({ protocolVersion: "fngk.session.v1", action: "rename" });
-    const world = await app.inject({
-      method: "GET",
-      url: "/api/graph?lens=world&contextId=local",
-    });
-    expect(world.statusCode).toBe(200);
-    expect(world.json().nodes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: "profile" }),
-        expect.objectContaining({ type: "device", label: "kigathi" }),
-      ]),
-    );
     expect((await app.inject({method:'POST',url:'/api/world/refresh',payload:{contextId:'local'}})).statusCode).toBe(200);
-    const atlas = await app.inject({
-      method: "GET",
-      url: "/api/atlas/devices/local/overview?lens=overview&budget=100",
-    });
-    expect(atlas.statusCode).toBe(200);
-    expect(atlas.json()).toMatchObject({
-      protocolVersion: "atlas.world.v2",
-      contextId: "local",
-      nodes: expect.arrayContaining([
-        expect.objectContaining({ kind: "device" }),
-      ]),
-    });
     const semantic = await app.inject({
       method: "GET",
       url: "/api/world/projection?contextId=local&lens=overview&budget=100",
@@ -279,7 +269,7 @@ describe("Atlas FNGK-native server", () => {
     ).toMatchObject({ items: expect.any(Array), errors: [] });
     expect(
       (
-        await app.inject({ method: "GET", url: "/api/atlas/interpreters" })
+        await app.inject({ method: "GET", url: "/api/world/interpreters" })
       ).json().items,
     ).toEqual(
       expect.arrayContaining([
@@ -516,14 +506,14 @@ describe("Atlas FNGK-native server", () => {
       (
         await app.inject({
           method: "POST",
-          url: "/api/atlas/device-adapters/test.adapter/run",
+          url: "/api/device-adapters/test.adapter/run",
           payload: { contextId: "local" },
         })
       ).statusCode,
     ).toBe(409);
     const ran = await app.inject({
       method: "POST",
-      url: "/api/atlas/device-adapters/test.adapter/run",
+      url: "/api/device-adapters/test.adapter/run",
       payload: { contextId: "local", confirm: true },
     });
     expect(ran.statusCode).toBe(200);
@@ -779,46 +769,11 @@ describe("Atlas FNGK-native server", () => {
       coverage: { artifact: "/repo/coverage/lcov.info", verified: true },
     });
     const graph = (
-      await app.inject({ method: "GET", url: "/api/graph" })
+      await app.inject({ method: "GET", url: "/api/software/functions?contextId=local" })
     ).json();
     expect(
-      graph.nodes.find((node: any) => node.name === "local"),
+      graph.items.find((node: any) => node.label === "local"),
     ).toMatchObject({ coverage: { fraction: 1, stale: false }, crap: 1 });
-    const lens = (
-      await app.inject({
-        method: "GET",
-        url: "/api/graph?lens=code&budget=2&layers=contains,calls",
-      })
-    ).json();
-    expect(lens).toMatchObject({
-      counts: { visibleNodes: 3, totalNodes: expect.any(Number) },
-      breadcrumbs: [],
-    });
-    expect(lens.nodes).toContainEqual(
-      expect.objectContaining({ type: "aggregate" }),
-    );
-    const machine = (
-      await app.inject({
-        method: "GET",
-        url: "/api/graph?lens=machine&budget=500&contextId=local",
-      })
-    ).json();
-    expect(machine.nodes).toContainEqual(
-      expect.objectContaining({
-        type: "process",
-        metadata: expect.objectContaining({ pid: expect.any(Number) }),
-      }),
-    );
-    const otherContext = (
-      await app.inject({
-        method: "GET",
-        url: "/api/graph?lens=code&contextId=device:other",
-      })
-    ).json();
-    expect(otherContext.index.contextId).toBe("device:other");
-    expect(
-      otherContext.nodes.some((node: any) => node.type === "function"),
-    ).toBe(false);
 
     expect(
       (

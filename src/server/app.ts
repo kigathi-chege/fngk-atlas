@@ -22,7 +22,6 @@ import { posixQuote } from "../transports/posix.js";
 import { correlateRuntime } from "../correlation/runtime-code.js";
 import { analyzeRepository } from "../analysis/repository-analyzer.js";
 import { redactCommandLine } from "../discovery/redaction.js";
-import { buildGraphLens, type GraphLens } from "../web/lib/graph-model.js";
 import { discoverDatabases } from "../databases/discovery.js";
 import { LiveProjectService } from "../live-projects/service.js";
 import { diagnoseBrowser } from "../diagnostics/browser-diagnostics.js";
@@ -1672,73 +1671,7 @@ export async function createApp(
         .slice(0, limit),
     };
   });
-  app.get("/api/atlas/devices/:contextId/overview", async (request, reply) => {
-    const contextId = decodeURIComponent(
-        (request.params as { contextId: string }).contextId,
-      ),
-      query = request.query as {
-        lens?: string;
-        level?: string;
-        budget?: string;
-        cursor?: string;
-      };
-    try {
-      return world.projection(contextId, {
-        lens: query.lens ?? "overview",
-        level: Number(query.level) || 0,
-        budget: Math.min(500, Math.max(1, Number(query.budget) || 100)),
-        cursor: query.cursor,
-      });
-    } catch (error) {
-      const result = processError(error);
-      return reply.code(result.statusCode).send(result.body);
-    }
-  });
-  app.get("/api/atlas/entities/:id", async (request, reply) => {
-    const id = decodeURIComponent((request.params as { id: string }).id),
-      contextId = String(
-        (request.query as { contextId?: string }).contextId ?? "",
-      );
-    const value = worldStore.entity(id);
-    return value ?? reply.code(404).send({ error: "entity_not_found" });
-  });
-  app.get("/api/atlas/entities/:id/neighborhood", async (request, reply) => {
-    const id = decodeURIComponent((request.params as { id: string }).id),
-      query = request.query as {
-        contextId?: string;
-        lens?: string;
-        level?: string;
-        budget?: string;
-        cursor?: string;
-      },
-      contextId = String(query.contextId ?? "");
-    if (!contextId) return reply.code(400).send({ error: "context_required" });
-    if (!worldStore.entity(id))
-      return reply.code(404).send({ error: "entity_not_found" });
-    return world.projection(contextId, {
-      rootId: id,
-      lens: query.lens ?? "overview",
-      level: Number(query.level) || 1,
-      budget: Math.min(500, Math.max(1, Number(query.budget) || 100)),
-      cursor: query.cursor,
-    });
-  });
-  app.get("/api/atlas/entities/:id/evidence", async (request, reply) => {
-    const id = decodeURIComponent((request.params as { id: string }).id),
-      value = worldStore.entity(id);
-    return value
-      ? { entity: value.entity, assertions: value.assertions }
-      : reply.code(404).send({ error: "entity_not_found" });
-  });
-  app.get("/api/atlas/entities/:id/timeline", async (request, reply) => {
-    const id = decodeURIComponent((request.params as { id: string }).id),
-      contextId = String(
-        (request.query as { contextId?: string }).contextId ?? "",
-      );
-    if (!contextId) return reply.code(400).send({ error: "context_required" });
-    return { items: worldStore.timeline(contextId, id) };
-  });
-  // Canonical semantic-world names; /api/atlas remains a compatibility alias.
+  // Canonical semantic-world routes.
   app.get("/api/world/projection", async (request, reply) => {
     const query = request.query as {
         contextId?: string;
@@ -1846,8 +1779,6 @@ export async function createApp(
   };
   app.get("/api/world/interpreters", listInterpreters);
   app.post("/api/world/interpreters/recompute", recomputeInterpreters);
-  app.get("/api/atlas/interpreters", listInterpreters);
-  app.post("/api/atlas/interpreters/recompute", recomputeInterpreters);
   app.post("/api/world/refresh",async(request,reply)=>{
     const contextId=String((request.body as {contextId?:string})?.contextId??'local');
     try{await refreshWorld(contextId,{force:true});return{contextId,refreshed:true,projection:world.projection(contextId,{lens:'overview',level:0,budget:100})}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
@@ -1901,8 +1832,6 @@ export async function createApp(
   };
   app.get("/api/device-adapters", listDeviceAdapters);
   app.post("/api/device-adapters/:id/run", runRegisteredDeviceAdapter);
-  app.get("/api/atlas/device-adapters", listDeviceAdapters);
-  app.post("/api/atlas/device-adapters/:id/run", runRegisteredDeviceAdapter);
   app.get("/api/intelligence/capabilities", async () =>
     intelligence.capabilities(),
   );
@@ -2412,179 +2341,6 @@ export async function createApp(
     if (!index)
       return reply.code(404).send({ error: "index_not_found" });
     return projectSoftwareFunctions(index, Number(query.limit) || 500);
-  });
-  app.get("/api/graph", async (request, reply) => {
-    const queryValue = request.query as {
-      type?: string;
-      q?: string;
-      parent?: string;
-      limit?: string;
-      lens?: GraphLens;
-      root?: string;
-      layers?: string;
-      budget?: string;
-      contextId?: string;
-      indexId?: string;
-    };
-    const type = String(queryValue.type ?? ""),
-      query = String(queryValue.q ?? "").toLowerCase(),
-      parent = String(queryValue.parent ?? "");
-    const requestedIndex = resolveIndex(
-        queryValue.indexId,
-        queryValue.contextId,
-      ),
-      indexContext =
-        requestedIndex?.contextId ??
-        queryValue.contextId ??
-        activeIndex?.contextId ??
-        "local",
-      contextId = queryValue.contextId ?? indexContext,
-      selectedIndex =
-        requestedIndex && indexContext === contextId
-          ? requestedIndex
-          : undefined,
-      baseIndex = selectedIndex ?? {
-        id: `runtime:${contextId}`,
-        root: "/",
-        contextId,
-        revision: undefined,
-        summary: { files: 0, functions: 0, packages: 0 },
-        nodes: [],
-        edges: [],
-      },
-      runtimeNodes = evidence.entities(contextId),
-      runtimeEdges = evidence
-        .relationships(contextId)
-        .map((value) => ({
-          id: value.id,
-          source: value.sourceId,
-          target: value.targetId,
-          type: value.type,
-          evidence: value.evidence,
-          observedAt: value.observedAt,
-        }));
-    let worldNodes: any[] = [],
-      worldEdges: any[] = [],
-      graphErrors: Array<{ code: string; message: string }> = [];
-    if (queryValue.lens === "world")
-      try {
-        const snapshot = await contexts.contexts(),
-          profileId = `profile:${snapshot.state.profile ?? "default"}`;
-        worldNodes.push({
-          id: profileId,
-          type: "profile",
-          label: snapshot.state.profile ?? "default",
-        });
-        for (const context of snapshot.contexts) {
-          const node = {
-            ...context,
-            type: context.kind === "fngk-device" ? "device" : "context",
-            label: context.name,
-          };
-          worldNodes.push(node);
-          worldEdges.push({
-            id: `context:${profileId}:${context.id}`,
-            source: profileId,
-            target: context.id,
-            type: "contains",
-          });
-        }
-        for (const connection of snapshot.state.namespace?.connections ?? []) {
-          worldNodes.push({
-            ...connection,
-            type: "connection",
-            label: connection.name ?? connection.id,
-          });
-          worldEdges.push({
-            id: `connection:${profileId}:${connection.id}`,
-            source: profileId,
-            target: connection.id,
-            type: "contains",
-          });
-        }
-      } catch (value) {
-        graphErrors.push({
-          code: "namespace_unavailable",
-          message: (value as Error).message,
-        });
-      }
-    const generatedPath = (value: unknown) =>
-      typeof value === "string" &&
-      /(^|\/)(?:web-dist|dist|build|coverage|node_modules|\.svelte-kit)(\/|$)|\.min\.[cm]?js$/i.test(
-        value,
-      );
-    let nodes = [
-        ...new Map(
-          [...baseIndex.nodes, ...runtimeNodes, ...worldNodes].map(
-            (node: any) => [node.id, node],
-          ),
-        ).values(),
-      ].filter((node: any) => !generatedPath(node.path)),
-      allEdges = [
-        ...new Map(
-          [...baseIndex.edges, ...runtimeEdges, ...worldEdges].map(
-            (edge: any) => [edge.id, edge],
-          ),
-        ).values(),
-      ];
-    const totalNodes = nodes.length;
-    if (type) nodes = nodes.filter((node: any) => node.type === type);
-    if (parent)
-      nodes = nodes.filter(
-        (node: any) => node.parent === parent || node.id === parent,
-      );
-    if (query)
-      nodes = nodes.filter((node: any) =>
-        `${node.label} ${node.path ?? ""} ${node.qualifiedName ?? ""}`
-          .toLowerCase()
-          .includes(query),
-      );
-    const allMatchingIds = new Set(nodes.map((node: any) => node.id));
-    let edges = allEdges.filter(
-      (edge: any) =>
-        allMatchingIds.has(edge.source) && allMatchingIds.has(edge.target),
-    );
-    if (queryValue.lens) {
-      const lens = buildGraphLens(
-        { nodes, edges },
-        {
-          lens: queryValue.lens,
-          root: queryValue.root,
-          budget: Math.min(500, Math.max(1, Number(queryValue.budget) || 90)),
-          layers: queryValue.layers
-            ? new Set(queryValue.layers.split(",").filter(Boolean))
-            : undefined,
-        },
-      );
-      nodes = lens.nodes;
-      edges = lens.edges;
-    } else {
-      nodes = nodes.slice(0, Math.min(Number(queryValue.limit) || 2500, 10000));
-      const ids = new Set(nodes.map((node: any) => node.id));
-      edges = edges.filter(
-        (edge: any) => ids.has(edge.source) && ids.has(edge.target),
-      );
-    }
-    return {
-      index: {
-        id: baseIndex.id,
-        root: baseIndex.root,
-        contextId: baseIndex.contextId ?? contextId,
-        revision: baseIndex.revision,
-        summary: baseIndex.summary,
-      },
-      nodes,
-      edges,
-      total: totalNodes,
-      counts: {
-        visibleNodes: nodes.length,
-        visibleEdges: edges.length,
-        totalNodes,
-      },
-      breadcrumbs: queryValue.root ? [queryValue.root] : [],
-      layout: selectedIndex ? store.layout(selectedIndex.id) : [],
-      errors: graphErrors,
-    };
   });
   app.get("/api/nodes/:id", async (request, reply) => {
     const id = (request.params as { id: string }).id,

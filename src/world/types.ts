@@ -227,15 +227,6 @@ export interface AtlasProjection {
     summary?: string;
     stale?: boolean;
   }>;
-  cards?: Array<{
-    id: string;
-    kind: string;
-    title: string;
-    status: "current" | "stale";
-    purpose?: string;
-    facts: Array<{ label: string; value: string }>;
-    confidence?: number;
-  }>;
   synthesis?: AtlasSynthesis;
   observatory?: AtlasObservatory;
   breadcrumbs: Array<{ id: string; label: string; kind: string }>;

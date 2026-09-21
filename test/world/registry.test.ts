@@ -9,8 +9,8 @@ import {
 } from "../../src/world/registry.js";
 import {
   validateInterpreterManifest,
-  workloadInterpreter,
 } from "../../src/world/interpreter.js";
+import { interpreterFixture } from "./interpreter-fixture.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -27,7 +27,7 @@ describe("interpreter registry", () => {
     cleanups.push(() => rm(root, { recursive: true, force: true }));
     const { privateKey, publicKey } = generateKeyPairSync("ed25519"),
       manifest = {
-        ...workloadInterpreter,
+        ...interpreterFixture,
         id: "community.postgres",
         publisher: "community",
       },
@@ -42,7 +42,7 @@ describe("interpreter registry", () => {
     );
     await writeFile(
       path.join(dev, "local.json"),
-      JSON.stringify({ ...workloadInterpreter, id: "local.experimental" }),
+      JSON.stringify({ ...interpreterFixture, id: "local.experimental" }),
     );
     const loaded = await loadInterpreterRegistry({
       signedDir: signed,
@@ -73,7 +73,7 @@ describe("interpreter registry", () => {
     const root = await mkdtemp(path.join(tmpdir(), "atlas-interpreters-"));
     await writeFile(
       path.join(root, "local.json"),
-      JSON.stringify({ ...workloadInterpreter, id: "local.experimental" }),
+      JSON.stringify({ ...interpreterFixture, id: "local.experimental" }),
     );
     cleanups.push(() => rm(root, { recursive: true, force: true }));
     expect(
@@ -84,7 +84,7 @@ describe("interpreter registry", () => {
   it("rejects undeclared outputs and unbounded presentation descriptors", () => {
     expect(
       validateInterpreterManifest({
-        ...workloadInterpreter,
+        ...interpreterFixture,
         stage: "enrich",
         outputKinds: ["capability"],
       }),
@@ -96,7 +96,7 @@ describe("interpreter registry", () => {
     });
     expect(
       validateInterpreterManifest({
-        ...workloadInterpreter,
+        ...interpreterFixture,
         stage: "present",
         views: [
           {

@@ -6,12 +6,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   runInterpreter,
   validateInterpreterManifest,
-  workloadInterpreter,
 } from "../../src/world/interpreter.js";
+import { interpreterFixture } from "./interpreter-fixture.js";
 import { projectWorld } from "../../src/world/projector.js";
 import { WorldService } from "../../src/world/service.js";
 import { WorldStore } from "../../src/world/store.js";
-import { resolveWorkloads } from "../../src/world/resolver.js";
 import { resolveOperationalWorld } from "../../src/world/resolution-policy.js";
 import { materializeWorld } from "../../src/world/materializer.js";
 import { adaptWorldObservations } from "../../src/world/observation-adapters.js";
@@ -130,8 +129,8 @@ describe("semantic Device atlas", () => {
       CREATE TABLE atlas_world_entities(id TEXT PRIMARY KEY,context_id TEXT NOT NULL,kind TEXT NOT NULL,namespace TEXT NOT NULL,label TEXT NOT NULL,aliases_json TEXT NOT NULL,parent_id TEXT,workload_id TEXT,attributes_json TEXT NOT NULL,first_observed_at TEXT NOT NULL,last_observed_at TEXT NOT NULL,stale INTEGER NOT NULL DEFAULT 0,content_hash TEXT NOT NULL);
       CREATE TABLE atlas_world_interpreters(id TEXT PRIMARY KEY,version TEXT NOT NULL,publisher TEXT NOT NULL,manifest_json TEXT NOT NULL,trusted INTEGER NOT NULL,source TEXT NOT NULL,status TEXT NOT NULL,error TEXT,updated_at TEXT NOT NULL);
       INSERT INTO atlas_world_observations VALUES('observation:one','local','process','runtime','process:1','2026-09-20T00:00:00.000Z',NULL,'{}','{"pid":1}','safe-metadata');
-      INSERT INTO atlas_world_entities VALUES('compat:one','local','process','atlas.compatibility','node','[]',NULL,NULL,'{}','2026-09-20T00:00:00.000Z','2026-09-20T00:00:00.000Z',0,'legacy');
-      INSERT INTO atlas_world_interpreters VALUES('atlas.compatibility','1','atlas','{}',1,'builtin','healthy',NULL,'2026-09-20T00:00:00.000Z');
+      INSERT INTO atlas_world_entities VALUES('derived:one','local','process','legacy.derived','node','[]',NULL,NULL,'{}','2026-09-20T00:00:00.000Z','2026-09-20T00:00:00.000Z',0,'legacy');
+      INSERT INTO atlas_world_interpreters VALUES('legacy.derived','1','atlas','{}',1,'builtin','healthy',NULL,'2026-09-20T00:00:00.000Z');
     `);
     legacy.close();
 
@@ -140,9 +139,9 @@ describe("semantic Device atlas", () => {
     expect(migrated.observations("local")).toHaveLength(1);
     expect(migrated.entities("local")).toEqual([]);
     expect(migrated.interpreters().map((item) => item.id)).not.toContain(
-      "atlas.compatibility",
+      "legacy.derived",
     );
-    migrated.sync("local", { ...workloadInterpreter, id: "atlas.v2.fixture" }, {
+    migrated.sync("local", { ...interpreterFixture, id: "atlas.v2.fixture" }, {
       entities: [
         {
           id: "workload:v2",
@@ -169,132 +168,6 @@ describe("semantic Device atlas", () => {
       "workload:v2",
     ]);
     reopened.close();
-  });
-  it("resolves service and process observations into one stable workload", () => {
-    const inputs = [
-      {
-        id: "service:signal",
-        contextId: "device:one",
-        kind: "service",
-        label: "Signal API",
-        attributes: { systemdUnit: "signal.service" },
-        observedAt: "2026-09-14T00:00:00Z",
-        source: "native",
-      },
-      {
-        id: "process:1",
-        contextId: "device:one",
-        kind: "process",
-        label: "node",
-        attributes: {
-          systemdUnit: "signal.service",
-          command: "node dist/server.js",
-        },
-        observedAt: "2026-09-14T00:00:01Z",
-        source: "terminal",
-      },
-    ];
-    const output = resolveWorkloads(inputs, () => "2026-09-14T00:01:00Z");
-    expect(output.entities.filter((v) => v.kind === "workload")).toHaveLength(
-      1,
-    );
-    expect(
-      output.assertions.filter((v) => v.predicate === "realized-by"),
-    ).toHaveLength(2);
-    expect(output.entities[0].attributes.memberKinds).toEqual([
-      "service",
-      "process",
-    ]);
-    expect(resolveWorkloads(inputs, () => "2026-09-14T00:01:00Z")).toEqual(
-      output,
-    );
-  });
-  it("bridges service, repository, process, and listener signals without using PID or port alone as identity", () => {
-    const inputs = [
-      {
-        id: "service",
-        contextId: "local",
-        kind: "service",
-        label: "Signal",
-        attributes: {
-          systemdUnit: "signal.service",
-          repositoryPath: "/srv/signal",
-        },
-        observedAt: "2026-09-14T00:00:00Z",
-        source: "native",
-      },
-      {
-        id: "repo",
-        contextId: "local",
-        kind: "repository",
-        label: "signal",
-        attributes: { path: "/srv/signal" },
-        observedAt: "2026-09-14T00:00:00Z",
-        source: "analysis",
-      },
-      {
-        id: "process",
-        contextId: "local",
-        kind: "process",
-        label: "node",
-        attributes: { systemdUnit: "signal.service", pid: 42 },
-        observedAt: "2026-09-14T00:00:00Z",
-        source: "terminal",
-      },
-      {
-        id: "port",
-        contextId: "local",
-        kind: "port",
-        label: ":3000",
-        attributes: { port: 3000 },
-        observedAt: "2026-09-14T00:00:00Z",
-        source: "terminal",
-      },
-    ];
-    const output = resolveWorkloads(inputs);
-    expect(output.entities.filter((v) => v.kind === "workload")).toHaveLength(
-      1,
-    );
-    expect(output.mapping.repo).toBe(output.mapping.service);
-    expect(output.mapping.process).toBe(output.mapping.service);
-    expect(output.mapping.port).toBeUndefined();
-    expect(output.unresolved).toContainEqual({
-      inputId: "port",
-      reason: expect.any(String),
-    });
-  });
-  it("applies specialists to resolved workloads and resists generic Node false positives", () => {
-    const input = {
-        id: "node",
-        contextId: "local",
-        kind: "process",
-        label: "node",
-        attributes: { repositoryPath: "/srv/plain", command: "node script.js" },
-        observedAt: "2026-09-14T00:00:00Z",
-        source: "terminal",
-      },
-      plain = resolveWorkloads([input]),
-      plainOutputs = runBuiltInSpecialists(plain, [input]);
-    expect(plainOutputs.flatMap((value) => value.output.assertions)).toEqual(
-      [],
-    );
-    const explicit = {
-        ...input,
-        id: "fastify",
-        attributes: {
-          repositoryPath: "/srv/api",
-          framework: "Fastify",
-          command: "node server.js",
-        },
-      },
-      resolved = resolveWorkloads([explicit]),
-      outputs = runBuiltInSpecialists(resolved, [explicit]);
-    expect(outputs.flatMap((value) => value.output.assertions)).toContainEqual(
-      expect.objectContaining({
-        predicate: "provides-capability",
-        confidence: 0.94,
-      }),
-    );
   });
   it("scopes specialist evidence to one workload", () => {
     const workload = (id: string, label: string, memberIds: string[]) => ({
@@ -377,7 +250,7 @@ describe("semantic Device atlas", () => {
     expect(observation.sensitivity).toBe("sensitive-reference");
   });
   it("validates and deterministically executes data-only interpreter specifications", () => {
-    expect(validateInterpreterManifest(workloadInterpreter)).toMatchObject({
+    expect(validateInterpreterManifest(interpreterFixture)).toMatchObject({
       ok: true,
     });
     const input = [
@@ -392,12 +265,12 @@ describe("semantic Device atlas", () => {
         },
       ],
       left = runInterpreter(
-        workloadInterpreter,
+        interpreterFixture,
         input,
         () => "2026-09-14T00:01:00Z",
       ),
       right = runInterpreter(
-        workloadInterpreter,
+        interpreterFixture,
         input,
         () => "2026-09-14T00:01:00Z",
       );
@@ -497,7 +370,9 @@ describe("semantic Device atlas", () => {
     expect(projection.protocolVersion).toBe("atlas.world.v2");
     expect(projection.nodes.length).toBeLessThanOrEqual(50);
     expect(
-      projection.cards?.some((value) => value.title === "Signal API"),
+      projection.observatory?.regions
+        .flatMap((value) => value.items)
+        .some((value) => value.label === "Signal API"),
     ).toBe(true);
     expect(projection.synthesis?.facts[0]?.text).toContain("workload");
     expect(projection.availableViews).toContain("relationships");
@@ -566,8 +441,8 @@ describe("semantic Device atlas", () => {
         lastObservedAt: "2026-09-14T00:00:00Z",
         stale: false,
       },
-      manifest = { ...workloadInterpreter, id: "one" },
-      manifestTwo = { ...workloadInterpreter, id: "two" },
+      manifest = { ...interpreterFixture, id: "one" },
+      manifestTwo = { ...interpreterFixture, id: "two" },
       base = {
         contextId: "local",
         subjectId: "entity",

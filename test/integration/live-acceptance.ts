@@ -82,10 +82,9 @@ check(discovery.some(message => message.complete === true), 'bounded remote disc
 check(discovery.flatMap(message => message.entities ?? []).some((entity: any) => entity.type === 'process'), 'terminal discovery did not report runtime processes');
 const analysis = await websocket(`/api/analysis/repository?contextId=${encodedContext}&path=${encodedRoot}`);
 check(analysis.some(message => message.type === 'analysis_complete' && message.index?.summary?.functions >= 1), 'remote repository analysis did not complete');
-const execution = await api(`/api/graph?contextId=${encodedContext}&lens=execution&layers=loads,runtime_in,served_by,contains&budget=500`);
-if(!execution.body.edges.some((edge: any) => edge.type === 'loads' && edge.evidence?.kind === 'command_path')){
-  const runtime=await api(`/api/discovery/entities?contextId=${encodedContext}`);
-  throw new Error(`process-to-code evidence link is missing: ${JSON.stringify({processes:runtime.body.entities?.filter((item:any)=>item.type==='process'&&String(item.metadata?.command).includes('server.js')),modules:execution.body.nodes?.filter((item:any)=>item.type==='module'),edges:execution.body.edges?.filter((item:any)=>['loads','runtime_in'].includes(item.type))})}`);
+const execution = await api(`/api/discovery/entities?contextId=${encodedContext}`);
+if(!execution.body.relationships.some((edge: any) => edge.type === 'loads' && edge.evidence?.kind === 'command_path')){
+  throw new Error(`process-to-code evidence link is missing: ${JSON.stringify({processes:execution.body.entities?.filter((item:any)=>item.type==='process'&&String(item.metadata?.command).includes('server.js')),modules:execution.body.entities?.filter((item:any)=>item.type==='module'),edges:execution.body.relationships?.filter((item:any)=>['loads','runtime_in'].includes(item.type))})}`);
 }
 
 const coverage = await api('/api/coverage/refresh', { method: 'POST', body: JSON.stringify({ contextId, repositoryPath: fixtureRoot, command: 'npm run coverage' }) });

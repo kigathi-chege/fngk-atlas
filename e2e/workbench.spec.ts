@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.setTimeout(45_000);
-const openWorkbench=async(page:any)=>{await page.goto('/');await expect(page.locator('.dv-dockview')).toBeVisible();await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('atlas.workbench.v5')??'null')?.version)).toBe(5)};
+const openWorkbench=async(page:any)=>{await page.goto('/');await expect(page.locator('.dv-dockview')).toBeVisible();await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('atlas.workbench.v6')??'null')?.version)).toBe(6)};
 
 test("orients a first-time user with the Machine Observatory", async ({ page }) => {
   await page.route("**/api/world/projection?**", async (route) => {
@@ -70,7 +70,7 @@ test("uses only canonical observatory APIs", async ({ page }) => {
       workload = { id: "workload:web", contextId: "local", kind: "workload", namespace: "atlas.resolver.v2", label: "Web", aliases: [], attributes: { health: "healthy", phase: "running", purpose: "Serve the application" }, firstObservedAt: "2026-09-20T12:00:00.000Z", lastObservedAt: "2026-09-20T12:00:00.000Z", stale: false },
       nodes = rootId ? [workload, ...(lens === "runtime" ? [{ ...workload, id: "process:web", kind: "process", label: "node", workloadId: workload.id }] : lens === "software" ? [{ ...workload, id: "function:main", kind: "function", label: "main", workloadId: workload.id, attributes: { path: "src/main.ts" } }] : [])] : [];
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({
-      protocolVersion: "atlas.world.v2", contextId: "local", rootId: rootId ?? "device:kigathi", lens, level: 0, nodes, edges: [], aggregates: [], cards: [],
+      protocolVersion: "atlas.world.v2", contextId: "local", rootId: rootId ?? "device:kigathi", lens, level: 0, nodes, edges: [], aggregates: [],
       breadcrumbs: rootId ? [{ id: "device:kigathi", label: "kigathi", kind: "device" }, { id: workload.id, label: workload.label, kind: workload.kind }] : [{ id: "device:kigathi", label: "kigathi", kind: "device" }],
       availableViews: ["overview", "runtime", "software", "relationships", "evidence"], availableExpansions: [], errors: [], synthesis: { headline: rootId ? "Web" : "kigathi", facts: [], attention: [], counters: {} },
       observatory: rootId ? undefined : { identity: { id: "device:kigathi", label: "kigathi", online: true }, health: "healthy", phase: "running", summary: "One primary workload is running.", measuredAt: "2026-09-20T12:00:00.000Z", stale: false, regions: [{ id: "applications", label: "Applications", health: "healthy", collapsedCount: 0, items: [{ id: workload.id, label: workload.label, kind: workload.kind, health: "healthy", phase: "running", purpose: "Serve the application", active: true, stale: false, confidence: .98, facts: [] }] }, { id: "data", label: "Data", health: "healthy", collapsedCount: 0, items: [] }, { id: "infrastructure", label: "Infrastructure", health: "healthy", collapsedCount: 0, items: [] }, { id: "development", label: "Development", health: "healthy", collapsedCount: 0, items: [] }, { id: "system", label: "System", health: "healthy", collapsedCount: 0, items: [] }, { id: "external", label: "External", health: "healthy", collapsedCount: 0, items: [] }], flows: [], attention: [], history: [] },
@@ -780,11 +780,11 @@ test("discards the legacy workbench schema and restores a full-height six-pixel 
       center: group(".atlas-workspace-anchor"),
       filesystem: group(".tree-explorer"),
       legacy: localStorage.getItem("atlas.workbench.v2"),
-      saved: JSON.parse(localStorage.getItem("atlas.workbench.v5") ?? "null"),
+      saved: JSON.parse(localStorage.getItem("atlas.workbench.v6") ?? "null"),
     };
   });
   expect(geometry.legacy).toBeNull();
-  expect(geometry.saved?.version).toBe(5);
+  expect(geometry.saved?.version).toBe(6);
   expect(geometry.navigator!.left - geometry.workbench!.left).toBe(6);
   expect(geometry.workbench!.bottom - geometry.navigator!.bottom).toBe(6);
   expect(geometry.center!.left - geometry.navigator!.right).toBe(6);
@@ -807,7 +807,7 @@ test("keeps sidebar widths and the center workspace when central tabs close", as
       ?.closest(".dv-groupview")
       ?.getBoundingClientRect().width,
   }));
-  for (const id of ["atlas.graph", "atlas.metrics", "atlas.activity"])
+  for (const id of ["atlas.observatory", "atlas.metrics", "atlas.activity"])
     await page
       .locator(`.atlas-tab[data-panel-id="${id}"] .atlas-tab-minimize`)
       .click();
