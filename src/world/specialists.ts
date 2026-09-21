@@ -8,11 +8,16 @@ import type {
 import { ATLAS_INTERPRETER_VERSION, ATLAS_WORLD_VERSION } from "./types.js";
 import { worldId } from "./interpreter.js";
 
+export interface SpecialistContext {
+  workload: AtlasEntity;
+  members: InterpreterInput[];
+  relationships: AtlasAssertion[];
+}
 type Specialist = {
   manifest: InterpreterManifest;
   matches: (
+    context: SpecialistContext,
     text: string,
-    inputs: InterpreterInput[],
   ) => Array<{ capability: string; confidence: number; explanation: string }>;
 };
 const manifest = (id: string, name: string): InterpreterManifest => ({
@@ -30,7 +35,7 @@ const manifest = (id: string, name: string): InterpreterManifest => ({
 export const BUILTIN_SPECIALISTS: Specialist[] = [
   {
     manifest: manifest("atlas.specialist.postgresql", "PostgreSQL specialist"),
-    matches: (text) =>
+    matches: (_context, text) =>
       /\bpostgres(?:ql)?\b/.test(text)
         ? [
             {
@@ -47,7 +52,7 @@ export const BUILTIN_SPECIALISTS: Specialist[] = [
       "atlas.specialist.docker",
       "Docker/containerd specialist",
     ),
-    matches: (text) =>
+    matches: (_context, text) =>
       /\b(dockerd|docker\.service|containerd(?:\.service)?)\b/.test(text)
         ? [
             {
@@ -64,9 +69,9 @@ export const BUILTIN_SPECIALISTS: Specialist[] = [
       "atlas.specialist.node",
       "Node/SvelteKit/Fastify specialist",
     ),
-    matches: (text, inputs) =>
+    matches: (context, text) =>
       /\b(sveltekit|fastify|next\.js|express)\b/.test(text) ||
-      inputs.some(
+      context.members.some(
         (value) =>
           value.kind === "port" &&
           /https?/.test(String(value.attributes.protocol ?? "")),
@@ -85,7 +90,7 @@ export const BUILTIN_SPECIALISTS: Specialist[] = [
   },
   {
     manifest: manifest("atlas.specialist.signal", "Signal/FNGK specialist"),
-    matches: (text) =>
+    matches: (_context, text) =>
       /\b(signal|fngk)\b/.test(text)
         ? [
             {
@@ -100,7 +105,7 @@ export const BUILTIN_SPECIALISTS: Specialist[] = [
 ];
 
 export function runBuiltInSpecialists(
-  resolved: { entities: AtlasEntity[]; mapping: Record<string, string> },
+  resolved: { entities: AtlasEntity[]; assertions?: AtlasAssertion[]; mapping?: Record<string, string> },
   inputs: InterpreterInput[],
   at = new Date().toISOString(),
 ) {
@@ -120,14 +125,23 @@ export function runBuiltInSpecialists(
       )
         .map((id) => byId.get(id))
         .filter(Boolean) as InterpreterInput[],
+      context: SpecialistContext = {
+        workload,
+        members,
+        relationships: (resolved.assertions ?? []).filter(
+          (assertion) =>
+            assertion.subjectId === workload.id ||
+            assertion.objectId === workload.id,
+        ),
+      },
       text =
-        `${workload.label} ${workload.aliases.join(" ")} ${members.map((value) => JSON.stringify(value.attributes)).join(" ")}`.toLowerCase();
+        `${workload.label} ${workload.aliases.join(" ")} ${members.map((value) => `${value.label} ${JSON.stringify(value.attributes)}`).join(" ")}`.toLowerCase();
     for (const specialist of BUILTIN_SPECIALISTS) {
       const output = outputs.get(specialist.manifest.id)!;
-      for (const match of specialist.matches(text, members)) {
+      for (const match of specialist.matches(context, text)) {
         const capabilityId = worldId(
           workload.contextId,
-          "atlas.core",
+          specialist.manifest.id,
           "capability",
           match.capability,
         );
@@ -136,7 +150,7 @@ export function runBuiltInSpecialists(
             id: capabilityId,
             contextId: workload.contextId,
             kind: "capability",
-            namespace: "atlas.core",
+            namespace: specialist.manifest.id,
             label: match.capability,
             aliases: [],
             attributes: { specialist: specialist.manifest.id },

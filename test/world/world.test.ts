@@ -296,6 +296,63 @@ describe("semantic Device atlas", () => {
       }),
     );
   });
+  it("scopes specialist evidence to one workload", () => {
+    const workload = (id: string, label: string, memberIds: string[]) => ({
+        id,
+        contextId: "local",
+        kind: "workload",
+        namespace: "atlas.resolver.v2",
+        label,
+        aliases: [],
+        attributes: { memberObservationIds: memberIds },
+        firstObservedAt: "2026-09-20T00:00:00.000Z",
+        lastObservedAt: "2026-09-20T00:00:00.000Z",
+        stale: false,
+      }),
+      inputs = [
+        { id: "fastify", contextId: "local", kind: "repository", label: "web", attributes: { framework: "Fastify" }, observedAt: "2026-09-20T00:00:00.000Z", source: "manifest" },
+        { id: "tcp", contextId: "local", kind: "port", label: ":9000", attributes: { protocol: "tcp" }, observedAt: "2026-09-20T00:00:00.000Z", source: "runtime" },
+        { id: "postgres", contextId: "local", kind: "database", label: "postgresql", attributes: {}, observedAt: "2026-09-20T00:00:00.000Z", source: "database" },
+        { id: "docker", contextId: "local", kind: "service", label: "docker.service", attributes: {}, observedAt: "2026-09-20T00:00:00.000Z", source: "systemd" },
+        { id: "signal", contextId: "local", kind: "service", label: "signal.service", attributes: {}, observedAt: "2026-09-20T00:00:00.000Z", source: "systemd" },
+      ],
+      entities = [
+        workload("workload:web", "web", ["fastify"]),
+        workload("workload:tcp", "listener", ["tcp"]),
+        workload("workload:postgres", "postgresql", ["postgres"]),
+        workload("workload:docker", "docker", ["docker"]),
+        workload("workload:signal", "signal", ["signal"]),
+      ],
+      outputs = runBuiltInSpecialists({ entities, mapping: {} }, inputs),
+      outputEntities = outputs.flatMap((value) => value.output.entities),
+      assertions = outputs.flatMap((value) => value.output.assertions),
+      http = assertions.filter(
+        (value) =>
+          value.predicate === "provides-capability" &&
+          outputEntities.find((entity) => entity.id === value.objectId)?.label ===
+            "http-serving",
+      );
+    expect(http.map((value) => value.subjectId)).toEqual(["workload:web"]);
+    const members = new Map(
+      entities.map((entity) => [
+        entity.id,
+        new Set(entity.attributes.memberObservationIds as string[]),
+      ]),
+    );
+    expect(assertions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ subjectId: "workload:postgres" }),
+        expect.objectContaining({ subjectId: "workload:docker" }),
+        expect.objectContaining({ subjectId: "workload:signal" }),
+      ]),
+    );
+    for (const assertion of assertions)
+      expect(
+        assertion.evidence.every((item) =>
+          members.get(assertion.subjectId)?.has(item.observationId),
+        ),
+      ).toBe(true);
+  });
   it("normalizes and redacts observations before semantic interpretation", () => {
     const [observation] = adaptWorldObservations(
       "local",

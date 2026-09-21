@@ -95,7 +95,7 @@ export class WorldService {
     this.store.register(resolverManifest);
     this.store.sync(contextId, resolverManifest, semantic);
     for (const specialist of runBuiltInSpecialists(
-      { entities: semantic.entities, mapping: resolved.mapping },
+      { entities: semantic.entities, assertions: semantic.assertions, mapping: resolved.mapping },
       inputs,
       at,
     )) {

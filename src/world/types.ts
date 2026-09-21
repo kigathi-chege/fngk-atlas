@@ -254,6 +254,7 @@ export interface InterpreterManifest {
   displayName: string;
   description?: string;
   license?: string;
+  stage?: "recognize" | "enrich" | "present";
   inputs: string[];
   outputKinds: string[];
   outputPredicates: string[];
