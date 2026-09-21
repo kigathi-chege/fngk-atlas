@@ -21,6 +21,8 @@ const numericKeys = [
   "cpuPercent",
   "rssBytes",
   "elapsedSeconds",
+  "memoryUtilization",
+  "restartCount",
 ] as const;
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -80,7 +82,7 @@ export function normalizeObservation(
     attributes.port = port;
   for (const key of numericKeys) {
     const number =
-      key === "cpuPercent"
+      key === "cpuPercent" || key === "memoryUtilization"
         ? nonNegative(candidate(facts, metadata, [key]))
         : nonNegativeInteger(candidate(facts, metadata, [key]));
     if (number !== undefined) attributes[key] = number;
@@ -89,6 +91,12 @@ export function normalizeObservation(
     candidate(facts, metadata, ["processState"]),
   );
   if (processState !== undefined) attributes.processState = processState;
+  const readiness = candidate(facts, metadata, ["readiness", "ready"]);
+  if (typeof readiness === "boolean") attributes.readiness = readiness;
+  else {
+    const value = safeString(readiness);
+    if (value !== undefined) attributes.readiness = value;
+  }
 
   return {
     id: observation.id,

@@ -87,4 +87,24 @@ describe("operational observation normalization", () => {
       ).attributes,
     ).toEqual({});
   });
+
+  it("retains bounded readiness, memory pressure, and restart evidence", () => {
+    expect(
+      normalizeObservation(
+        observation({
+          facts: {
+            metadata: {
+              readiness: "ready",
+              memoryUtilization: 0.92,
+              restartCount: 3,
+            },
+          },
+        }),
+      ).attributes,
+    ).toEqual({
+      readiness: "ready",
+      memoryUtilization: 0.92,
+      restartCount: 3,
+    });
+  });
 });

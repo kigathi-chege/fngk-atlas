@@ -1,5 +1,6 @@
 import { worldId } from "./interpreter.js";
 import { materializedRelationship } from "./relationships.js";
+import { evaluateOperationalState } from "./health.js";
 import type { ResolvedWorld } from "./resolution-policy.js";
 import type {
   AtlasAssertion,
@@ -160,7 +161,54 @@ export function materializeWorld(
           .map((member) => member.observedAt)
           .sort()
           .at(-1) ?? at,
-      regionId = regionIds.get(workload.region)!;
+      regionId = regionIds.get(workload.region)!,
+      operational = evaluateOperationalState(
+        {
+          id: workload.id,
+          contextId,
+          kind: "workload",
+          namespace: RESOLVER_NAMESPACE,
+          label: workload.label,
+          aliases: [],
+          attributes: {},
+          firstObservedAt,
+          lastObservedAt,
+          stale: !device.online,
+        },
+        members,
+        device.online,
+      ),
+      cpuPercent = members.reduce(
+        (sum, member) =>
+          sum +
+          (typeof member.attributes.cpuPercent === "number"
+            ? member.attributes.cpuPercent
+            : 0),
+        0,
+      ),
+      rssBytes = members.reduce(
+        (sum, member) =>
+          sum +
+          (typeof member.attributes.rssBytes === "number"
+            ? member.attributes.rssBytes
+            : 0),
+        0,
+      ),
+      memoryUtilization = Math.max(
+        ...members
+          .map((member) => member.attributes.memoryUtilization)
+          .filter((value): value is number => typeof value === "number"),
+        0,
+      ),
+      restartCount = Math.max(
+        ...members
+          .map((member) => member.attributes.restartCount)
+          .filter((value): value is number => typeof value === "number"),
+        0,
+      ),
+      readiness = members
+        .map((member) => member.attributes.readiness)
+        .find((value) => value !== undefined);
     entities.push({
       id: workload.id,
       contextId,
@@ -175,6 +223,15 @@ export function materializeWorld(
         region: workload.region,
         visibility: workload.visibility,
         confidence: workload.confidence,
+        health: operational.health,
+        phase: operational.phase,
+        active: operational.active,
+        healthReasons: operational.reasons,
+        ...(cpuPercent ? { cpuPercent } : {}),
+        ...(rssBytes ? { rssBytes } : {}),
+        ...(memoryUtilization ? { memoryUtilization } : {}),
+        ...(restartCount ? { restartCount } : {}),
+        ...(readiness !== undefined ? { readiness } : {}),
         ...(workload.healthHint ? { healthHint: workload.healthHint } : {}),
       },
       firstObservedAt,

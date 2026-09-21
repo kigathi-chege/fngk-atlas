@@ -8,7 +8,7 @@ import {
 } from "./types.js";
 import { runInterpreter } from "./interpreter.js";
 import { projectWorld } from "./projector.js";
-import { WorldStore } from "./store.js";
+import { WorldStore, type WorldSample } from "./store.js";
 import type { RegisteredInterpreter } from "./registry.js";
 import { adaptWorldObservations } from "./observation-adapters.js";
 import { runBuiltInSpecialists } from "./specialists.js";
@@ -94,6 +94,44 @@ export class WorldService {
       );
     this.store.register(resolverManifest);
     this.store.sync(contextId, resolverManifest, semantic);
+    const samples: WorldSample[] = [];
+    for (const entity of semantic.entities.filter(
+      (value) => value.kind === "workload",
+    )) {
+      for (const [metric, unit] of [
+        ["cpuPercent", "percent"],
+        ["rssBytes", "bytes"],
+        ["memoryUtilization", "ratio"],
+        ["restartCount", "count"],
+      ] as const) {
+        const value = entity.attributes[metric];
+        if (typeof value === "number")
+          samples.push({
+            contextId,
+            entityId: entity.id,
+            metric,
+            value,
+            unit,
+            observedAt: entity.lastObservedAt,
+          });
+      }
+      if (entity.attributes.readiness !== undefined)
+        samples.push({
+          contextId,
+          entityId: entity.id,
+          metric: "readiness",
+          value:
+            entity.attributes.readiness === true ||
+            ["ready", "healthy", "passing"].includes(
+              String(entity.attributes.readiness).toLowerCase(),
+            )
+              ? 1
+              : 0,
+          unit: "boolean",
+          observedAt: entity.lastObservedAt,
+        });
+    }
+    this.store.putSamples(samples);
     for (const specialist of runBuiltInSpecialists(
       { entities: semantic.entities, assertions: semantic.assertions, mapping: resolved.mapping },
       inputs,
