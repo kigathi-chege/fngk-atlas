@@ -12,6 +12,8 @@ import { projectWorld } from "../../src/world/projector.js";
 import { WorldService } from "../../src/world/service.js";
 import { WorldStore } from "../../src/world/store.js";
 import { resolveWorkloads } from "../../src/world/resolver.js";
+import { resolveOperationalWorld } from "../../src/world/resolution-policy.js";
+import { materializeWorld } from "../../src/world/materializer.js";
 import { adaptWorldObservations } from "../../src/world/observation-adapters.js";
 import {
   canonicalBreadcrumb,
@@ -25,6 +27,97 @@ afterEach(async () => {
   while (cleanups.length) await cleanups.pop()?.();
 });
 describe("semantic Device atlas", () => {
+  it("materializes a compact semantic world with complete provenance", () => {
+    const runtime = [
+        {
+          id: "deployment:atlas",
+          contextId: "local",
+          kind: "deployment",
+          label: "atlas-web",
+          attributes: {
+            managedDeploymentId: "deployment:atlas",
+            repositoryPath: "/srv/atlas",
+          },
+          observedAt: "2026-09-20T00:00:00.000Z",
+          source: "deployment",
+        },
+        {
+          id: "repo:atlas",
+          contextId: "local",
+          kind: "repository",
+          label: "atlas",
+          attributes: { repositoryPath: "/srv/atlas" },
+          observedAt: "2026-09-20T00:00:00.000Z",
+          source: "analysis",
+        },
+        {
+          id: "process:42",
+          contextId: "local",
+          kind: "process",
+          label: "node",
+          attributes: { cwd: "/srv/atlas", processState: "S" },
+          observedAt: "2026-09-20T00:00:00.000Z",
+          source: "runtime",
+        },
+        {
+          id: "database:postgres",
+          contextId: "local",
+          kind: "database",
+          label: "postgresql",
+          attributes: {
+            databaseEngine: "postgresql",
+            address: "127.0.0.1",
+            port: 5432,
+          },
+          observedAt: "2026-09-20T00:00:00.000Z",
+          source: "database",
+        },
+      ],
+      inputs = [
+        ...runtime,
+        ...Array.from({ length: 20_000 }, (_, index) => ({
+          id: `function:${index}`,
+          contextId: "local",
+          kind: index % 2 ? "function" : "file",
+          label: `symbol-${index}`,
+          attributes: { repositoryPath: "/srv/atlas" },
+          observedAt: "2026-09-20T00:00:00.000Z",
+          source: "analysis",
+        })),
+      ],
+      resolved = resolveOperationalWorld(
+        inputs,
+        () => "2026-09-20T00:01:00.000Z",
+      ),
+      output = materializeWorld(
+        "local",
+        {
+          id: "device:one",
+          label: "kigathi",
+          online: true,
+          observationId: "observation:device",
+          observedAt: "2026-09-20T00:00:00.000Z",
+        },
+        resolved,
+        inputs,
+        () => "2026-09-20T00:01:00.000Z",
+      );
+
+    expect(output.entities.length).toBeLessThan(250);
+    expect(output.entities.some((item) => item.kind === "function")).toBe(
+      false,
+    );
+    expect(output.assertions.every((item) => item.evidence.length > 0)).toBe(
+      true,
+    );
+    expect(
+      output.entities.filter(
+        (item) =>
+          item.kind === "workload" &&
+          item.attributes.visibility === "primary",
+      ),
+    ).toHaveLength(2);
+  });
   it("migrates the semantic world to v2 while preserving observations", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "atlas-world-v1-"));
     const file = path.join(directory, "atlas.db");
@@ -281,16 +374,31 @@ describe("semantic Device atlas", () => {
       "device:one",
       [
         {
-          id: "service:signal",
-          type: "service",
+          id: "deployment:signal",
+          type: "deployment",
           label: "Signal API",
-          metadata: { command: "node dist/server.js" },
+          metadata: {
+            managedDeploymentId: "signal",
+            repositoryPath: "/srv/signal",
+          },
         },
         {
-          id: "process:postgres",
+          id: "repository:signal",
+          type: "repository",
+          label: "Signal",
+          metadata: { repositoryPath: "/srv/signal" },
+        },
+        {
+          id: "process:signal",
           type: "process",
-          label: "postgres",
-          metadata: { command: "/usr/bin/postgres" },
+          label: "node",
+          metadata: { cwd: "/srv/signal", processState: "S" },
+        },
+        {
+          id: "database:postgres",
+          type: "database",
+          label: "postgresql",
+          metadata: { address: "127.0.0.1", port: 5432 },
         },
         {
           id: "port:3000",
@@ -302,7 +410,7 @@ describe("semantic Device atlas", () => {
       [
         {
           id: "runs",
-          source: "service:signal",
+          source: "deployment:signal",
           target: "port:3000",
           type: "served_by",
         },
@@ -327,19 +435,24 @@ describe("semantic Device atlas", () => {
     expect(store.search("device:one", "Signal")).not.toHaveLength(0);
     const projection = projectWorld("device:one", entities, assertions, {
       lens: "overview",
-      budget: 1,
+      budget: 50,
     });
     expect(projection.protocolVersion).toBe("atlas.world.v2");
-    expect(projection.nodes.length).toBeLessThanOrEqual(1);
+    expect(projection.nodes.length).toBeLessThanOrEqual(50);
     expect(
       projection.cards?.some((value) => value.title === "Signal API"),
     ).toBe(true);
     expect(projection.synthesis?.facts[0]?.text).toContain("workload");
     expect(projection.availableViews).toContain("relationships");
-    expect(projection.cursor || projection.aggregates.length).toBeTruthy();
+    const bounded = projectWorld("device:one", entities, assertions, {
+      lens: "overview",
+      budget: 1,
+    });
+    expect(bounded.nodes).toHaveLength(1);
+    expect(bounded.cursor || bounded.aggregates.length).toBeTruthy();
     expect(store.interpreters()).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "atlas.resolver" }),
+        expect.objectContaining({ id: "atlas.resolver.v2" }),
         expect.objectContaining({ id: "atlas.specialist.postgresql" }),
         expect.objectContaining({ id: "atlas.specialist.signal" }),
       ]),
@@ -348,13 +461,16 @@ describe("semantic Device atlas", () => {
   it("does not rewrite unchanged entities, assertions, observations, or search rows",async()=>{
     const directory=await mkdtemp(path.join(tmpdir(),'atlas-world-')),store=new WorldStore(path.join(directory,'atlas.db')),world=new WorldService(store);
     cleanups.push(async()=>{store.close();await rm(directory,{recursive:true,force:true})});
-    const nodes=[{id:'process:postgres',type:'process',label:'postgres',metadata:{command:'/usr/bin/postgres'}}];
+    const nodes=[{id:'deployment:atlas',type:'deployment',label:'atlas-web',metadata:{managedDeploymentId:'atlas'}}];
     world.refresh('local',nodes,[],{name:'host',online:true});
+    const workloadId=store.entities('local').find(value=>value.kind==='workload')!.id;
     const before=(store.db.prepare('SELECT total_changes() value').get() as any).value,changes=store.timeline('local',undefined,500).length,search=(store.db.prepare('SELECT count(*) value FROM atlas_world_search').get() as any).value;
     world.refresh('local',nodes,[],{name:'host',online:true});
     const after=(store.db.prepare('SELECT total_changes() value').get() as any).value;
     expect(store.timeline('local',undefined,500)).toHaveLength(changes);expect((store.db.prepare('SELECT count(*) value FROM atlas_world_search').get() as any).value).toBe(search);
     expect(after-before).toBeLessThan(20);
+    world.refresh('local',[],[],{name:'host',online:true});
+    expect(store.timeline('local',workloadId,50)).toContainEqual(expect.objectContaining({itemType:'entity',changeType:'withdrawn',interpreterId:'atlas.resolver.v2'}));
   });
   it("keeps breadcrumbs canonical and dependencies lateral", () => {
     const entities: any[] = [
@@ -422,7 +538,7 @@ describe("semantic Device atlas", () => {
     });
     expect(store.assertions("local", "entity")).toHaveLength(2);
   });
-  it("reveals finer code structure by semantic zoom and preserves mixed-kind parents", async () => {
+  it("keeps software detail out of the compact semantic world", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "atlas-world-")),
       store = new WorldStore(path.join(directory, "atlas.db")),
       world = new WorldService(store);
@@ -440,23 +556,16 @@ describe("semantic Device atlas", () => {
       [],
       { name: "host", online: true },
     );
-    const entities = store.entities("local"),
-      repo = entities.find((value) => value.label === "Atlas")!,
-      module = entities.find((value) => value.label === "world.ts")!,
-      fn = entities.find((value) => value.label === "projectWorld")!;
-    expect(module.parentId).toBe(repo.id);
-    expect(fn.parentId).toBe(module.id);
+    const entities = store.entities("local");
+    expect(entities.map((value) => value.kind)).not.toEqual(
+      expect.arrayContaining(["repository", "module", "function"]),
+    );
     expect(
-      projectWorld("local", entities, store.assertions("local"), {
-        lens: "code",
-        level: 0,
-      }).nodes.map((value) => value.kind),
-    ).not.toContain("function");
-    expect(
-      projectWorld("local", entities, store.assertions("local"), {
-        lens: "code",
-        level: 4,
-      }).nodes.map((value) => value.kind),
-    ).toContain("function");
+      entities.find(
+        (value) =>
+          value.kind === "topology-region" &&
+          value.attributes.region === "development",
+      )?.attributes.collapsedCount,
+    ).toBe(3);
   });
 });

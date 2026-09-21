@@ -1,43 +1,44 @@
 import {
   ATLAS_INTERPRETER_VERSION,
   ATLAS_WORLD_VERSION,
-  type AtlasAssertion,
-  type AtlasEntity,
   type AtlasObservation,
   type InterpreterInput,
   type InterpreterManifest,
   type InterpreterOutput,
 } from "./types.js";
-import { runInterpreter, workloadInterpreter, worldId } from "./interpreter.js";
-import { resolveWorkloads } from "./resolver.js";
+import { runInterpreter } from "./interpreter.js";
 import { projectWorld } from "./projector.js";
 import { WorldStore } from "./store.js";
 import type { RegisteredInterpreter } from "./registry.js";
 import { adaptWorldObservations } from "./observation-adapters.js";
 import { runBuiltInSpecialists } from "./specialists.js";
-import { normalizePredicate } from "./relationships.js";
+import { CORE_PREDICATES } from "./relationships.js";
 import { normalizeObservation } from "./normalization.js";
+import { resolveOperationalWorld } from "./resolution-policy.js";
+import { materializeWorld, RESOLVER_NAMESPACE } from "./materializer.js";
 
-const kindMap: Record<string, string> = {
-  filesystem: "data-store",
-  endpoint: "http-endpoint",
-  external: "external-system",
-  flow: "resource",
-  coverage: "resource",
-  command: "operation",
-  terminal: "operation",
-  output: "event",
-};
-const legacyManifest: InterpreterManifest = {
+const resolverManifest: InterpreterManifest = {
   protocolVersion: ATLAS_INTERPRETER_VERSION,
   ontologyVersion: ATLAS_WORLD_VERSION,
-  id: "atlas.compatibility",
-  version: "1.0.0",
+  id: RESOLVER_NAMESPACE,
+  version: "2.0.0",
   publisher: "atlas",
-  displayName: "Atlas compatibility interpreter",
+  displayName: "Atlas operational world resolver",
   inputs: ["*"],
-  outputKinds: [],
-  outputPredicates: [],
+  outputKinds: [
+    "device",
+    "topology-region",
+    "workload",
+    "service",
+    "process",
+    "container",
+    "interface",
+    "data-store",
+    "repository",
+    "event",
+    "operation",
+  ],
+  outputPredicates: [...CORE_PREDICATES],
   rules: [],
 };
 export class WorldService {
@@ -55,190 +56,49 @@ export class WorldService {
     device?: { id?: string; name?: string; online?: boolean },
   ) {
     const at = new Date().toISOString(),
-      deviceId = worldId(contextId, "atlas.core", "device", contextId),
+      observedDevice = device ?? {
+        id: contextId,
+        name:
+          contextId === "local"
+            ? "Atlas process host"
+            : contextId.replace(/^device:/, ""),
+        online: true,
+      },
       observations: AtlasObservation[] = adaptWorldObservations(
         contextId,
         nodes,
         edges,
-        device,
+        observedDevice,
         at,
       );
     this.store.putObservations(observations);
-    const sourceNodes = nodes.slice(0, 10000),
-      mapped = new Map<string, string>(),
-      entities: AtlasEntity[] = [
-        {
-          id: deviceId,
-          contextId,
-          kind: "device",
-          namespace: legacyManifest.id,
-          label:
-            device?.name ??
-            (contextId === "local"
-              ? "Atlas process host"
-              : contextId.replace(/^device:/, "")),
-          aliases: [contextId],
-          attributes: {
-            online: device?.online ?? true,
-            sourceId: device?.id ?? contextId,
-          },
-          firstObservedAt: at,
-          lastObservedAt: at,
-          stale: device?.online === false,
-        },
-      ],
-      assertions: AtlasAssertion[] = [];
-    for (const node of sourceNodes) {
-      const kind =
-        kindMap[String(node.type)] ?? String(node.type ?? "resource");
-      mapped.set(
-        String(node.id),
-        worldId(contextId, legacyManifest.id, kind, String(node.id)),
-      );
-    }
-    for (const node of sourceNodes) {
-      const kind =
-          kindMap[String(node.type)] ?? String(node.type ?? "resource"),
-        id = mapped.get(String(node.id))!;
-      entities.push({
-        id,
-        contextId,
-        kind,
-        namespace: legacyManifest.id,
-        label: String(node.label ?? node.name ?? node.id),
-        aliases: [
-          String(node.qualifiedName ?? ""),
-          String(node.path ?? ""),
-        ].filter(Boolean),
-        parentId: node.parent ? mapped.get(String(node.parent)) : undefined,
-        attributes: { ...node, legacyId: node.id },
-        firstObservedAt: String(node.observedAt ?? at),
-        lastObservedAt: String(node.observedAt ?? at),
-        stale: Boolean(node.stale),
-      });
-      assertions.push(
-        this.assertion(contextId, deviceId, "contains", id, node, at),
-      );
-    }
-    for (const edge of edges.slice(0, 20000)) {
-      const source = mapped.get(String(edge.source)),
-        target = mapped.get(String(edge.target));
-      if (source && target)
-        assertions.push(
-          this.assertion(
-            contextId,
-            source,
-            normalizePredicate(String(edge.type ?? "related-to")),
-            target,
-            edge,
-            at,
-          ),
-        );
-    }
-    const compatibility: InterpreterOutput = {
-      entities,
-      assertions,
-      views: [
-        {
-          id: "atlas.core.evidence",
-          title: "Evidence",
-          appliesTo: ["*"],
-          priority: 0,
-          sections: [
-            { kind: "properties", title: "Identity" },
-            { kind: "relationships", title: "Relationships" },
-            { kind: "evidence", title: "Why Atlas believes this" },
-            { kind: "timeline", title: "Recent changes" },
-          ],
-        },
-      ],
-    };
-    this.store.register(legacyManifest);
     const inputs: InterpreterInput[] = observations
       .filter(
         (value) => value.kind !== "relationship" && value.kind !== "device",
       )
-      .map(normalizeObservation);
-    const semantic = resolveWorkloads(inputs, () => at);
-    semantic.assertions = semantic.assertions.filter(
-      (value) => value.predicate !== "realized-by",
-    );
-    for (const entity of semantic.entities)
-      if (entity.kind === "workload") {
-        entity.parentId = deviceId;
-        const contained = this.assertion(
-          contextId,
-          deviceId,
-          "contains",
-          entity.id,
-          { source: "atlas.resolver" },
-          at,
-          "derived",
-          0.9,
-          "The workload was resolved from observations on this Device.",
-        );
-        contained.interpreterId = "atlas.resolver";
-        contained.interpreterVersion = "1.1.0";
-        semantic.assertions.push(contained);
-        for (const inputId of entity.attributes
-          .memberObservationIds as string[]) {
-          const source = inputs.find((value) => value.id === inputId),
-            observation = observations.find((value) => value.id === inputId),
-            realized =
-              source && observation && mapped.get(observation.sourceId);
-          if (realized) {
-            const technical = entities.find((value) => value.id === realized);
-            if (technical) technical.workloadId = entity.id;
-            const predicate =
-                source.kind === "repository"
-                  ? "implemented-by"
-                  : source.kind === "port" ||
-                      source.kind === "socket" ||
-                      source.kind === "interface"
-                    ? "listens-on"
-                    : source.kind === "service"
-                      ? "controlled-by"
-                      : "realized-by",
-              explanation =
-                predicate === "implemented-by"
-                  ? "Repository identity and runtime correlation connect this software to the workload."
-                  : predicate === "listens-on"
-                    ? "Listener ownership evidence connects this interface to the workload."
-                    : predicate === "controlled-by"
-                      ? "Service ownership evidence identifies the workload control unit."
-                      : "The resolved workload is realized by this observed technical entity.",
-              realization = this.assertion(
-                contextId,
-                entity.id,
-                predicate,
-                realized,
-                { id: inputId, source: "atlas.resolver" },
-                at,
-                "derived",
-                0.92,
-                explanation,
-              );
-            realization.interpreterId = "atlas.resolver";
-            realization.interpreterVersion = "1.1.0";
-            semantic.assertions.push(realization);
-          }
-        }
-      }
-    this.store.register(workloadInterpreter);
-    const resolverManifest = {
-      ...workloadInterpreter,
-      id: "atlas.resolver",
-      version: "1.1.0",
-      displayName: "Atlas workload resolver",
-    };
+      .map(normalizeObservation),
+      resolved = resolveOperationalWorld(inputs, () => at),
+      deviceObservation = observations.find((value) => value.kind === "device")!,
+      semantic = materializeWorld(
+        contextId,
+        {
+          id: observedDevice.id,
+          label: observedDevice.name ?? contextId,
+          online: observedDevice.online ?? true,
+          observationId: deviceObservation.id,
+          observedAt: deviceObservation.observedAt,
+        },
+        resolved,
+        inputs,
+        () => at,
+      );
     this.store.register(resolverManifest);
-    this.store.sync(contextId, legacyManifest, {
-      entities,
-      assertions,
-      views: compatibility.views,
-    });
     this.store.sync(contextId, resolverManifest, semantic);
-    for (const specialist of runBuiltInSpecialists(semantic, inputs, at)) {
+    for (const specialist of runBuiltInSpecialists(
+      { entities: semantic.entities, mapping: resolved.mapping },
+      inputs,
+      at,
+    )) {
       this.store.register(specialist.manifest);
       this.store.sync(contextId, specialist.manifest, specialist.output);
     }
@@ -288,45 +148,6 @@ export class WorldService {
         ),
         views: output.views,
       });
-  }
-  private assertion(
-    contextId: string,
-    subjectId: string,
-    predicate: string,
-    objectId: string,
-    evidence: any,
-    at: string,
-    classification: AtlasAssertion["classification"] = "observed",
-    confidence = 0.95,
-    explanation = "Existing Atlas evidence directly supports this relationship.",
-  ): AtlasAssertion {
-    const id = worldId(
-      contextId,
-      "atlas.compatibility",
-      "assertion",
-      `${subjectId}:${predicate}:${objectId}`,
-    );
-    return {
-      id,
-      contextId,
-      subjectId,
-      predicate,
-      objectId,
-      classification,
-      confidence,
-      explanation,
-      evidence: [
-        {
-          observationId: String(evidence.id ?? evidence.source ?? objectId),
-          method: "atlas-existing-evidence",
-        },
-      ],
-      interpreterId: "atlas.compatibility",
-      interpreterVersion: "1.0.0",
-      observedAt: String(evidence.observedAt ?? at),
-      derivedAt: at,
-      stale: Boolean(evidence.stale),
-    };
   }
   projection(contextId: string, options: Parameters<typeof projectWorld>[3]) {
     return projectWorld(

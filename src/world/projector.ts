@@ -14,6 +14,7 @@ import { synthesizeWorld } from "./synthesis.js";
 const viewKinds: Record<string, Set<string>> = {
   overview: new Set([
     "device",
+    "topology-region",
     "environment",
     "workload",
     "capability",
@@ -287,7 +288,9 @@ export function projectWorld(
     lens === "overview"
       ? entities.filter((value) =>
           root?.kind === "device"
-            ? value.parentId === rootId && value.kind === "workload"
+            ? value.kind === "workload" &&
+              (value.parentId === rootId ||
+                byId.get(value.parentId ?? "")?.parentId === rootId)
             : value.id !== rootId &&
               (value.parentId === rootId || value.workloadId === rootId),
         )

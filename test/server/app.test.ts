@@ -181,8 +181,7 @@ describe("Atlas FNGK-native server", () => {
       ).json().items,
     ).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "atlas.compatibility", trusted: true }),
-        expect.objectContaining({ id: "atlas.workloads", trusted: true }),
+        expect.objectContaining({ id: "atlas.resolver.v2", trusted: true }),
       ]),
     );
     expect(
@@ -491,7 +490,7 @@ describe("Atlas FNGK-native server", () => {
     ).json();
     expect(data.nodes).toContainEqual(
       expect.objectContaining({
-        kind: "database",
+        kind: "data-store",
         label: expect.stringContaining("postgres"),
       }),
     );

@@ -35,6 +35,16 @@ const aliases: Record<string, CorePredicate> = {
 };
 export const normalizePredicate = (value: string) =>
   aliases[value] ?? value.replaceAll("_", "-");
+export const materializedRelationship = (kind: string): CorePredicate =>
+  kind === "service"
+    ? "controlled-by"
+    : kind === "repository"
+      ? "implemented-by"
+      : ["port", "socket", "interface", "http-endpoint"].includes(kind)
+        ? "listens-on"
+        : ["database", "data-store"].includes(kind)
+          ? "writes"
+          : "realized-by";
 
 export function canonicalBreadcrumb(
   entityId: string,
