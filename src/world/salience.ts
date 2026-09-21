@@ -1,4 +1,20 @@
-import type { AtlasAssertion, AtlasEntity } from "./types.js";
+import type {
+  AtlasAssertion,
+  AtlasEntity,
+  OperationalHealth,
+} from "./types.js";
+
+export const healthSeverity = (health: OperationalHealth) =>
+  ({ critical: 5, degraded: 4, stale: 3, unknown: 2, healthy: 1 })[health];
+export const operationalSalience = (entity: AtlasEntity) => {
+  const confidence =
+      typeof entity.attributes.confidence === "number"
+        ? entity.attributes.confidence
+        : 0,
+    exposure = entity.attributes.public === true ? 2 : 0,
+    active = entity.attributes.active === true ? 1 : 0;
+  return exposure + active + confidence;
+};
 
 export function salientFacts(
   entity: AtlasEntity,

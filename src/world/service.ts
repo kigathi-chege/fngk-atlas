@@ -193,6 +193,10 @@ export class WorldService {
       this.store.entities(contextId),
       this.store.assertions(contextId),
       options,
+      {
+        changes: this.store.timeline(contextId, undefined, 200),
+        samples: this.store.samples(contextId),
+      },
     );
   }
 }

@@ -10,6 +10,22 @@ import {
 } from "./relationships.js";
 import { salientFacts } from "./salience.js";
 import { synthesizeWorld } from "./synthesis.js";
+import { buildObservatory } from "./observatory.js";
+import type { WorldSample } from "./store.js";
+
+export interface ObservatoryProjectionContext {
+  changes?: Array<{
+    id: number | string;
+    itemId: string;
+    itemType: string;
+    changeType: string;
+    interpreterId: string;
+    changedAt: string;
+    summary: Record<string, unknown>;
+  }>;
+  samples?: WorldSample[];
+  now?: string;
+}
 
 const viewKinds: Record<string, Set<string>> = {
   overview: new Set([
@@ -187,6 +203,7 @@ export function projectWorld(
     budget?: number;
     cursor?: string;
   } = {},
+  observatoryContext: ObservatoryProjectionContext = {},
 ): AtlasProjection {
   const requested = options.lens ?? "overview",
     lens = viewKinds[requested] ? requested : "overview",
@@ -337,6 +354,17 @@ export function projectWorld(
     aggregates,
     cards: lens === "overview" ? cards : undefined,
     synthesis: synthesizeWorld(rootId, entities, assertions),
+    observatory:
+      lens === "overview"
+        ? buildObservatory(
+            rootId,
+            entities,
+            assertions,
+            observatoryContext.changes ?? [],
+            observatoryContext.samples ?? [],
+            observatoryContext.now,
+          )
+        : undefined,
     breadcrumbs: canonicalBreadcrumb(rootId, entities).map((value) => ({
       id: value.id,
       label: value.label,

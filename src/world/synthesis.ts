@@ -5,6 +5,18 @@ import type {
   AtlasSynthesis,
 } from "./types.js";
 
+export function synthesizeObservatorySummary(
+  online: boolean,
+  running: number,
+  primary: number,
+  attention: number,
+) {
+  if (!online)
+    return `This Device was last observed with ${primary} primary workload${primary === 1 ? "" : "s"}. Current state is unavailable.`;
+  const activity = `${running} primary workload${running === 1 ? " is" : "s are"} running`;
+  return `This Device ${activity} from ${primary} resolved workload${primary === 1 ? "" : "s"}.${attention ? ` ${attention} item${attention === 1 ? "" : "s"} require attention.` : ""}`;
+}
+
 export function synthesizeWorld(
   rootId: string,
   entities: AtlasEntity[],
