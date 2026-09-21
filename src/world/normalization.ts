@@ -97,6 +97,18 @@ export function normalizeObservation(
     const value = safeString(readiness);
     if (value !== undefined) attributes.readiness = value;
   }
+  for (const key of ["description", "purpose", "documentPath"] as const) {
+    const value = safeString(candidate(facts, metadata, [key]));
+    if (value !== undefined) attributes[key] = value;
+  }
+  const documentText = candidate(facts, metadata, ["documentText"]);
+  if (
+    typeof documentText === "string" &&
+    !documentText.includes("\0") &&
+    !documentText.includes("\uFFFD") &&
+    Buffer.byteLength(documentText, "utf8") <= 64 * 1024
+  )
+    attributes.documentText = documentText;
 
   return {
     id: observation.id,

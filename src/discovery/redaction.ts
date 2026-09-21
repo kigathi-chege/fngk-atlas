@@ -1,4 +1,6 @@
 const secretKey = /(secret|token|credential|password|passwd|cookie|authorization|database_url|private[_-]?key)/i;
+const secretValue = /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b|((?:token|secret|password|credential|authorization)\s*[=:]\s*)[^\s,;]+/gi;
+export const redactSensitiveText=(value:string)=>value.replace(secretValue,(_match,prefix)=>`${prefix??''}[redacted]`);
 
 export const redactCommandLine = (value: string) => value
   .replace(/((?:--?|\/)(?:token|password|passwd|secret|credential|cookie|authorization)(?:=|\s+))[^\s]+/gi, '$1[redacted]')
@@ -8,6 +10,7 @@ export const redactCommandLine = (value: string) => value
 export function redactFacts(value: unknown, key = ''): unknown {
   if (secretKey.test(key)) return '[redacted]';
   if (key === 'command' && typeof value === 'string') return redactCommandLine(value);
+  if (['documentText','description','purpose'].includes(key)&&typeof value==='string')return redactSensitiveText(value);
   if (Array.isArray(value)) return value.map(item => redactFacts(item));
   if (value && typeof value === 'object') {
     const output: Record<string, unknown> = {};

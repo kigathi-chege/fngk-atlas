@@ -1,6 +1,7 @@
 import { deriveActiveFlows } from "./health.js";
 import { healthSeverity, operationalSalience, salientFacts } from "./salience.js";
 import { synthesizeObservatorySummary } from "./synthesis.js";
+import { selectAuthoritativeAssertion } from "./enrichment.js";
 import type { WorldSample } from "./store.js";
 import type {
   AtlasAssertion,
@@ -87,6 +88,13 @@ export function buildObservatory(
         )
         .map((assertion) => byId.get(assertion.objectId ?? "")?.label)
         .filter(Boolean) as string[],
+      purpose = selectAuthoritativeAssertion(
+        assertions.filter(
+          (assertion) =>
+            assertion.subjectId === workload.id &&
+            assertion.predicate === "has-purpose",
+        ),
+      ),
       stale = !online || workload.stale,
       confidence =
         typeof workload.attributes.confidence === "number"
@@ -107,7 +115,9 @@ export function buildObservatory(
       kind: workload.kind,
       health: stale ? "stale" : health(workload.attributes.health),
       phase: phase(workload.attributes.phase),
-      purpose: capabilities.join(" · ") || "Observed workload",
+      purpose:
+        (typeof purpose?.value === "string" ? purpose.value : undefined) ??
+        (capabilities.join(" · ") || "Observed workload"),
       active: online && workload.attributes.active === true,
       stale,
       confidence,

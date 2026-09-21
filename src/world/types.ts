@@ -87,6 +87,13 @@ export interface AtlasObservation {
   facts: Record<string, unknown>;
   sensitivity: "safe-metadata" | "sensitive-reference";
 }
+export interface LocalDocumentation {
+  path: string;
+  repositoryPath: string;
+  sourceInputId: string;
+  observationId: string;
+  text: string;
+}
 export interface AtlasViewDescriptor {
   id: string;
   title: string;

@@ -16,6 +16,11 @@ import { CORE_PREDICATES } from "./relationships.js";
 import { normalizeObservation } from "./normalization.js";
 import { resolveOperationalWorld } from "./resolution-policy.js";
 import { materializeWorld, RESOLVER_NAMESPACE } from "./materializer.js";
+import {
+  enrichFromLocalDocumentation,
+  localDocumentationManifest,
+} from "./enrichment.js";
+import type { LocalDocumentation } from "./types.js";
 
 const resolverManifest: InterpreterManifest = {
   protocolVersion: ATLAS_INTERPRETER_VERSION,
@@ -94,6 +99,31 @@ export class WorldService {
       );
     this.store.register(resolverManifest);
     this.store.sync(contextId, resolverManifest, semantic);
+    const documents: LocalDocumentation[] = inputs
+      .filter(
+        (input) =>
+          typeof input.attributes.documentPath === "string" &&
+          typeof input.attributes.documentText === "string" &&
+          typeof input.attributes.repositoryPath === "string",
+      )
+      .map((input) => ({
+        path: String(input.attributes.documentPath),
+        repositoryPath: String(input.attributes.repositoryPath),
+        sourceInputId: input.id,
+        observationId: input.id,
+        text: String(input.attributes.documentText),
+      }));
+    const enriched = semantic.entities
+      .filter((entity) => entity.kind === "workload")
+      .map((entity) =>
+        enrichFromLocalDocumentation(entity, inputs, documents, () => at),
+      );
+    this.store.register(localDocumentationManifest);
+    this.store.sync(contextId, localDocumentationManifest, {
+      entities: enriched.flatMap((output) => output.entities),
+      assertions: enriched.flatMap((output) => output.assertions),
+      views: [],
+    });
     const samples: WorldSample[] = [];
     for (const entity of semantic.entities.filter(
       (value) => value.kind === "workload",
