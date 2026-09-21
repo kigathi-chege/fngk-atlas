@@ -21,6 +21,7 @@ import {
   localDocumentationManifest,
 } from "./enrichment.js";
 import type { LocalDocumentation } from "./types.js";
+import {applyCorrections,correctionId,validateCorrection,type AtlasCorrectionKind} from './corrections.js';
 
 const resolverManifest: InterpreterManifest = {
   protocolVersion: ATLAS_INTERPRETER_VERSION,
@@ -218,15 +219,35 @@ export class WorldService {
       });
   }
   projection(contextId: string, options: Parameters<typeof projectWorld>[3]) {
+    const corrected=applyCorrections(this.store.entities(contextId),this.store.assertions(contextId),this.store.corrections(contextId));
     return projectWorld(
       contextId,
-      this.store.entities(contextId),
-      this.store.assertions(contextId),
+      corrected.entities,
+      corrected.assertions,
       options,
       {
         changes: this.store.timeline(contextId, undefined, 200),
         samples: this.store.samples(contextId),
       },
     );
+  }
+  corrections(contextId:string,subjectId?:string){return this.store.corrections(contextId,subjectId)}
+  putCorrection(contextId:string,subjectId:string,kind:AtlasCorrectionKind,value:unknown){
+    validateCorrection(contextId,subjectId,kind,value,this.store.entities(contextId));
+    const at=new Date().toISOString(),id=correctionId(contextId,subjectId,kind),prior=this.store.corrections(contextId,subjectId).find(item=>item.kind===kind);
+    this.store.putCorrection({id,contextId,subjectId,kind,value,createdAt:prior?.createdAt??at,updatedAt:at});
+    return this.store.corrections(contextId,subjectId);
+  }
+  deleteCorrections(contextId:string,subjectId:string,kind?:AtlasCorrectionKind){
+    if(this.store.entity(subjectId)?.entity?.contextId!==contextId)throw new Error('entity_not_found');
+    return this.store.deleteCorrections(contextId,subjectId,kind);
+  }
+  detail(id:string){
+    const raw=this.store.entity(id),synthetic=id.startsWith('workload:split:')?this.store.correctionById(id.slice('workload:split:'.length)):undefined,contextId=raw?.entity?.contextId??synthetic?.contextId;
+    if(!contextId)return null;
+    const corrected=applyCorrections(this.store.entities(contextId),this.store.assertions(contextId),this.store.corrections(contextId));
+    const entity=corrected.entities.find(value=>value.id===id)??raw?.entity;
+    if(!entity)return null;
+    return {...raw,entity,assertions:corrected.assertions.filter(item=>item.subjectId===id||item.objectId===id),relatedEntities:corrected.entities.filter(value=>corrected.assertions.some(item=>(item.subjectId===id&&item.objectId===value.id)||(item.objectId===id&&item.subjectId===value.id))),corrections:this.store.corrections(contextId,id),views:raw?.views??[]};
   }
 }

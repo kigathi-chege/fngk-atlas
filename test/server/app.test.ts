@@ -29,6 +29,20 @@ async function harness() {
 }
 
 describe("Atlas FNGK-native server", () => {
+  it('requires confirmation and retains correction provenance without rewriting evidence',async()=>{
+    const app=await harness();
+    expect((await app.inject({method:'POST',url:'/api/world/refresh',payload:{contextId:'local'}})).statusCode).toBe(200);
+    const home=(await app.inject({method:'GET',url:'/api/world/projection?contextId=local&lens=overview'})).json(),id=home.rootId;
+    const url=`/api/world/entities/${encodeURIComponent(id)}/correction`;
+    expect((await app.inject({method:'PUT',url,payload:{contextId:'local',kind:'rename',value:'Corrected machine'}})).statusCode).toBe(409);
+    expect((await app.inject({method:'PUT',url,payload:{contextId:'local',kind:'merge',value:'missing',confirm:true}})).statusCode).toBe(400);
+    expect((await app.inject({method:'PUT',url,payload:{contextId:'local',kind:'rename',value:'Corrected machine',confirm:true}})).statusCode).toBe(200);
+    const corrected=(await app.inject({method:'GET',url:`/api/world/entities/${encodeURIComponent(id)}`})).json();
+    expect(corrected.entity.label).toBe('Corrected machine');
+    expect(corrected.assertions).toContainEqual(expect.objectContaining({classification:'user-defined',predicate:'has-name'}));
+    expect((await app.inject({method:'DELETE',url,payload:{contextId:'local',confirm:true}})).statusCode).toBe(200);
+    expect((await app.inject({method:'GET',url:`/api/world/entities/${encodeURIComponent(id)}`})).json().entity.label).not.toBe('Corrected machine');
+  });
   it("does not expose legacy graph or Atlas alias routes", async () => {
     const app = await harness(),
       legacyGraph = "/api/" + "graph",

@@ -1725,8 +1725,20 @@ export async function createApp(
   });
   app.get("/api/world/entities/:id", async (request, reply) => {
     const id = decodeURIComponent((request.params as { id: string }).id),
-      value = worldStore.entity(id);
+      value = world.detail(id);
     return value ?? reply.code(404).send({ error: "entity_not_found" });
+  });
+  app.put('/api/world/entities/:id/correction',async(request,reply)=>{
+    const id=decodeURIComponent((request.params as {id:string}).id),body=request.body as {contextId?:string;kind?:string;value?:unknown;confirm?:boolean}|undefined;
+    if(body?.confirm!==true)return reply.code(409).send({error:'confirmation_required'});
+    if(!body?.contextId||!body.kind)return reply.code(400).send({error:'invalid_correction'});
+    try{return{corrections:world.putCorrection(body.contextId,id,body.kind as any,body.value)}}catch(error){const message=(error as Error).message;return reply.code(message==='entity_not_found'?404:400).send({error:message})}
+  });
+  app.delete('/api/world/entities/:id/correction',async(request,reply)=>{
+    const id=decodeURIComponent((request.params as {id:string}).id),body=request.body as {contextId?:string;kind?:string;confirm?:boolean}|undefined;
+    if(body?.confirm!==true)return reply.code(409).send({error:'confirmation_required'});
+    if(!body?.contextId)return reply.code(400).send({error:'context_required'});
+    try{return{removed:world.deleteCorrections(body.contextId,id,body.kind as any)}}catch(error){return reply.code(404).send({error:(error as Error).message})}
   });
   app.get("/api/world/entities/:id/neighborhood", async (request, reply) => {
     const id = decodeURIComponent((request.params as { id: string }).id),
@@ -1739,7 +1751,7 @@ export async function createApp(
       },
       contextId = String(query.contextId ?? "");
     if (!contextId) return reply.code(400).send({ error: "context_required" });
-    if (!worldStore.entity(id))
+    if (!world.detail(id))
       return reply.code(404).send({ error: "entity_not_found" });
     return world.projection(contextId, {
       rootId: id,
@@ -1751,7 +1763,7 @@ export async function createApp(
   });
   app.get("/api/world/entities/:id/evidence", async (request, reply) => {
     const id = decodeURIComponent((request.params as { id: string }).id),
-      value = worldStore.entity(id);
+      value = world.detail(id);
     return value
       ? { entity: value.entity, assertions: value.assertions }
       : reply.code(404).send({ error: "entity_not_found" });
