@@ -360,10 +360,11 @@ export async function createApp(
       return index;
     let device: any;
     try {
-      device = (await contexts.contexts()).contexts.find(
+      device = (await contexts.contexts({force})).contexts.find(
         (value:any) => value.id === contextId,
       );
     } catch {}
+    if(!device)device={id:contextId,name:contextId,online:contextId==='local'};
     const deviceKey = [device?.id, device?.online, device?.name].join(":");
     if (force||previous?.sourceKey !== sourceKey || previous.deviceKey !== deviceKey){
       const nodes=[...(index?.nodes??[]),...runtimeNodes],edges=[...(index?.edges??[]),...runtimeEdges];
@@ -1096,7 +1097,7 @@ export async function createApp(
     const body = request.body as any;
     if (!body?.resourceId)
       return reply.code(400).send({ error: "resource_required" });
-    const { resourceId, ...input } = body;
+    const { resourceId, contextId: _contextId, ...input } = body;
     try {
       const value = await fngk.createResourceBinding(
         String(resourceId),
@@ -1136,7 +1137,8 @@ export async function createApp(
         metadata: { bindingId, capability: body.capability },
       });
     try {
-      const value = await fngk.invokeResourceBinding(bindingId, body, {
+      const {contextId: _contextId, ...invocation}=body;
+      const value = await fngk.invokeResourceBinding(bindingId, invocation, {
         signal: requestSignal(request),
       });
       diagnostics.update(diagnostic.id, {
@@ -1793,7 +1795,7 @@ export async function createApp(
   app.post("/api/world/interpreters/recompute", recomputeInterpreters);
   app.post("/api/world/refresh",async(request,reply)=>{
     const contextId=String((request.body as {contextId?:string})?.contextId??'local');
-    try{await refreshWorld(contextId,{force:true});return{contextId,refreshed:true,projection:world.projection(contextId,{lens:'overview',level:0,budget:100})}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
+    try{await refreshWorld(contextId,{force:true});return{contextId,refreshed:true,projection:world.projection(contextId,{lens:'overview',level:0,budget:100})}}catch(error){worldStore.recordRefreshError(contextId,error);return reply.code(503).send({error:'world_refresh_failed',message:'The last complete Observatory remains available.',lastGoodAt:worldStore.lastGoodAt(contextId)??null})}
   });
   const listDeviceAdapters = async () => ({
     protocolVersion: "atlas.device-adapter.v1",

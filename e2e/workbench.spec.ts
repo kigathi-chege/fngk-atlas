@@ -43,8 +43,10 @@ test("orients a first-time user with the Machine Observatory", async ({ page }) 
       }),
     });
   });
+  await page.emulateMedia({reducedMotion:'reduce'});
   await page.setViewportSize({ width: 1440, height: 900 });
   await openWorkbench(page);
+  expect(await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
   await expect(page.getByRole("heading", { name: "kigathi" })).toBeVisible();
   await expect(page.getByText("Applications", { exact: true })).toBeVisible();
   await expect(page.getByText("Web → PostgreSQL", { exact: true })).toBeVisible();

@@ -43,6 +43,14 @@ describe("Atlas FNGK-native server", () => {
     expect((await app.inject({method:'DELETE',url,payload:{contextId:'local',confirm:true}})).statusCode).toBe(200);
     expect((await app.inject({method:'GET',url:`/api/world/entities/${encodeURIComponent(id)}`})).json().entity.label).not.toBe('Corrected machine');
   });
+  it('deduplicates simultaneous explicit Observatory refresh requests',async()=>{
+    const app=await harness(),responses=await Promise.all([
+      app.inject({method:'POST',url:'/api/world/refresh',payload:{contextId:'local'}}),
+      app.inject({method:'POST',url:'/api/world/refresh',payload:{contextId:'local'}}),
+    ]);
+    expect(responses.map(response=>response.statusCode)).toEqual([200,200]);
+    expect(responses[0].json().projection.rootId).toBe(responses[1].json().projection.rootId);
+  });
   it("does not expose legacy graph or Atlas alias routes", async () => {
     const app = await harness(),
       legacyGraph = "/api/" + "graph",
@@ -600,7 +608,7 @@ describe("Atlas FNGK-native server", () => {
         label: expect.stringContaining("postgres"),
       }),
     );
-    await app.inject({
+    const createdBinding=await app.inject({
       method: "POST",
       url: "/api/databases/bindings",
       payload: {
@@ -610,6 +618,10 @@ describe("Atlas FNGK-native server", () => {
         environment: "development",
       },
     });
+    expect(createdBinding.json().input).not.toHaveProperty('contextId');
+    const invocation=await app.inject({method:'POST',url:'/api/databases/bindings/binding-1/invoke',payload:{contextId:'local',capability:'database.catalog',input:{section:'databases'}}});
+    expect(invocation.statusCode).toBe(200);
+    expect(invocation.json().input).not.toHaveProperty('contextId');
     await app.inject({method:'POST',url:'/api/world/refresh',payload:{contextId:'local'}});
     const activity = (
       await app.inject({

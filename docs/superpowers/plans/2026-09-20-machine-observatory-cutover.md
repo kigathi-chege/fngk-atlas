@@ -885,6 +885,8 @@ Expected before implementation: at least the forced-exit/last-good assertion fai
 
 Add a refresh generation ID to derived rows or write into temporary generation tables, then atomically switch the active generation only after resolver, specialists, assertions, search, and samples complete. On failure, delete the incomplete generation and expose `{code:'world_refresh_failed',lastGoodAt}`.
 
+Implementation deviation (2026-09-21): SQLite WAL already provides the required last-good isolation. The cutover uses one `BEGIN IMMEDIATE` transaction around the complete refresh and savepoints for nested store writes, rather than duplicating every derived table by generation. A worker exit rolls back the uncommitted transaction; the parent records a refresh error and the API exposes `lastGoodAt`. Failure, worker-exit, restart, and live Device tests verify the observable contract.
+
 - [ ] **Step 4: Extend live acceptance**
 
 The disposable exact-head run must prove:

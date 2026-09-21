@@ -10,5 +10,7 @@ describe('native database resource discovery',()=>{
     const value=await discoverDatabases('device:1',{execute:async()=>({output:Buffer.from('LISTEN 0 128 127.0.0.1:5432 users:(("postgres",pid=4))'),exitCode:0})},native);
     expect(value.items).toHaveLength(1);expect(value.items[0]).toMatchObject({source:'terminal',engine:'postgres',evidence:{nativeResourceId:'resource-1',terminal:true}});
     const fallback=await discoverDatabases('device:1',undefined,native);expect(fallback.items[0]).toMatchObject({source:'adapter',engine:'postgres'});expect(fallback.errors).toEqual([{probe:'database-census',message:'No terminal command route was available.'}]);
+    const filtered=await discoverDatabases('device:1',undefined,[{id:'resource-filtered',deviceId:'device-1',kind:'postgres.instance',name:'PostgreSQL :5433',status:'online',availability:'available',attributes:{}}]);
+    expect(filtered.items[0]).toMatchObject({engine:'postgres',port:5433,evidence:{nativeResourceId:'resource-filtered'}});
   });
 });

@@ -18,7 +18,7 @@ export async function discoverDatabases(contextId:string,executor?:CommandExecut
   }
   for(const resource of nativeResources){
     const engine=String(resource.kind??'').split('.')[0] as DatabaseEngine;if(!names.some(([,value])=>value===engine))continue;
-    const host=String(resource.attributes?.host??'127.0.0.1'),port=Number(resource.attributes?.port)||undefined,key=`${engine}:${host}:${port??''}`,prior=items.get(key);
+    const host=String(resource.attributes?.host??'127.0.0.1'),namedPort=resource.name?.match(/:(\d{2,5})\s*$/)?.[1],candidate=Number(resource.attributes?.port??namedPort),port=candidate>0&&candidate<=65535?candidate:undefined,key=`${engine}:${host}:${port??''}`,prior=items.get(key);
     const native={nativeResourceId:resource.id,nativeStatus:resource.status,nativeAvailability:resource.availability,nativeCapabilities:resource.capabilities??[]};
     if(prior){prior.evidence={...prior.evidence,...native};continue}
     items.set(key,{id:createHash('sha256').update(`${contextId}:${key}`).digest('hex').slice(0,24),contextId,engine,host,port,source:'adapter',evidence:native,observedAt:resource.lastObservedAt??observedAt,stale:resource.availability==='unavailable'});

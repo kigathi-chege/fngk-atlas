@@ -11,6 +11,7 @@ import { interpreterFixture } from "./interpreter-fixture.js";
 import { projectWorld } from "../../src/world/projector.js";
 import { WorldService } from "../../src/world/service.js";
 import { WorldStore } from "../../src/world/store.js";
+import { backgroundRefresh } from '../../src/world/background-refresh.js';
 import { resolveOperationalWorld } from "../../src/world/resolution-policy.js";
 import { materializeWorld } from "../../src/world/materializer.js";
 import { adaptWorldObservations } from "../../src/world/observation-adapters.js";
@@ -26,6 +27,61 @@ afterEach(async () => {
   while (cleanups.length) await cleanups.pop()?.();
 });
 describe("semantic Device atlas", () => {
+  it('rejects a worker that exits without a committed success message',async()=>{
+    await expect(backgroundRefresh({databaseFile:':memory:',contextId:'local',nodes:[],edges:[],extensions:[]},{workerUrl:new URL('../fixtures/refresh-exit.mjs',import.meta.url)})).rejects.toThrow('without a committed success message');
+  });
+  it('cancels a stalled refresh worker without claiming success',async()=>{
+    const controller=new AbortController(),pending=backgroundRefresh({databaseFile:':memory:',contextId:'local',nodes:[],edges:[],extensions:[]},{workerUrl:new URL('../fixtures/refresh-hang.mjs',import.meta.url),signal:controller.signal});
+    controller.abort();
+    await expect(pending).rejects.toThrow('cancelled');
+  });
+  it('quarantines malformed extension output while committing a complete core world',()=>{
+    const store=new WorldStore(':memory:'),broken={...interpreterFixture,id:'test.malformed',rules:[{id:'invalid',when:{},emit:{kind:'undeclared',explanation:'Invalid output kind.'}}]},world=new WorldService(store,[{manifest:broken,trusted:false,source:'development'}]);
+    world.refresh('local',[{id:'repo',type:'repository',label:'web',path:'/srv/web',repositoryPath:'/srv/web'},{id:'process',type:'process',label:'node',metadata:{cwd:'/srv/web',processState:'S'}}],[],{name:'Device',online:true});
+    expect(world.projection('local',{lens:'overview'}).observatory?.regions.flatMap(region=>region.items).length).toBeGreaterThan(0);
+    expect(store.interpreters()).toContainEqual(expect.objectContaining({id:'test.malformed',status:'error'}));
+    expect(store.entities('local').some(entity=>entity.namespace==='test.malformed')).toBe(false);
+    expect(store.lastGoodAt('local')).toBeDefined();
+    store.close();
+  });
+  it('bounds a 20,000-node source fixture to a compact home and retained observation budget',()=>{
+    const store=new WorldStore(':memory:'),world=new WorldService(store),nodes=[
+      {id:'repo',type:'repository',label:'web',path:'/srv/web',repositoryPath:'/srv/web'},
+      {id:'process',type:'process',label:'node',metadata:{cwd:'/srv/web',processState:'S'}},
+      ...Array.from({length:20_000},(_,index)=>({id:`file:${index}`,type:'file',label:`file-${index}`,path:`/srv/web/file-${index}.ts`,repositoryPath:'/srv/web'})),
+    ];
+    world.refresh('local',nodes,[],{name:'Device',online:true});
+    const projection=world.projection('local',{lens:'overview',budget:100});
+    expect(store.observations('local').length).toBeLessThanOrEqual(10_000);
+    expect(store.entities('local').length).toBeLessThan(250);
+    expect(projection.nodes.length).toBeLessThanOrEqual(100);
+    expect(projection.observatory!.regions.flatMap(region=>region.items).length).toBeLessThanOrEqual(24);
+    store.close();
+  });
+  it('keeps the last complete world visible after a failed refresh',()=>{
+    const store=new WorldStore(':memory:'),world=new WorldService(store),nodes=[{id:'repo',type:'repository',label:'before',path:'/srv/before',repositoryPath:'/srv/before'},{id:'process',type:'process',label:'node',metadata:{cwd:'/srv/before',processState:'S'}}];
+    world.refresh('local',nodes,[],{name:'Device',online:true});
+    const prior=world.projection('local',{lens:'overview'}),lastGood=store.lastGoodAt('local'),original=store.sync.bind(store);
+    let calls=0;
+    store.sync=(...args:Parameters<WorldStore['sync']>)=>{original(...args);if(++calls===1)throw new Error('forced mid-refresh failure')};
+    expect(()=>world.refresh('local',[{...nodes[0],label:'after'},nodes[1]],[],{name:'Device',online:true})).toThrow('forced mid-refresh failure');
+    expect({...world.projection('local',{lens:'overview'}).observatory,measuredAt:undefined}).toEqual({...prior.observatory,measuredAt:undefined});
+    expect(store.lastGoodAt('local')).toBe(lastGood);
+    expect(store.refreshError('local')).toContain('forced mid-refresh failure');
+    store.close();
+  });
+  it('restores stable semantic IDs and refresh status after reopening the database',async()=>{
+    const directory=await mkdtemp(path.join(tmpdir(),'atlas-world-restart-')),file=path.join(directory,'atlas.db');
+    cleanups.push(()=>rm(directory,{recursive:true,force:true}));
+    const first=new WorldStore(file),world=new WorldService(first),nodes=[{id:'repo',type:'repository',label:'web',path:'/srv/web',repositoryPath:'/srv/web'},{id:'process',type:'process',label:'node',metadata:{cwd:'/srv/web',processState:'S'}}];
+    world.refresh('local',nodes,[],{name:'Device',online:true});
+    const ids=first.entities('local').map(entity=>entity.id).sort(),lastGood=first.lastGoodAt('local');
+    first.close();
+    const reopened=new WorldStore(file);
+    expect(reopened.entities('local').map(entity=>entity.id).sort()).toEqual(ids);
+    expect(reopened.lastGoodAt('local')).toBe(lastGood);
+    reopened.close();
+  });
   it("materializes a compact semantic world with complete provenance", () => {
     const runtime = [
         {

@@ -83,9 +83,17 @@ check(discovery.flatMap(message => message.entities ?? []).some((entity: any) =>
 const analysis = await websocket(`/api/analysis/repository?contextId=${encodedContext}&path=${encodedRoot}`);
 check(analysis.some(message => message.type === 'analysis_complete' && message.index?.summary?.functions >= 1), 'remote repository analysis did not complete');
 const execution = await api(`/api/discovery/entities?contextId=${encodedContext}`);
-if(!execution.body.relationships.some((edge: any) => edge.type === 'loads' && edge.evidence?.kind === 'command_path')){
-  throw new Error(`process-to-code evidence link is missing: ${JSON.stringify({processes:execution.body.entities?.filter((item:any)=>item.type==='process'&&String(item.metadata?.command).includes('server.js')),modules:execution.body.entities?.filter((item:any)=>item.type==='module'),edges:execution.body.relationships?.filter((item:any)=>['loads','runtime_in'].includes(item.type))})}`);
-}
+check(execution.body.entities?.some((item:any)=>item.type==='process'&&String(item.metadata?.command).includes('server.js')),'live Device process was not discovered');
+const worldRefresh=await api('/api/world/refresh',{method:'POST',body:JSON.stringify({contextId})});
+check(worldRefresh.response.ok&&worldRefresh.body.projection?.protocolVersion==='atlas.world.v2',`semantic Device refresh failed: ${JSON.stringify(worldRefresh.body)}`);
+const worldProjection=worldRefresh.body.projection,observatory=worldProjection.observatory,workloads=observatory.regions.flatMap((region:any)=>region.items);
+check(workloads.length>0,'semantic Device home did not identify an operational workload');
+check(observatory.regions.some((region:any)=>region.id==='system'&&region.collapsedCount>=0&&region.collapsedCount<10_000),'bounded System aggregate is missing');
+check(['healthy','degraded','critical','unknown'].includes(observatory.health)&&Array.isArray(observatory.flows)&&Array.isArray(observatory.attention),'observatory state, flow, or attention is missing');
+const semanticEvidence=await Promise.all(workloads.map((item:any)=>api(`/api/world/entities/${encodeURIComponent(item.id)}/evidence`)));
+check(semanticEvidence.every(item=>item.response.ok&&item.body.assertions?.every((assertion:any)=>assertion.evidence?.length>0)),'semantic workload lacks provenance');
+check(semanticEvidence.some(item=>item.body.assertions?.some((assertion:any)=>assertion.predicate==='implemented-by')&&item.body.assertions?.some((assertion:any)=>assertion.predicate==='realized-by')),'semantic workload did not correlate process and repository evidence');
+evidence.world={rootId:worldProjection.rootId,workloadIds:workloads.map((item:any)=>item.id),health:observatory.health,systemCollapsed:observatory.regions.find((region:any)=>region.id==='system')?.collapsedCount};
 
 const coverage = await api('/api/coverage/refresh', { method: 'POST', body: JSON.stringify({ contextId, repositoryPath: fixtureRoot, command: 'npm run coverage' }) });
 check(coverage.response.ok && coverage.body.coverage?.verified&&coverage.body.coverage?.artifact,`coverage run was not verified: ${JSON.stringify(coverage.body)}`);
@@ -117,5 +125,5 @@ const fresh = await api(`/api/discovery/entities?contextId=${encodedContext}`); 
 const stoppedLive=await api(`/api/live-projects/${encodeURIComponent(live.body.session.id)}`,{method:'DELETE',body:JSON.stringify({confirm:true})});check(stoppedLive.body.stopped,'live project did not stop');
 const leftovers = (await readdir(fixtureRoot)).filter(name => name.includes('.atlas-') || name.endsWith('.b64'));
 check(leftovers.length === 0, `helper artifacts remained: ${leftovers.join(', ')}`);
-evidence.acceptance = { rootRoute: root.body.route, conflict: conflict.body.error, processCodeEdges: execution.body.edges.filter((edge: any) => edge.type === 'loads').length, coverage: coverage.body.coverage, terminalEvents: terminalMessages.map(message => message.type), liveProject:{url:live.body.session.url,browser:{status:browser.body.status,title:browser.body.title,consoleErrors:browser.body.consoleErrors.length}},database:{nativeDiscovery:true,postgresResources:database.body.items.filter((item:any)=>item.engine==='postgres').length,catalogDatabases:databaseCatalog.body.output.rows.length},reconnect: { priorSession, nextSession }, helperArtifacts: leftovers };
+evidence.acceptance = { rootRoute: root.body.route, conflict: conflict.body.error, semanticProcessCodeLinks:semanticEvidence.filter(item=>item.body.assertions?.some((assertion:any)=>assertion.predicate==='implemented-by')&&item.body.assertions?.some((assertion:any)=>assertion.predicate==='realized-by')).length, coverage: coverage.body.coverage, terminalEvents: terminalMessages.map(message => message.type), liveProject:{url:live.body.session.url,browser:{status:browser.body.status,title:browser.body.title,consoleErrors:browser.body.consoleErrors.length}},database:{nativeDiscovery:true,postgresResources:database.body.items.filter((item:any)=>item.engine==='postgres').length,catalogDatabases:databaseCatalog.body.output.rows.length},reconnect: { priorSession, nextSession }, helperArtifacts: leftovers };
 process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);

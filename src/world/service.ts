@@ -61,6 +61,8 @@ export class WorldService {
     edges: any[],
     device?: { id?: string; name?: string; online?: boolean },
   ) {
+    this.store.beginRefresh();
+    try {
     const at = new Date().toISOString(),
       observedDevice = device ?? {
         id: contextId,
@@ -187,6 +189,11 @@ export class WorldService {
           (error as Error).message,
         );
       }
+    }
+    this.store.completeRefresh(contextId);
+    } catch(error) {
+      this.store.abortRefresh(contextId,error);
+      throw error;
     }
   }
   ingest(

@@ -722,3 +722,9 @@ The design and implementation plan that follow this audit should explicitly sati
 ## 13. One-sentence diagnosis
 
 **Atlas already knows a great deal about the computer, but today it shows the user the evidence graph before it has turned that evidence into an understandable model of what the computer is doing.**
+
+## 14. Implemented cutover note (2026-09-21)
+
+This audit records the historical pre-cutover state. The current `feat/fngk-native-atlas` branch implements `atlas.world.v2`: a compact operational resolver, strong-identity primary workloads, bounded System aggregates, normalized runtime state, scoped specialists, a Device-home Machine Observatory, canonical `/api/world/*` and `/api/software/functions` APIs, explicit local-document enrichment, and separate user corrections. The old compatibility entity mirror, workload interpreter, default graph/card wall, graph API, semantic aliases, and unused FileExplorer component were removed. The active FilesystemTree and all expert workbenches remain.
+
+This is not a claim of complete machine telemetry. Health and flow are limited to evidence Atlas actually collects; missing facts remain unknown. See [Machine Observatory](../machine-observatory.md) for the current product contract and refresh/failure behavior. Operational live acceptance and final visual review are tracked in `docs/superpowers/plans/2026-09-20-machine-observatory-cutover.md`.
