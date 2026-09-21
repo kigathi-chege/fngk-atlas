@@ -43,6 +43,7 @@ import {
 } from "../intelligence/service.js";
 import { DeploymentService } from "../deployments/service.js";
 import { interpretDeploymentProject } from "../deployments/adapters.js";
+import { projectSoftwareFunctions } from "../world/software-projection.js";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -1830,11 +1831,11 @@ export async function createApp(
     if (!contextId) return reply.code(400).send({ error: "context_required" });
     return { items: worldStore.timeline(contextId, id) };
   });
-  app.get("/api/atlas/interpreters", async () => ({
+  const listInterpreters = async () => ({
     protocolVersion: "atlas.interpreter.v1",
     items: worldStore.interpreters(),
-  }));
-  app.post("/api/atlas/interpreters/recompute", async (request, reply) => {
+  });
+  const recomputeInterpreters = async (request: any, reply: any) => {
     if (process.env.NODE_ENV === "production")
       return reply.code(403).send({ error: "development_only" });
     const contextId = String(
@@ -1842,12 +1843,16 @@ export async function createApp(
     );
     await refreshWorld(contextId,{force:true});
     return { contextId, interpreters: worldStore.interpreters() };
-  });
+  };
+  app.get("/api/world/interpreters", listInterpreters);
+  app.post("/api/world/interpreters/recompute", recomputeInterpreters);
+  app.get("/api/atlas/interpreters", listInterpreters);
+  app.post("/api/atlas/interpreters/recompute", recomputeInterpreters);
   app.post("/api/world/refresh",async(request,reply)=>{
     const contextId=String((request.body as {contextId?:string})?.contextId??'local');
     try{await refreshWorld(contextId,{force:true});return{contextId,refreshed:true,projection:world.projection(contextId,{lens:'overview',level:0,budget:100})}}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}
   });
-  app.get("/api/atlas/device-adapters", async () => ({
+  const listDeviceAdapters = async () => ({
     protocolVersion: "atlas.device-adapter.v1",
     items: deviceAdapters.map((value) => ({
       id: value.manifest.id,
@@ -1860,8 +1865,8 @@ export async function createApp(
       status: value.error ? "error" : "ready",
       error: value.error,
     })),
-  }));
-  app.post("/api/atlas/device-adapters/:id/run", async (request, reply) => {
+  });
+  const runRegisteredDeviceAdapter = async (request: any, reply: any) => {
     const id = decodeURIComponent((request.params as { id: string }).id),
       body = request.body as { contextId?: string; confirm?: boolean },
       adapter = deviceAdapters.find((value) => value.manifest.id === id);
@@ -1893,7 +1898,11 @@ export async function createApp(
       const result = processError(error);
       return reply.code(result.statusCode).send(result.body);
     }
-  });
+  };
+  app.get("/api/device-adapters", listDeviceAdapters);
+  app.post("/api/device-adapters/:id/run", runRegisteredDeviceAdapter);
+  app.get("/api/atlas/device-adapters", listDeviceAdapters);
+  app.post("/api/atlas/device-adapters/:id/run", runRegisteredDeviceAdapter);
   app.get("/api/intelligence/capabilities", async () =>
     intelligence.capabilities(),
   );
@@ -2389,6 +2398,20 @@ export async function createApp(
         .code(400)
         .send({ error: "analysis_failed", message: (error as Error).message });
     }
+  });
+  app.get("/api/software/functions", async (request, reply) => {
+    const query = request.query as {
+        contextId?: string;
+        indexId?: string;
+        limit?: string;
+      },
+      contextId = String(query.contextId ?? ""),
+      index = resolveIndex(query.indexId, contextId || undefined);
+    if (!contextId)
+      return reply.code(400).send({ error: "context_required" });
+    if (!index)
+      return reply.code(404).send({ error: "index_not_found" });
+    return projectSoftwareFunctions(index, Number(query.limit) || 500);
   });
   app.get("/api/graph", async (request, reply) => {
     const queryValue = request.query as {

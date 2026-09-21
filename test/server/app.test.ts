@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/server/app.js";
 import { FngkProcessClient } from "../../src/fngk/process-client.js";
 import { DiagnosticRegistry } from "../../src/diagnostics/registry.js";
+import { Store } from "../../src/store.js";
 
 const fixture = path.resolve("test/fixtures/fngk.mjs");
 const cleanups: Array<() => Promise<void>> = [];
@@ -28,6 +29,107 @@ async function harness() {
 }
 
 describe("Atlas FNGK-native server", () => {
+  it("serves canonical observatory routes", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fngk-atlas-canonical-")),
+      dbPath = path.join(directory, "atlas.db"),
+      seed = new Store(dbPath);
+    seed.saveIndex({
+      id: "index:software",
+      contextId: "local",
+      root: "/repo",
+      revision: "abc",
+      fingerprint: "fixture",
+      summary: { files: 1, functions: 1, packages: 1 },
+      nodes: [
+        {
+          id: "function:main",
+          type: "function",
+          label: "main",
+          qualifiedName: "main",
+          path: "src/main.ts",
+          line: 3,
+          endLine: 8,
+          complexity: 4,
+          coverage: { fraction: 0.75, stale: false, source: "lcov.info" },
+          crap: 4.25,
+        },
+      ],
+      edges: [],
+    });
+    seed.close();
+    const app = await createApp({
+      fngk: new FngkProcessClient({ binary: fixture }),
+      dbPath,
+    });
+    cleanups.push(async () => {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/world/refresh",
+          payload: { contextId: "local" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const overview = await app.inject({
+      method: "GET",
+      url: "/api/world/projection?contextId=local&lens=overview",
+    });
+    expect(overview.json()).toMatchObject({
+      protocolVersion: "atlas.world.v2",
+      observatory: {
+        identity: expect.objectContaining({ label: expect.any(String) }),
+        regions: expect.any(Array),
+        flows: expect.any(Array),
+        attention: expect.any(Array),
+      },
+    });
+    expect(
+      (
+        await app.inject({ method: "GET", url: "/api/world/interpreters" })
+      ).json(),
+    ).toMatchObject({
+      protocolVersion: "atlas.interpreter.v1",
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: "atlas.resolver.v2" }),
+      ]),
+    });
+    expect(
+      (
+        await app.inject({ method: "GET", url: "/api/device-adapters" })
+      ).json(),
+    ).toMatchObject({ protocolVersion: "atlas.device-adapter.v1", items: [] });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/api/world/interpreters/recompute",
+          payload: { contextId: "local" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const functions = await app.inject({
+      method: "GET",
+      url: "/api/software/functions?contextId=local&indexId=index%3Asoftware&limit=20",
+    });
+    expect(functions.statusCode).toBe(200);
+    expect(functions.json()).toEqual({
+      items: [
+        expect.objectContaining({
+          id: "function:main",
+          label: "main",
+          path: "src/main.ts",
+          complexity: 4,
+          coverage: expect.objectContaining({ fraction: 0.75, stale: false }),
+          crap: 4.25,
+          stale: false,
+        }),
+      ],
+    });
+  });
   it('serves semantic projections without probing FNGK or recomputing evidence',async()=>{
     const directory=await mkdtemp(path.join(tmpdir(),'fngk-atlas-readonly-world-')),fngk={probe:async()=>{throw new Error('projection attempted FNGK discovery')}};
     const app=await createApp({fngk:fngk as any,dbPath:path.join(directory,'atlas.db')});cleanups.push(async()=>{await app.close();await rm(directory,{recursive:true,force:true})});

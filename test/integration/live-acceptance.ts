@@ -90,8 +90,8 @@ if(!execution.body.edges.some((edge: any) => edge.type === 'loads' && edge.evide
 
 const coverage = await api('/api/coverage/refresh', { method: 'POST', body: JSON.stringify({ contextId, repositoryPath: fixtureRoot, command: 'npm run coverage' }) });
 check(coverage.response.ok && coverage.body.coverage?.verified&&coverage.body.coverage?.artifact,`coverage run was not verified: ${JSON.stringify(coverage.body)}`);
-const code = await api(`/api/graph?contextId=${encodedContext}&type=function&limit=500`);
-check(code.body.nodes.some((node: any) => node.type === 'function' && typeof node.crap === 'number' && node.coverage?.stale === false),`verified coverage did not produce CRAP: ${JSON.stringify({coverage:coverage.body.coverage,functions:code.body.nodes.filter((node:any)=>node.type==='function')})}`);
+const code = await api(`/api/software/functions?contextId=${encodedContext}&limit=500`);
+check(code.body.items.some((node: any) => typeof node.crap === 'number' && node.coverage?.stale === false),`verified coverage did not produce CRAP: ${JSON.stringify({coverage:coverage.body.coverage,functions:code.body.items})}`);
 
 const terminalMessages: any[] = [];
 const terminal = new WebSocket(`${atlas.replace(/^http/, 'ws')}/api/fngk/terminals?target=${encodeURIComponent(`device:${device.id}`)}&new=1`);
