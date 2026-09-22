@@ -6,7 +6,6 @@ export interface DesktopBridge {
   getLocalStatus(): Promise<unknown>;
   installFngk(input: { scope: "user" | "system" }): Promise<unknown>;
   convergeDaemon(input: { profile: string }): Promise<unknown>;
-  beginLogin(input: { profile: string }): Promise<unknown>;
   cancelOperation(input: { operationId: string }): Promise<unknown>;
   shutdown(): Promise<unknown>;
 }
@@ -25,7 +24,6 @@ export function createDesktopBridge(invoke: DesktopInvoke): DesktopBridge {
       });
     },
     convergeDaemon: (input: { profile: string }) => invokeProfileOperation(invoke, "atlas_converge_daemon", input),
-    beginLogin: (input: { profile: string }) => invokeProfileOperation(invoke, "atlas_begin_login", input),
     cancelOperation: (input: { operationId: string }) => {
       return validated(() => {
         assertExactKeys(input, ["operationId"]);
@@ -37,7 +35,7 @@ export function createDesktopBridge(invoke: DesktopInvoke): DesktopBridge {
   });
 }
 
-function invokeProfileOperation(invoke: DesktopInvoke, operation: "atlas_converge_daemon" | "atlas_begin_login", input: { profile: string }): Promise<unknown> {
+function invokeProfileOperation(invoke: DesktopInvoke, operation: "atlas_converge_daemon", input: { profile: string }): Promise<unknown> {
   return validated(() => {
     assertExactKeys(input, ["profile"]);
     if (!profilePattern.test(input.profile)) throw new Error("FNGK profile is invalid.");

@@ -1,13 +1,14 @@
 <script lang="ts">
   import {onMount} from 'svelte';
   import {api} from '../lib/api.js';
+  import {openAuthorizationUrl} from '../lib/external-url.js';
   import {resolveOnboardingPresentation} from '../lib/onboarding-state.js';
   import FngkStatusCard from './FngkStatusCard.svelte';
   let status:any,loading=true,error='',origin='';
   $: presentation=resolveOnboardingPresentation(status,error);
   const refresh=async()=>{loading=true;error='';try{status=await api('/api/onboarding/status')}catch(cause){error=(cause as Error).message}finally{loading=false}};
   const converge=async()=>{loading=true;error='';try{await api('/api/onboarding/converge',{method:'POST',body:JSON.stringify({profile:status?.local?.profile??'local',confirm:true})});await refresh()}catch(cause){error=(cause as Error).message;loading=false}};
-  const login=async()=>{loading=true;error='';try{const selected=origin.trim();if(!selected)throw new Error('Enter the HTTPS Signal origin.');const flow:any=await api('/api/onboarding/login/begin',{method:'POST',body:JSON.stringify({profile:status?.local?.profile??'local',origin:selected})});window.open(flow.authorizationUrl,'_blank','noopener,noreferrer');await api('/api/onboarding/login/complete',{method:'POST',body:JSON.stringify({stateId:flow.stateId,origin:selected,receivedAt:new Date().toISOString()})});await refresh()}catch(cause){error=(cause as Error).message;loading=false}};
+  const login=async()=>{loading=true;error='';try{const selected=origin.trim();if(!selected)throw new Error('Enter the HTTPS Signal origin.');const flow:any=await api('/api/onboarding/login/begin',{method:'POST',body:JSON.stringify({profile:status?.local?.profile??'local',origin:selected})});await openAuthorizationUrl(flow.authorizationUrl);await api('/api/onboarding/login/complete',{method:'POST',body:JSON.stringify({stateId:flow.stateId,origin:selected,receivedAt:new Date().toISOString()})});await refresh()}catch(cause){error=(cause as Error).message;loading=false}};
   onMount(()=>{void refresh()});
 </script>
 

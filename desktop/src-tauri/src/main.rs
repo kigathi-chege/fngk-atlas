@@ -117,14 +117,6 @@ fn atlas_converge_daemon(request: ProfileRequest, runtime: State<DesktopRuntime>
 }
 
 #[tauri::command]
-fn atlas_begin_login(request: ProfileRequest) -> Result<BootstrapResponse, String> {
-    if !valid_profile(&request.profile) {
-        return Err("Invalid FNGK profile.".into());
-    }
-    Ok(response("login-choice", "FNGK browser login is not configured yet.", Some("bootstrap_not_configured")))
-}
-
-#[tauri::command]
 fn atlas_cancel_operation(request: CancelRequest) -> Result<BootstrapResponse, String> {
     if !valid_operation_id(&request.operation_id) {
         return Err("Invalid operation ID.".into());
@@ -181,6 +173,7 @@ fn desktop_server_config(app: &tauri::AppHandle, fngk: &FngkPaths) -> Result<Atl
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let fngk = fngk_paths(&app.handle())?;
             let config = desktop_server_config(&app.handle(), &fngk)?;
@@ -200,7 +193,6 @@ fn main() {
             atlas_get_local_status,
             atlas_install_fngk,
             atlas_converge_daemon,
-            atlas_begin_login,
             atlas_cancel_operation,
             atlas_shutdown,
         ])

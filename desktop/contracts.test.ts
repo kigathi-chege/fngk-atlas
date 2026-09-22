@@ -29,5 +29,6 @@ describe("desktop IPC contracts", () => {
       }),
     ).toThrow("unexpected field");
     expect(() => parseDesktopOperation("shell_execute")).toThrow("Unknown desktop operation");
+    expect(() => parseDesktopOperation("atlas_begin_login")).toThrow("Unknown desktop operation");
   });
 });

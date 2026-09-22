@@ -10,7 +10,6 @@ export const desktopOperations = [
   "atlas_get_local_status",
   "atlas_install_fngk",
   "atlas_converge_daemon",
-  "atlas_begin_login",
   "atlas_cancel_operation",
   "atlas_shutdown",
 ] as const;

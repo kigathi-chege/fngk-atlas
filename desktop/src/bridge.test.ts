@@ -9,7 +9,6 @@ describe("restricted desktop bridge", () => {
     await expect(bridge.getLocalStatus()).resolves.toEqual({ state: "ready" });
     expect(invoke).toHaveBeenCalledWith("atlas_get_local_status", {});
     expect(Object.keys(bridge).sort()).toEqual([
-      "beginLogin",
       "cancelOperation",
       "convergeDaemon",
       "getLocalStatus",

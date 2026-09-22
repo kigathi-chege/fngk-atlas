@@ -3,5 +3,11 @@
   "identifier": "default",
   "description": "Atlas's minimal desktop window capability.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{"url": "https://*"}]
+    }
+  ]
 }
