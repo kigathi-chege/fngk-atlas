@@ -147,4 +147,18 @@ describe("local documentation enrichment", () => {
     expect(store.assertions("local").some((item) => item.predicate === "has-purpose")).toBe(false);
     store.close();
   });
+  it('never persists raw document bodies or credential fields in world evidence',()=>{
+    const store=new WorldStore(':memory:'),service=new WorldService(store);
+    service.refresh('local',[
+      {id:'repo',type:'repository',label:'web',path:'/srv/web',repositoryPath:'/srv/web'},
+      {id:'process',type:'process',label:'node',metadata:{cwd:'/srv/web',processState:'S'}},
+      {id:'deployment-doc',type:'configuration',label:'deployment.json',repositoryPath:'/srv/web',documentPath:'/srv/web/deployment.json',documentText:'{"purpose":"Serves customers","databaseUrl":"postgres://user:fixture-secret@host/db","privateKey":"fixture-private"}'},
+    ],[],{name:'Device',online:true});
+    const persisted=JSON.stringify({observations:store.observations('local'),assertions:store.assertions('local')});
+    expect(persisted).not.toContain('fixture-secret');
+    expect(persisted).not.toContain('fixture-private');
+    expect(persisted).not.toContain('databaseUrl');
+    expect(store.assertions('local')).toContainEqual(expect.objectContaining({predicate:'has-purpose',value:'Serves customers'}));
+    store.close();
+  });
 });

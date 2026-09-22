@@ -232,6 +232,27 @@ describe("semantic Device atlas", () => {
     ]);
     reopened.close();
   });
+  it('scrubs preexisting v2 observations when reopening a database',async()=>{
+    const directory=await mkdtemp(path.join(tmpdir(),'atlas-world-privacy-')),file=path.join(directory,'atlas.db');
+    cleanups.push(()=>rm(directory,{recursive:true,force:true}));
+    const legacy=new DatabaseSync(file);
+    legacy.exec(`CREATE TABLE atlas_world_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);INSERT INTO atlas_world_meta VALUES('schema_version','2');CREATE TABLE atlas_world_observations(id TEXT PRIMARY KEY,context_id TEXT NOT NULL,kind TEXT NOT NULL,source TEXT NOT NULL,source_id TEXT NOT NULL,observed_at TEXT NOT NULL,scan_id TEXT,route_json TEXT NOT NULL,facts_json TEXT NOT NULL,sensitivity TEXT NOT NULL);`);
+    legacy.prepare('INSERT INTO atlas_world_observations VALUES(?,?,?,?,?,?,?,?,?,?)').run('observation:old','local','configuration','analysis','old','2026-09-20T00:00:00Z',null,'{}',JSON.stringify({documentText:'{"privateKey":"legacy-secret"}',argv:['--password=legacy-secret'],documentPath:'/srv/deployment.json',repositoryPath:'/srv'}),'safe-metadata');
+    legacy.close();
+    const migrated=new WorldStore(file),persisted=JSON.stringify(migrated.observations('local'));
+    expect(persisted).not.toContain('legacy-secret');
+    expect(persisted).not.toContain('documentText');
+    expect(migrated.observations('local')).toHaveLength(1);
+    migrated.close();
+  });
+  it('sanitizes observations supplied directly to the world store',()=>{
+    const store=new WorldStore(':memory:'),at='2026-09-20T00:00:00Z';
+    store.putObservations([{id:'direct',contextId:'local',kind:'process',source:'test',sourceId:'process:1',observedAt:at,facts:{label:'node',argv:'--password write-secret',metadata:{pid:1,databaseUrl:'postgres://user:write-secret@host/db'}},route:{kind:'terminal',token:'write-secret'},sensitivity:'safe-metadata'}]);
+    const persisted=String((store.db.prepare('SELECT facts_json||route_json value FROM atlas_world_observations WHERE id=?').get('direct') as any).value);
+    expect(persisted).not.toContain('write-secret');
+    expect(store.observations('local')[0].facts).toMatchObject({label:'node',metadata:{pid:1}});
+    store.close();
+  });
   it("scopes specialist evidence to one workload", () => {
     const workload = (id: string, label: string, memberIds: string[]) => ({
         id,
@@ -314,11 +335,12 @@ describe("semantic Device atlas", () => {
   });
   it('persists only allowed operational facts, never arbitrary command or metadata secrets',()=>{
     const store=new WorldStore(':memory:'),world=new WorldService(store);
-    world.refresh('local',[{id:'process:secret',type:'process',label:'server',argv:['node','--api-key=fixture-secret'],documentText:'API_KEY=doc-secret\n{"apiKey":"json-secret"}',metadata:{command:'node --api-key=fixture-secret',accessKey:'fixture-secret',cwd:'/srv/web',pid:42,processState:'S'}}],[],{name:'Device',online:true});
+    world.refresh('local',[{id:'process:secret',type:'process',label:'server',argv:['node','--api-key=fixture-secret'],documentText:'API_KEY=doc-secret\n{"apiKey":"json-secret"}',purpose:'Connects postgres://user:url-secret@host/db',metadata:{command:'node --api-key=fixture-secret',accessKey:'fixture-secret',cwd:'/srv/web',pid:42,processState:'S'}}],[],{name:'Device',online:true});
     const retained=JSON.stringify(store.observations('local'));
     expect(retained).not.toContain('fixture-secret');
     expect(retained).not.toContain('doc-secret');
     expect(retained).not.toContain('json-secret');
+    expect(retained).not.toContain('url-secret');
     expect(retained).not.toContain('argv');
     expect(retained).not.toContain('accessKey');
     expect(store.observations('local').find(item=>item.sourceId==='process:secret')).toMatchObject({sensitivity:'sensitive-reference',facts:{metadata:{cwd:'/srv/web',pid:42,processState:'S'}}});

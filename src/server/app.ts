@@ -1830,7 +1830,7 @@ export async function createApp(
         await contexts.commandExecutor(contextId),
         contextId,
       );
-      world.ingest(adapter.manifest.interpreter, result.inputs, result.output);
+      world.ingest(adapter.manifest.interpreter, result.inputs);
       worldRefreshState.delete(contextId);
       return {
         adapterId: id,

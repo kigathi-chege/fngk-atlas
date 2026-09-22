@@ -5,14 +5,48 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { analyzeRepository } from '../../src/analysis/repository-analyzer.js';
 import { FileService } from '../../src/files/file-service.js';
 import { DirectTransport } from '../../src/transports/direct.js';
+import { Store } from '../../src/store.js';
+import {DatabaseSync} from 'node:sqlite';
 
 const directories: string[] = [];
 afterEach(async () => { while (directories.length) await rm(directories.pop()!, { recursive: true, force: true }); });
 
 describe('transport-neutral repository analysis', () => {
+  it('sanitizes documentation supplied directly to saveIndex',async()=>{
+    const root=await mkdtemp(path.join(tmpdir(),'atlas-index-write-'));directories.push(root);
+    const store=new Store(path.join(root,'atlas.db'));
+    store.saveIndex({id:'direct',root:'/srv',fingerprint:'x',summary:{},contextId:'local',nodes:[{id:'doc',type:'configuration',label:'privateKey=label-write-secret',documentPath:'/srv/deployment.json',documentText:'{"purpose":"Serves customers","databaseUrl":"postgres://user:write-secret@host/db"}',metadata:{privateKey:'flow-write-secret'}}],edges:[]});
+    const persisted=String((store.db.prepare('SELECT graph_json FROM indexes WHERE id=?').get('direct') as any).graph_json);
+    expect(persisted).not.toContain('write-secret');
+    expect(persisted).not.toContain('databaseUrl');
+    expect(persisted).not.toContain('flow-write-secret');
+    expect(persisted).not.toContain('metadata');
+    expect(persisted).not.toContain('label-write-secret');
+    expect(JSON.stringify(store.db.prepare("SELECT label FROM atlas_search WHERE source='index'").all())).not.toContain('label-write-secret');
+    expect(store.index('direct')?.nodes[0].documentText).toBe('{"purpose":"Serves customers"}');
+    store.close();
+  });
+  it('scrubs a previously persisted repository document when opening the index',async()=>{
+    const root=await mkdtemp(path.join(tmpdir(),'atlas-index-privacy-'));directories.push(root);
+    const file=path.join(root,'atlas.db'),legacy=new DatabaseSync(file);
+    legacy.exec('CREATE TABLE indexes(id TEXT PRIMARY KEY,root TEXT NOT NULL,fingerprint TEXT NOT NULL,summary_json TEXT NOT NULL,updated_at TEXT NOT NULL,graph_json TEXT NOT NULL,context_id TEXT NOT NULL,revision TEXT)');
+    legacy.prepare('INSERT INTO indexes VALUES(?,?,?,?,?,?,?,?)').run('old','/srv','x','{}','2026-09-20T00:00:00Z',JSON.stringify({id:'old',root:'/srv',contextId:'local',nodes:[{id:'doc',type:'configuration',label:'privateKey=label-legacy-secret',documentPath:'/srv/deployment.json',documentText:'{"purpose":"Serves customers","privateKey":"legacy-secret"}',metadata:{privateKey:'flow-legacy-secret'}}],edges:[],summary:{}}),'local',null);
+    legacy.exec("CREATE VIRTUAL TABLE atlas_search USING fts5(context_id UNINDEXED,entity_id UNINDEXED,type UNINDEXED,label,path,detail,source UNINDEXED,tokenize='unicode61')");
+    legacy.prepare('INSERT INTO atlas_search(context_id,entity_id,type,label,path,detail,source) VALUES(?,?,?,?,?,?,?)').run('local','doc','configuration','privateKey=label-legacy-secret','','','index');
+    legacy.close();
+    const store=new Store(file),persisted=String((store.db.prepare('SELECT graph_json FROM indexes WHERE id=?').get('old') as any).graph_json);
+    expect(persisted).not.toContain('legacy-secret');
+    expect(persisted).not.toContain('privateKey');
+    expect(persisted).not.toContain('flow-legacy-secret');
+    expect(persisted).not.toContain('metadata');
+    expect(persisted).not.toContain('label-legacy-secret');
+    expect(JSON.stringify(store.db.prepare("SELECT label FROM atlas_search WHERE source='index'").all())).not.toContain('label-legacy-secret');
+    expect(store.index('old')?.nodes[0].documentText).toBe('{"purpose":"Serves customers"}');
+    store.close();
+  });
   it('streams stable modules, functions, arguments, imports, calls, and sizes from a FileService', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'atlas-analysis-source-')); directories.push(root); await mkdir(path.join(root, 'repo', 'src'), { recursive: true });await mkdir(path.join(root,'repo','.worktrees','duplicate'),{recursive:true});
-    await writeFile(path.join(root, 'repo', 'package.json'), '{"name":"remote-fixture","dependencies":{"zod":"1.0.0"}}');
+    await writeFile(path.join(root, 'repo', 'package.json'), '{"name":"remote-fixture","dependencies":{"zod":"1.0.0","private-package":"git+https://user:dependency-secret@host/repo"},"description":"Serves customers","databaseUrl":"postgres://user:fixture-secret@host/db","privateKey":"fixture-private"}');
     await writeFile(path.join(root, 'repo', 'README.md'), 'Runs the fixture. token=never-persist-this-secret');
     await writeFile(path.join(root, 'repo', 'src', 'b.ts'), 'export function double(value:number){ return value * 2 }');
     await writeFile(path.join(root, 'repo', 'src', 'a.ts'), "import {double} from './b'; app.get('/health', handler); bus.emit('calculated'); db.query('select * from jobs'); export function calculate(value:number, fallback=0){ if(value > 0) return double(value); return fallback }");
@@ -28,5 +62,12 @@ describe('transport-neutral repository analysis', () => {
     expect(first.nodes.some((node:any)=>String(node.path).includes('.worktrees'))).toBe(false);
     expect(JSON.stringify(first)).not.toContain('never-persist-this-secret');
     expect(first.nodes).toContainEqual(expect.objectContaining({documentPath:'/repo/README.md',documentText:'Runs the fixture. token=[redacted]'}));
+    const store=new Store(path.join(root,'atlas.db'));store.saveIndex(first);
+    const persisted=String((store.db.prepare('SELECT graph_json FROM indexes WHERE id=?').get(first.id) as any).graph_json);
+    expect(persisted).not.toContain('fixture-secret');
+    expect(persisted).not.toContain('fixture-private');
+    expect(persisted).not.toContain('dependency-secret');
+    expect(persisted).not.toContain('databaseUrl');
+    store.close();
   });
 });

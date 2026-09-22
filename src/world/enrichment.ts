@@ -1,4 +1,6 @@
 import { worldId } from "./interpreter.js";
+import {redactCommandLine,redactSensitiveText} from '../discovery/redaction.js';
+import {summarizeLocalDocument} from './document-summary.js';
 import {
   ATLAS_INTERPRETER_VERSION,
   ATLAS_WORLD_VERSION,
@@ -41,13 +43,7 @@ export function selectAuthoritativeAssertion(assertions: AtlasAssertion[]) {
   )[0];
 }
 
-const secret =
-  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b|((?:token|secret|password|credential|authorization)\s*[=:]\s*)[^\s,;]+/gi;
-const safe = (value: string) => value.replace(secret, (_match, prefix) => `${prefix ?? ""}[redacted]`);
-const bounded = (text: string) => {
-  if (text.includes("\0") || text.includes("\uFFFD")) return undefined;
-  return Buffer.from(text, "utf8").subarray(0, 64 * 1024).toString("utf8");
-};
+const safe = (value: string) => redactSensitiveText(redactCommandLine(value));
 const readmePurpose = (text: string) => {
   const lines = text.split(/\r?\n/), paragraph: string[] = [];
   for (const raw of lines) {
@@ -115,7 +111,7 @@ export function enrichFromLocalDocumentation(
     });
   };
   for (const document of scoped) {
-    const text = bounded(document.text);
+    const text = summarizeLocalDocument(document.path,document.text);
     if (!text) continue;
     const name = document.path.split("/").at(-1) ?? document.path;
     if (/^readme(?:\.|$)/i.test(name)) {

@@ -1,15 +1,25 @@
 import { createHash } from "node:crypto";
 import { redactFacts } from "../discovery/redaction.js";
-import type { AtlasObservation } from "./types.js";
+import {redactSensitiveText} from '../discovery/redaction.js';
+import type { AtlasObservation,InterpreterInput } from "./types.js";
 
 const stable = (value: string) =>
   createHash("sha256").update(value).digest("hex").slice(0, 28);
 const sensitiveKey =
   /(secret|token|credential|password|passwd|cookie|authorization|database_url|private[_-]?key|api[_-]?key|access[_-]?key)/i;
-const allowedFacts=new Set(['label','name','id','type','stale','online','profile','pid','ppid','cwd','systemdUnit','containerId','protocol','address','routeId','environment','managedDeploymentId','activeState','active','subState','state','repositoryPath','root','path','port','cpuPercent','rssBytes','elapsedSeconds','memoryUtilization','restartCount','processState','readiness','ready','description','purpose','documentPath','documentText']);
+const allowedFacts=new Set(['label','name','id','type','stale','online','profile','pid','ppid','cwd','systemdUnit','containerId','protocol','address','routeId','environment','managedDeploymentId','activeState','active','subState','state','repositoryPath','root','path','port','cpuPercent','rssBytes','elapsedSeconds','memoryUtilization','restartCount','processState','readiness','ready','description','purpose','documentPath']);
 const allowedRoute=new Set(['kind','privilege','effectiveIdentity','authority']);
 const safeRecord=(value:unknown,allowed:Set<string>)=>Object.fromEntries(Object.entries(value&&typeof value==='object'&&!Array.isArray(value)?value:{}).filter(([key,item])=>allowed.has(key)&&item!==undefined));
-const safeFacts=(value:Record<string,unknown>)=>redactFacts({...safeRecord(value,allowedFacts),metadata:safeRecord(value.metadata,allowedFacts)}) as Record<string,unknown>;
+export const safeWorldFacts=(value:Record<string,unknown>)=>redactFacts({...safeRecord(value,allowedFacts),metadata:safeRecord(value.metadata,allowedFacts)}) as Record<string,unknown>;
+export const safeWorldRoute=(value:unknown)=>redactFacts(safeRecord(value,allowedRoute)) as Record<string,unknown>;
+export const safeStoredObservationFacts=(kind:string,value:Record<string,unknown>)=>kind==='relationship'
+  ?redactFacts(safeRecord(value,new Set(['source','target','type','stale']))) as Record<string,unknown>
+  :safeWorldFacts(value);
+export const safeAdapterInput=(input:InterpreterInput):InterpreterInput=>({
+  ...input,
+  label:redactSensitiveText(input.label).slice(0,500),
+  attributes:safeWorldFacts(input.attributes),
+});
 const sensitivity = (value: unknown): AtlasObservation["sensitivity"] =>
   JSON.stringify(value, (key, item) =>
     sensitiveKey.test(key) ? "[sensitive]" : item,
@@ -45,7 +55,7 @@ export function adaptWorldObservations(
     });
   for (const node of selectedNodes) {
     const raw = { label: node.label ?? node.name ?? node.id, ...node },
-      facts = safeFacts(raw);
+      facts = safeWorldFacts(raw);
     observations.push({
       id: `observation:${stable(`${contextId}:node:${node.id}`)}`,
       contextId,
@@ -54,7 +64,7 @@ export function adaptWorldObservations(
       sourceId: String(node.id),
       observedAt: String(node.observedAt ?? at),
       scanId: node.scanId,
-      route: redactFacts(safeRecord(node.route,allowedRoute)) as Record<string, unknown>,
+      route: safeWorldRoute(node.route),
       facts,
       sensitivity: sensitivity(raw),
     });
@@ -70,7 +80,7 @@ export function adaptWorldObservations(
       sourceId: String(edge.id),
       observedAt: String(edge.observedAt ?? at),
       scanId: edge.scanId,
-      route: redactFacts(safeRecord(edge.route,allowedRoute)) as Record<string, unknown>,
+      route: safeWorldRoute(edge.route),
       facts,
       sensitivity: sensitivity(raw),
     });

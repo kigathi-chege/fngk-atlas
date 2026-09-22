@@ -4,13 +4,12 @@ import {
   type AtlasObservation,
   type InterpreterInput,
   type InterpreterManifest,
-  type InterpreterOutput,
 } from "./types.js";
 import { runInterpreter } from "./interpreter.js";
 import { projectWorld } from "./projector.js";
 import { WorldStore, type WorldSample } from "./store.js";
 import type { RegisteredInterpreter } from "./registry.js";
-import { adaptWorldObservations } from "./observation-adapters.js";
+import { adaptWorldObservations,safeAdapterInput } from "./observation-adapters.js";
 import { runBuiltInSpecialists } from "./specialists.js";
 import { CORE_PREDICATES } from "./relationships.js";
 import { normalizeObservation } from "./normalization.js";
@@ -21,6 +20,7 @@ import {
   localDocumentationManifest,
 } from "./enrichment.js";
 import type { LocalDocumentation } from "./types.js";
+import {summarizeLocalDocument} from './document-summary.js';
 import {applyCorrections,correctionId,validateCorrection,type AtlasCorrectionKind} from './corrections.js';
 
 const resolverManifest: InterpreterManifest = {
@@ -102,20 +102,13 @@ export class WorldService {
       );
     this.store.register(resolverManifest);
     this.store.sync(contextId, resolverManifest, semantic);
-    const documents: LocalDocumentation[] = inputs
-      .filter(
-        (input) =>
-          typeof input.attributes.documentPath === "string" &&
-          typeof input.attributes.documentText === "string" &&
-          typeof input.attributes.repositoryPath === "string",
-      )
-      .map((input) => ({
-        path: String(input.attributes.documentPath),
-        repositoryPath: String(input.attributes.repositoryPath),
-        sourceInputId: input.id,
-        observationId: input.id,
-        text: String(input.attributes.documentText),
-      }));
+    const rawById=new Map(nodes.map(node=>[String(node.id),node])),sourceByObservation=new Map(observations.map(value=>[value.id,value.sourceId]));
+    const documents: LocalDocumentation[] = inputs.flatMap(input=>{
+      const documentPath=input.attributes.documentPath,repositoryPath=input.attributes.repositoryPath,raw=rawById.get(sourceByObservation.get(input.id)??'');
+      if(typeof documentPath!=='string'||typeof repositoryPath!=='string'||typeof raw?.documentText!=='string')return [];
+      const text=summarizeLocalDocument(documentPath,raw.documentText);
+      return text?[{path:documentPath,repositoryPath,sourceInputId:input.id,observationId:input.id,text}]:[];
+    });
     const enriched = semantic.entities
       .filter((entity) => entity.kind === "workload")
       .map((entity) =>
@@ -199,10 +192,10 @@ export class WorldService {
   ingest(
     manifest: InterpreterManifest,
     inputs: InterpreterInput[],
-    output: InterpreterOutput,
   ) {
+    const safeInputs=inputs.map(safeAdapterInput),output=runInterpreter(manifest,safeInputs);
     this.store.putObservations(
-      inputs.map((input) => ({
+      safeInputs.map((input) => ({
         id: input.id,
         contextId: input.contextId,
         kind: input.kind,
@@ -214,7 +207,7 @@ export class WorldService {
       })),
     );
     this.store.register(manifest);
-    for (const contextId of new Set(inputs.map((value) => value.contextId)))
+    for (const contextId of new Set(safeInputs.map((value) => value.contextId)))
       this.store.sync(contextId, manifest, {
         entities: output.entities.filter(
           (value) => value.contextId === contextId,
