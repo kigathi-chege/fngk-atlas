@@ -36,7 +36,7 @@ describe("runtime census", () => {
             ),
             exitCode: 0,
           };
-        if (command.startsWith("ss "))
+        if (command.includes("ss -H -lntup"))
           return {
             output: Buffer.from(
               'tcp LISTEN 0 511 127.0.0.1:4317 0.0.0.0:* users:(("node",pid=12,fd=20))\n',

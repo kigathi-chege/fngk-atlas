@@ -88,6 +88,10 @@ export class FngkProcessClient {
     if(value.protocolVersion!==FILES_PROTOCOL)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported Files protocol.');return value;
   }
 
+  async #publish(action:'publish'|'unpublish',port:number,options:{profile?:string;signal?:AbortSignal}={}){const args=[action,String(port),'--json'];if(options.profile)args.push('--profile',options.profile);let value:any;try{value=JSON.parse((await this.#run(args,options.signal)).trim())}catch(error){if(error instanceof FngkProcessError)throw error;throw new FngkProcessError('publish_protocol_invalid','FNGK returned malformed publish output.')}if(value.protocolVersion!=='fngk.publish.v1'||value.type!==`${action}ed`)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported publish protocol.');return value}
+  async publishPort(port:number,options:{profile?:string;signal?:AbortSignal}={}){return this.#publish('publish',port,options)}
+  async unpublishPort(port:number,options:{profile?:string;signal?:AbortSignal}={}){return this.#publish('unpublish',port,options)}
+
   async sessionAction(sessionId:string,action:'rename'|'restart'|'stop'|'archive'|'restore',options:{profile?:string;title?:string;confirm?:boolean;signal?:AbortSignal}={}){
     const args=['sessions',sessionId,action,'--json'];if(options.profile)args.push('--profile',options.profile);if(options.title)args.push('--title',options.title);if(options.confirm)args.push('--yes');
     const value=JSON.parse((await this.#run(args,options.signal)).trim());if(value.protocolVersion!==SESSION_PROTOCOL)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported terminal session protocol.');return value;

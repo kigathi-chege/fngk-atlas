@@ -14,7 +14,7 @@ for command_name in docker curl jq node npm git tar go openssl; do command -v "$
 
 free_port() { node -e "const s=require('node:net').createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})"; }
 free_postgres_adapter_port() { node -e "const net=require('node:net');let port=5432;const probe=()=>{if(port>5440)process.exit(1);const candidate=port++,server=net.createServer();server.once('error',probe);server.listen(candidate,'127.0.0.1',()=>server.close(()=>console.log(candidate))) };probe()"; }
-live_postgres_port="$(free_postgres_adapter_port)"; live_redis_port="$(free_port)"; signal_port="$(free_port)"; atlas_port="$(free_port)"
+live_postgres_port="$(free_postgres_adapter_port)"; live_redis_port="$(free_port)"; signal_port="$(free_port)"; atlas_port="$(free_port)"; share_port="$(free_port)"; untouched_port="$(free_port)"
 run_root="$(mktemp -d /tmp/fngk-atlas-live.XXXXXX)"
 project="fngk-atlas-live-$(basename "$run_root" | tr '[:upper:].' '[:lower:]-')"
 evidence_dir="${ATLAS_LIVE_EVIDENCE_DIR:-$atlas_root/output/live-acceptance/$(date -u +%Y%m%dT%H%M%SZ)}"
@@ -49,6 +49,11 @@ if [[ "$service_host" != 127.0.0.1 ]]; then
   node -e 'const net=require("node:net"),port=Number(process.argv[1]),host=process.argv[2];net.createServer(local=>{const remote=net.connect(port,host);local.pipe(remote);remote.pipe(local);local.on("error",()=>remote.destroy());remote.on("error",()=>local.destroy())}).listen(port,"127.0.0.1")' "$live_postgres_port" "$service_host" >"$run_root/postgres-proxy.log" 2>&1 & postgres_proxy_pid=$!
   wait_tcp 127.0.0.1 "$live_postgres_port"
 fi
+
+echo "[live] starting two independent HTTP listeners for generic port sharing"
+node -e 'const http=require("node:http"),a=Number(process.argv[1]),b=Number(process.argv[2]);http.createServer((_q,r)=>r.end("atlas-share")).listen(a,"127.0.0.1");http.createServer((_q,r)=>r.end("atlas-untouched")).listen(b,"127.0.0.1")' "$share_port" "$untouched_port" >"$run_root/http-fixtures.log" 2>&1 & fixture_pid=$!
+wait_http "http://127.0.0.1:$share_port"
+wait_http "http://127.0.0.1:$untouched_port"
 
 echo "[live] building exact-head FNGK CLI"
 docker build --progress=plain --target cli-build -t "$cli_image" "$signal_root" >"$run_root/cli-build.log" 2>&1
@@ -109,7 +114,7 @@ echo "[live] building and starting Atlas"
 FNGK_BIN="$run_root/bin/fngk" SIGNAL_CONFIG_PATH="$config_path" ATLAS_DB="$run_root/atlas.db" ATLAS_HOST=127.0.0.1 ATLAS_PORT="$atlas_port" node "$atlas_root/dist/server/index.js" >"$run_root/atlas.log" 2>&1 & atlas_pid=$!
 wait_http "http://127.0.0.1:$atlas_port/api/health"
 
-LIVE_ATLAS_URL="http://127.0.0.1:$atlas_port" LIVE_FIXTURE_ROOT="$run_root/fixture" LIVE_POSTGRES_PORT="$live_postgres_port" node --import tsx "$atlas_root/test/integration/live-acceptance.ts" >"$evidence_dir/acceptance.json"
+LIVE_ATLAS_URL="http://127.0.0.1:$atlas_port" LIVE_FIXTURE_ROOT="$run_root/fixture" LIVE_POSTGRES_PORT="$live_postgres_port" LIVE_SHARE_PORT="$share_port" LIVE_UNTOUCHED_PORT="$untouched_port" node --import tsx "$atlas_root/test/integration/live-acceptance.ts" >"$evidence_dir/acceptance.json"
 echo "[live] proving Device disconnect and reconnect staleness"
 kill "$daemon_pid"
 wait "$daemon_pid" 2>/dev/null || true

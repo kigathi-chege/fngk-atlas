@@ -140,7 +140,7 @@ export class RuntimeDiscovery {
         });
       } catch {}
     }
-    for (const line of (await attempt(`ss -H -lntup`)).split(/\r?\n/)) {
+    for (const line of (await attempt(`if command -v ss >/dev/null 2>&1; then ss -H -lntup; elif command -v lsof >/dev/null 2>&1; then lsof -nP -iTCP -sTCP:LISTEN -Fpcn 2>/dev/null | awk '/^p/{pid=substr($0,2)} /^n/{printf "tcp LISTEN 0 0 %s users:((pid=%s))\\n",substr($0,2),pid}'; fi`)).split(/\r?\n/)) {
       const fields = line.trim().split(/\s+/);
       if (fields.length < 5) continue;
       const address = fields[4];

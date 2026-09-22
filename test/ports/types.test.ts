@@ -1,0 +1,3 @@
+import {describe,expect,it} from 'vitest';
+import {candidateId,exposureFor} from '../../src/ports/types.js';
+describe('port sharing contracts',()=>{it('keeps candidate identity stable and process-specific',()=>{expect(candidateId('device:a','127.0.0.1',8000,4)).toBe(candidateId('device:a','127.0.0.1',8000,4));expect(candidateId('device:a','127.0.0.1',8000,4)).not.toBe(candidateId('device:a','127.0.0.1',8000,5))});it('classifies listener exposure',()=>{expect(exposureFor('127.0.0.1')).toBe('loopback');expect(exposureFor('192.168.1.4')).toBe('lan');expect(exposureFor('0.0.0.0')).toBe('all-interfaces');expect(exposureFor('8.8.8.8')).toBe('unknown')})});

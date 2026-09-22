@@ -9,6 +9,7 @@
   import {chooseContext} from './lib/workbench-state.js';
   import {loadContextCatalog} from './lib/context-catalog.js';
   import {WorkspaceRootsStore} from './lib/workspace-roots.js';
+  import PanelBottomOpen from '@lucide/svelte/icons/panel-bottom-open';
   let persisted:any={};try{persisted=JSON.parse(localStorage.getItem('atlas.state.v1')??'{}');}catch{}
   let persistedRoots:unknown=[];try{persistedRoots=JSON.parse(localStorage.getItem('atlas.workspace-roots.v1')??'[]')}catch{}
   const state=createWorkbenchState(persisted),roots=new WorkspaceRootsStore(persistedRoots);let snapshot=state.snapshot(),ready=false;
@@ -16,4 +17,4 @@
 </script>
 
 <svelte:head><meta name="description" content="FNGK-native systems and code atlas"></svelte:head>
-<div class="atlas-shell"><AtlasMenu {state}/>{#if ready}<ActivityRail {state}/><Workbench {state} {roots}/><PinnedRootsRail {state} {roots}/>{:else}<main class="atlas-boot" aria-label="Starting Atlas">Loading Device context…</main>{/if}<footer><span class:ok={snapshot.connection.phase==='connected'}>◆</span><b>{snapshot.connection.phase==='connected'?'FNGK connected':snapshot.connection.phase==='checking'?'Checking FNGK…':'FNGK disconnected'}</b><span>{snapshot.contextId}</span><span title={snapshot.connection.message}>{snapshot.connection.message}</span><span class="footer-route">effective route · no credentials stored</span><button title="Previous selection" onclick={()=>state.back()}>←</button><button title="Next selection" onclick={()=>state.forward()}>→</button></footer></div><GlobalContextMenu {state}/>
+<div class="atlas-shell"><AtlasMenu {state}/>{#if ready}<ActivityRail {state}/><Workbench {state} {roots}/><PinnedRootsRail {state} {roots}/>{:else}<main class="atlas-boot" aria-label="Starting Atlas">Loading Device context…</main>{/if}<footer><span class:ok={snapshot.connection.phase==='connected'}>◆</span><b>{snapshot.connection.phase==='connected'?'FNGK connected':snapshot.connection.phase==='checking'?'Checking FNGK…':'FNGK disconnected'}</b><span>{snapshot.contextId}</span><span title={snapshot.connection.message}>{snapshot.connection.message}</span><span class="footer-route">effective route · no credentials stored</span><button title="Open operations dock" aria-label="Open operations dock" onclick={()=>window.dispatchEvent(new Event('atlas:open-operations'))}><PanelBottomOpen size={13}/></button><button title="Previous selection" onclick={()=>state.back()}>←</button><button title="Next selection" onclick={()=>state.forward()}>→</button></footer></div><GlobalContextMenu {state}/>

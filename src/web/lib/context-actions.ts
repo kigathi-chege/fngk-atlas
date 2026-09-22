@@ -9,6 +9,8 @@ export const contextActions:ContextAction[]=[
  {id:'architecture',label:'Open architecture',group:'workflow',placement:'workspace',available:()=>true,run:()=>emit('atlas:graph-refresh')},
  {id:'database',label:'Open databases',group:'workflow',placement:'workspace',available:()=>true,run:s=>emit('atlas:open-database',{contextId:s.contextId})},
  {id:'terminal',label:'Open terminal',group:'observe',placement:'operations',available:s=>s.contextId.startsWith('device:'),run:s=>emit('atlas:open-terminal',{contextId:s.contextId})},
+ {id:'ports',label:'Share HTTP ports',group:'observe',placement:'workspace',available:()=>true,run:s=>emit('atlas:open-ports',{contextId:s.contextId})},
+ {id:'handoff',label:'Install FNGK head',group:'workflow',placement:'workspace',available:s=>s.contextId.startsWith('device:'),run:s=>emit('atlas:open-fngk-handoff',{contextId:s.contextId})},
  {id:'live',label:'Start dev run',group:'workflow',placement:'workspace',available:s=>s.contextId.startsWith('device:'),run:s=>emit('atlas:open-live-project',{contextId:s.contextId,repositoryPath:repository(s)})},
  {id:'deploy',label:'Open deployment workbench',group:'workflow',placement:'workspace',available:s=>s.contextId.startsWith('device:'),run:s=>emit('atlas:open-deployment',{contextId:s.contextId,repositoryPath:repository(s)})},
 ];

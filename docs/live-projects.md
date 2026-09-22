@@ -2,6 +2,8 @@
 
 Atlas Live Project starts code on the selected FNGK Device and keeps the execution, route, diagnostics, and code evidence connected. It does not run a remote project through the Atlas host shell.
 
+The repository field accepts an absolute path or can be filled from the existing Filesystem panel with its folder button. While the picker is active, selecting a directory returns it to Live Project; no second filesystem implementation is used.
+
 ## Required path
 
 The selected profile must expose an online Device with terminal support, and both Signal and the installed FNGK CLI must include `fngk.publish.v1`. Atlas opens a dedicated terminal, changes to the absolute repository path, starts the confirmed command, and asks the Device's own daemon to publish the selected port. Signal returns the effective URL, including the development port when applicable.

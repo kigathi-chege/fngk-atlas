@@ -1,0 +1,9 @@
+import {posixQuote} from '../transports/posix.js';import type {HeadArtifact} from './artifacts.js';
+export function remoteInstallCommand(input:{artifact:HeadArtifact;baseUrl:string;profile:string;systemScope?:boolean}){
+  const {artifact}=input,url=`${input.baseUrl.replace(/\/$/,'')}/${artifact.archiveName}`,profile=input.profile||'default';
+  const install=input.systemScope
+    ?`[ ! -e /usr/local/bin/fngk ] || sudo cp /usr/local/bin/fngk /usr/local/bin/fngk.atlas-backup; sudo install -m 0755 "$tmp/fngk" /usr/local/bin/fngk; sudo /usr/local/bin/fngk install --system --run-as "$(id -un)" --profile ${posixQuote(profile)}; installed=/usr/local/bin/fngk`
+    :`mkdir -p "$HOME/.local/bin"; [ ! -e "$HOME/.local/bin/fngk" ] || cp "$HOME/.local/bin/fngk" "$HOME/.local/bin/fngk.atlas-backup"; install -m 0755 "$tmp/fngk" "$HOME/.local/bin/fngk"; "$HOME/.local/bin/fngk" install --profile ${posixQuote(profile)}; installed="$HOME/.local/bin/fngk"`;
+  return `set -eu; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT; curl -f --max-redirs 0 --max-time 120 ${posixQuote(url)} -o "$tmp/${artifact.archiveName}"; printf '%s  %s\n' ${posixQuote(artifact.checksum)} ${posixQuote(artifact.archiveName)} > "$tmp/SHA256SUMS"; (cd "$tmp" && sha256sum -c SHA256SUMS); tar -xzf "$tmp/${artifact.archiveName}" -C "$tmp" fngk; ${install}; test "$(sha256sum "$installed" | awk '{print $1}')" = "$(sha256sum "$tmp/fngk" | awk '{print $1}')"; "$installed" status --json --profile ${posixQuote(profile)} >/dev/null; printf '__ATLAS_FNGK_HEAD__ commit=%s checksum=%s\n' ${posixQuote(artifact.commit)} ${posixQuote(artifact.checksum)}`
+}
+export function rollbackCommand(systemScope=false){return systemScope?`test -x /usr/local/bin/fngk.atlas-backup && sudo install -m 0755 /usr/local/bin/fngk.atlas-backup /usr/local/bin/fngk`:`test -x "$HOME/.local/bin/fngk.atlas-backup" && install -m 0755 "$HOME/.local/bin/fngk.atlas-backup" "$HOME/.local/bin/fngk"`}

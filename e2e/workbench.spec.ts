@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.setTimeout(45_000);
-const openWorkbench=async(page:any)=>{await page.goto('/');await expect(page.locator('.dv-dockview')).toBeVisible();await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('atlas.workbench.v6')??'null')?.version)).toBe(6)};
+const openWorkbench=async(page:any)=>{await page.goto('/');await expect(page.locator('.dv-dockview')).toBeVisible();await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('atlas.workbench.v7')??'null')?.version)).toBe(7)};
 
 test('builds the first Device Observatory from a fresh database without a manual scan',async({page})=>{
   await page.goto('/');
@@ -107,6 +107,7 @@ test("uses only canonical observatory APIs", async ({ page }) => {
   await expect(page.getByText("main", { exact: true }).first()).toBeVisible();
   await page.getByLabel("Search selected context").fill("main");
   await expect(page.locator(".search-results").getByText("main", { exact: true })).toBeVisible();
+  await page.locator('.context-sidebar').getByRole('button',{name:'Evidence'}).click();
   await page.getByRole("tab", { name: "Functions & coverage" }).click();
   await expect(page.locator(".metrics-table").getByText("main", { exact: true })).toBeVisible();
   expect(forbidden).toEqual([]);
@@ -175,9 +176,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
   await expect(
     page.getByText("Device Atlas", { exact: true }).first(),
   ).toBeVisible();
-  await expect(
-    page.getByText("Functions & coverage", { exact: true }).first(),
-  ).toBeVisible();
+  await expect(page.getByText("Functions & coverage", { exact: true })).toHaveCount(0);
   await expect(
     page.getByText("Filesystem", { exact: true }).first(),
   ).toBeVisible();
@@ -303,6 +302,10 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
   await expect(
     visibleTerminal.getByRole("button", { name: "New terminal session" }),
   ).toBeVisible();
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event("atlas:focus-metrics"));
+    window.dispatchEvent(new Event("atlas:open-operations"));
+  });
   expect(
     await page.evaluate(() => {
       const group = (id: string) =>
@@ -332,6 +335,11 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
     .poll(() => terminalSockets.filter((url) => url.includes("new=1")).length)
     .toBe(1);
   await expect(page.locator(".terminal-panel")).toHaveCount(1);
+  await page.getByRole('button',{name:'Minimize Operations dock'}).click();
+  await expect(page.locator('.atlas-tab[data-panel-id="atlas.operations"]')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Restore Terminal'})).toBeVisible();
+  await page.getByRole('button',{name:'Restore Terminal'}).click();
+  await expect(page.locator('.atlas-tab[data-panel-id="atlas.operations"]')).toBeVisible();
   const separators = page.locator(".dv-sash");
   expect(await separators.count()).toBeGreaterThan(1);
   await page.reload();
@@ -520,13 +528,16 @@ test("opens Device database and live-project workbenches without starting privil
     .getByRole("button", { name: /kigathi/ })
     .click();
   const sidebar = page.locator(".context-sidebar");
-  await sidebar.getByRole("button", { name: "More actions" }).click();
-  await sidebar.getByRole("button", { name: "Dev run" }).click();
+  await expect(sidebar.getByText('Choose the project Atlas should inspect',{exact:false})).toBeVisible();
+  await sidebar.getByRole('button',{name:'Choose code mapping root'}).click();
+  await expect(page.locator('.directory-picker')).toBeVisible();
+  await page.locator('.directory-picker').getByRole('button',{name:/^Use /}).click();
+  await expect(page.locator('.directory-picker')).toHaveCount(0);
+  await sidebar.getByRole("button", { name: "Run" }).click();
   await expect(
     page.getByRole("heading", { name: "Run on selected Device" }),
   ).toBeVisible();
-  await sidebar.getByRole("button", { name: "More actions" }).click();
-  await sidebar.getByRole("button", { name: "Databases" }).click();
+  await sidebar.getByRole("button", { name: "Data" }).click();
   await expect(page.locator(".native-database")).toBeVisible();
   await expect(page.getByText("Device PostgreSQL resources")).toBeVisible();
   await expect(page.getByText("DbGate")).toHaveCount(0);
@@ -791,11 +802,11 @@ test("discards the legacy workbench schema and restores a full-height six-pixel 
       center: group(".atlas-workspace-anchor"),
       filesystem: group(".tree-explorer"),
       legacy: localStorage.getItem("atlas.workbench.v2"),
-      saved: JSON.parse(localStorage.getItem("atlas.workbench.v6") ?? "null"),
+      saved: JSON.parse(localStorage.getItem("atlas.workbench.v7") ?? "null"),
     };
   });
   expect(geometry.legacy).toBeNull();
-  expect(geometry.saved?.version).toBe(6);
+  expect(geometry.saved?.version).toBe(7);
   expect(geometry.navigator!.left - geometry.workbench!.left).toBe(6);
   expect(geometry.workbench!.bottom - geometry.navigator!.bottom).toBe(6);
   expect(geometry.center!.left - geometry.navigator!.right).toBe(6);
@@ -818,7 +829,7 @@ test("keeps sidebar widths and the center workspace when central tabs close", as
       ?.closest(".dv-groupview")
       ?.getBoundingClientRect().width,
   }));
-  for (const id of ["atlas.observatory", "atlas.metrics", "atlas.activity"])
+  for (const id of ["atlas.observatory"])
     await page
       .locator(`.atlas-tab[data-panel-id="${id}"] .atlas-tab-minimize`)
       .click();
@@ -867,4 +878,29 @@ test("keeps sidebar widths and the center workspace when central tabs close", as
   });
   expect(Math.abs(restored.width! - widths.right!)).toBeLessThanOrEqual(1);
   expect(restored.left).toBeGreaterThan(restored.centerRight!);
+});
+
+test('keeps Operations closed until requested and manages a verified HTTP share',async({page})=>{
+  const candidate={id:'http-8000',contextId:'local',address:'127.0.0.1',port:8000,protocol:'http',state:'listening',exposure:'loopback',probe:'http',probeStatus:200,probeTitle:'Fixture',probePath:'/',observedAt:new Date().toISOString(),stale:false};
+  const unverified={...candidate,id:'tcp-9000',port:9000,probe:'tcp',probeStatus:undefined,probeTitle:undefined};
+  let published:any[]=[];
+  await page.route('**/api/ports?**',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({contextId:'local',candidates:[],published})}));
+  await page.route('**/api/ports/scan',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({contextId:'local',candidates:[candidate,unverified],published,errors:[]})}));
+  await page.route('**/api/ports/http-8000/publish',route=>{const value={id:'share-1',candidateId:candidate.id,contextId:'local',port:8000,connectionId:'connection-1',hostname:'fixture.hkmn.test',url:'https://fixture.hkmn.test/',publishedAt:new Date().toISOString(),status:'published'};published=[value];return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify(value)})});
+  await page.route('**/api/ports/http-8000/stop',route=>{published=published.map(value=>({...value,status:'stopped'}));return route.fulfill({contentType:'application/json',body:JSON.stringify(published[0])})});
+  await openWorkbench(page);
+  await expect(page.locator('.atlas-tab[data-panel-id="atlas.operations"]')).toHaveCount(0);
+  await page.locator('.context-sidebar').getByRole('button',{name:'Ports'}).click();
+  await expect(page.getByRole('tab',{name:'HTTP ports'})).toBeVisible();
+  await expect(page.locator('.atlas-tab[data-panel-id="atlas.operations"]')).toHaveCount(0);
+  expect(await page.evaluate(()=>document.querySelector('.atlas-tab[data-panel-id="atlas.ports"]')?.closest('.dv-groupview')===document.querySelector('.atlas-tab[data-panel-id="atlas.observatory"]')?.closest('.dv-groupview'))).toBe(true);
+  await page.getByTitle('Scan listening HTTP ports').click();
+  await expect(page.getByText('Fixture',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Publish port 9000'}).click();
+  await expect(page.getByText(/Port 9000 is not publishable yet/)).toBeVisible();
+  await page.getByTitle('Publish through Signal/HKMN').click();
+  await page.getByRole('button',{name:'Publish',exact:true}).click();
+  await expect(page.getByText('https://fixture.hkmn.test/',{exact:true})).toBeVisible();
+  await page.getByTitle('Stop public route').click();
+  await expect(page.getByText('Public route stopped')).toBeVisible();
 });

@@ -5,7 +5,8 @@ import WebSocket from 'ws';
 const atlas = process.env.LIVE_ATLAS_URL;
 const fixtureRoot = process.env.LIVE_FIXTURE_ROOT;
 const postgresPort=Number(process.env.LIVE_POSTGRES_PORT);
-if (!atlas || !fixtureRoot || !postgresPort) throw new Error('LIVE_ATLAS_URL, LIVE_FIXTURE_ROOT, and LIVE_POSTGRES_PORT are required');
+const sharePort=Number(process.env.LIVE_SHARE_PORT),untouchedPort=Number(process.env.LIVE_UNTOUCHED_PORT);
+if (!atlas || !fixtureRoot || !postgresPort || !sharePort || !untouchedPort) throw new Error('LIVE_ATLAS_URL, LIVE_FIXTURE_ROOT, LIVE_POSTGRES_PORT, LIVE_SHARE_PORT, and LIVE_UNTOUCHED_PORT are required');
 const evidence: Record<string, unknown> = {};
 const check = (condition: unknown, message: string): asserts condition => { if (!condition) throw new Error(message); };
 async function api(path: string, init?: RequestInit) {
@@ -36,6 +37,20 @@ const device = namespace.body.devices.find((value: any) => value.online);
 check(device, 'no online disposable Device appeared in the namespace');
 const contextId = `device:${device.id}`, encodedContext = encodeURIComponent(contextId), encodedRoot = encodeURIComponent(fixtureRoot);
 evidence.namespace = { protocolVersion: namespace.body.protocolVersion, device: { id: device.id, name: device.name, online: device.online } };
+
+const portScan=await api('/api/ports/scan',{method:'POST',body:JSON.stringify({contextId})});
+const shareCandidate=portScan.body.candidates?.find((item:any)=>item.port===sharePort&&item.probe==='http'),untouchedCandidate=portScan.body.candidates?.find((item:any)=>item.port===untouchedPort&&item.probe==='http');
+check(portScan.response.ok&&shareCandidate&&untouchedCandidate,`generic port scan did not verify both HTTP fixtures: ${JSON.stringify(portScan.body)}`);
+const shared=await api(`/api/ports/${encodeURIComponent(shareCandidate.id)}/publish`,{method:'POST',body:JSON.stringify({confirm:true,expiresInMs:60_000})});
+check(shared.response.status===201&&shared.body.candidateId===shareCandidate.id&&shared.body.url,`generic HTTP fixture was not published: ${JSON.stringify(shared.body)}`);
+await waitForHttpText(shared.body.url,'atlas-share');
+const shares=await api(`/api/ports?contextId=${encodedContext}`);
+check(shares.body.published?.some((item:any)=>item.candidateId===shareCandidate.id&&item.status==='published'),'published fixture is missing from route state');
+check(!shares.body.published?.some((item:any)=>item.candidateId===untouchedCandidate.id&&item.status==='published'),'unselected HTTP fixture was published');
+const stoppedShare=await api(`/api/ports/${encodeURIComponent(shareCandidate.id)}/stop`,{method:'POST',body:JSON.stringify({confirm:true})});
+check(stoppedShare.response.ok&&stoppedShare.body.status==='stopped','generic public route did not stop');
+await waitForHttpText(`http://127.0.0.1:${sharePort}`,'atlas-share');await waitForHttpText(`http://127.0.0.1:${untouchedPort}`,'atlas-untouched');
+evidence.portSharing={publishedPort:sharePort,untouchedPort,publicUrl:shared.body.url,stoppedWithoutKillingSource:true};
 
 const root = await api(`/api/files?contextId=${encodedContext}&path=%2F&limit=25`);
 const rootRoutes = await api('/api/contexts/terminals');

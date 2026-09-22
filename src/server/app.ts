@@ -43,6 +43,9 @@ import {
 import { DeploymentService } from "../deployments/service.js";
 import { interpretDeploymentProject } from "../deployments/adapters.js";
 import { projectSoftwareFunctions } from "../world/software-projection.js";
+import { PortShareStore } from "../ports/store.js";
+import { PortSharingService } from "../ports/service.js";
+import { FngkHeadHandoffService } from "../fngk-head/handoff-service.js";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -203,6 +206,9 @@ export async function createApp(
         ? store.latestIndex(contextId)
         : activeIndex;
   const diagnostics = options.diagnosticRegistry ?? new DiagnosticRegistry();
+  const portStore = new PortShareStore(databaseFile);
+  const portSharing = new PortSharingService(portStore,fngk,{diagnostics,executorFor:(contextId)=>contexts.commandExecutor(contextId)});
+  const headHandoffs = new FngkHeadHandoffService({artifactRoot:process.env.FNGK_HEAD_OUTPUT??path.join(root,'output','fngk-head'),signalRoot:process.env.SIGNAL_SOURCE??path.resolve(root,'../signal'),ports:portSharing,executorFor:(contextId)=>contexts.commandExecutor(contextId),diagnostics});
   const liveProjects = new LiveProjectService(fngk, {
     diagnostics,
     commandExecutor: (contextId) => contexts.commandExecutor(contextId),
@@ -391,10 +397,13 @@ export async function createApp(
   await app.register(websocket);
   app.addHook("onClose", async () => {
     await liveProjects.close();
+    await headHandoffs.close();
+    portSharing.close();
     contexts.close();
     await worldRefreshTail.catch(() => {});
     worldStore.close();
     evidence.close();
+    portStore.close();
     store.close();
   });
 
@@ -1193,6 +1202,15 @@ export async function createApp(
       return reply.code(result.statusCode).send(result.body);
     }
   });
+  app.post("/api/ports/scan",async(request,reply)=>{const body=request.body as {contextId?:string};if(!body?.contextId)return reply.code(400).send({error:'context_required'});try{return await portSharing.scan(String(body.contextId),requestSignal(request,reply))}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.get("/api/ports",async(request,reply)=>{const contextId=String((request.query as {contextId?:string}).contextId??'');if(!contextId)return reply.code(400).send({error:'context_required'});return portSharing.list(contextId)});
+  app.post("/api/ports/:id/publish",async(request,reply)=>{const body=request.body as {confirm?:boolean;expiresInMs?:number};try{return reply.code(201).send(await portSharing.publish(decodeURIComponent((request.params as {id:string}).id),{confirm:body?.confirm,expiresInMs:body?.expiresInMs,signal:requestSignal(request,reply)}))}catch(error){const code=String((error as any)?.code??''),result=processError(error);return reply.code(code==='confirmation_required'?409:code==='candidate_not_found'?404:['candidate_stale','port_not_http','fngk_incompatible','publish_protocol_invalid'].includes(code)?409:result.statusCode).send({...result.body,error:code||result.body.error})}});
+  app.post("/api/ports/:id/stop",async(request,reply)=>{const body=request.body as {confirm?:boolean};try{return await portSharing.stop(decodeURIComponent((request.params as {id:string}).id),{confirm:body?.confirm,signal:requestSignal(request,reply)})}catch(error){const code=String((error as any)?.code??''),result=processError(error);return reply.code(code==='confirmation_required'?409:result.statusCode).send({...result.body,error:code||result.body.error})}});
+  app.post('/api/fngk-head/handoff/prepare',async(request,reply)=>{const body=request.body as {architecture?:string;platform?:string};try{return reply.code(201).send(await headHandoffs.prepare(body?.platform,body?.architecture))}catch(error){const code=String((error as any)?.code??'handoff_prepare_failed');return reply.code(422).send({error:code,message:(error as Error).message})}});
+  app.post('/api/fngk-head/handoff/install',async(request,reply)=>{const body=request.body as {handoffId?:string;targetContextId?:string;confirm?:boolean;profile?:string;systemScope?:boolean};if(!body?.handoffId||!body.targetContextId)return reply.code(400).send({error:'invalid_handoff_install'});try{return await headHandoffs.install(body.handoffId,body.targetContextId,{confirm:body.confirm,profile:body.profile,systemScope:body.systemScope})}catch(error){const code=String((error as any)?.code??'handoff_install_failed');return reply.code(code==='confirmation_required'?409:422).send({error:code,message:(error as Error).message,diagnosticSessionId:(error as any)?.diagnosticSessionId,handoff:(error as any)?.handoff})}});
+  app.get('/api/fngk-head/handoff/:id',async(request,reply)=>headHandoffs.get(decodeURIComponent((request.params as {id:string}).id))??reply.code(404).send({error:'handoff_not_found'}));
+  app.delete('/api/fngk-head/handoff/:id',async(request,reply)=>{if((request.body as any)?.confirm!==true)return reply.code(409).send({error:'confirmation_required'});return{stopped:await headHandoffs.stop(decodeURIComponent((request.params as {id:string}).id))}});
+
   app.get("/api/live-projects", async () => ({ items: liveProjects.list() }));
   app.post("/api/live-projects", async (request, reply) => {
     const body = request.body as {
