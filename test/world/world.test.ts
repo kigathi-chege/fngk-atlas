@@ -35,6 +35,11 @@ describe("semantic Device atlas", () => {
     controller.abort();
     await expect(pending).rejects.toThrow('cancelled');
   });
+  it('terminates a stalled refresh worker at its deadline',async()=>{
+    const controller=new AbortController(),pending=backgroundRefresh({databaseFile:':memory:',contextId:'local',nodes:[],edges:[],extensions:[]},{workerUrl:new URL('../fixtures/refresh-hang.mjs',import.meta.url),signal:controller.signal,timeoutMs:60});
+    try{await expect(Promise.race([pending,new Promise((_resolve,reject)=>setTimeout(()=>reject(new Error('deadline was not enforced')),300))])).rejects.toThrow('deadline exceeded')}
+    finally{controller.abort();await pending.catch(()=>{})}
+  });
   it('quarantines malformed extension output while committing a complete core world',()=>{
     const store=new WorldStore(':memory:'),broken={...interpreterFixture,id:'test.malformed',rules:[{id:'invalid',when:{},emit:{kind:'undeclared',explanation:'Invalid output kind.'}}]},world=new WorldService(store,[{manifest:broken,trusted:false,source:'development'}]);
     world.refresh('local',[{id:'repo',type:'repository',label:'web',path:'/srv/web',repositoryPath:'/srv/web'},{id:'process',type:'process',label:'node',metadata:{cwd:'/srv/web',processState:'S'}}],[],{name:'Device',online:true});
@@ -46,13 +51,15 @@ describe("semantic Device atlas", () => {
   });
   it('bounds a 20,000-node source fixture to a compact home and retained observation budget',()=>{
     const store=new WorldStore(':memory:'),world=new WorldService(store),nodes=[
+      ...Array.from({length:20_000},(_,index)=>({id:`file:${index}`,type:'file',label:`file-${index}`,path:`/srv/web/file-${index}.ts`,repositoryPath:'/srv/web'})),
       {id:'repo',type:'repository',label:'web',path:'/srv/web',repositoryPath:'/srv/web'},
       {id:'process',type:'process',label:'node',metadata:{cwd:'/srv/web',processState:'S'}},
-      ...Array.from({length:20_000},(_,index)=>({id:`file:${index}`,type:'file',label:`file-${index}`,path:`/srv/web/file-${index}.ts`,repositoryPath:'/srv/web'})),
     ];
-    world.refresh('local',nodes,[],{name:'Device',online:true});
+    world.refresh('local',nodes,[{id:'link',type:'loads',source:'process',target:'repo'}],{name:'Device',online:true});
     const projection=world.projection('local',{lens:'overview',budget:100});
     expect(store.observations('local').length).toBeLessThanOrEqual(10_000);
+    const retained=new Set(store.observations('local').map(item=>item.sourceId));
+    for(const id of ['repo','process','link'])expect(retained.has(id),`${id} should survive the observation budget`).toBe(true);
     expect(store.entities('local').length).toBeLessThan(250);
     expect(projection.nodes.length).toBeLessThanOrEqual(100);
     expect(projection.observatory!.regions.flatMap(region=>region.items).length).toBeLessThanOrEqual(24);
@@ -304,6 +311,18 @@ describe("semantic Device atlas", () => {
     expect(JSON.stringify(observation.facts)).not.toContain("secret");
     expect(JSON.stringify(observation.facts)).not.toContain("hidden");
     expect(observation.sensitivity).toBe("sensitive-reference");
+  });
+  it('persists only allowed operational facts, never arbitrary command or metadata secrets',()=>{
+    const store=new WorldStore(':memory:'),world=new WorldService(store);
+    world.refresh('local',[{id:'process:secret',type:'process',label:'server',argv:['node','--api-key=fixture-secret'],documentText:'API_KEY=doc-secret\n{"apiKey":"json-secret"}',metadata:{command:'node --api-key=fixture-secret',accessKey:'fixture-secret',cwd:'/srv/web',pid:42,processState:'S'}}],[],{name:'Device',online:true});
+    const retained=JSON.stringify(store.observations('local'));
+    expect(retained).not.toContain('fixture-secret');
+    expect(retained).not.toContain('doc-secret');
+    expect(retained).not.toContain('json-secret');
+    expect(retained).not.toContain('argv');
+    expect(retained).not.toContain('accessKey');
+    expect(store.observations('local').find(item=>item.sourceId==='process:secret')).toMatchObject({sensitivity:'sensitive-reference',facts:{metadata:{cwd:'/srv/web',pid:42,processState:'S'}}});
+    store.close();
   });
   it("validates and deterministically executes data-only interpreter specifications", () => {
     expect(validateInterpreterManifest(interpreterFixture)).toMatchObject({

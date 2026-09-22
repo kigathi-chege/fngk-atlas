@@ -1686,13 +1686,14 @@ export async function createApp(
       contextId = String(query.contextId ?? "");
     if (!contextId) return reply.code(400).send({ error: "context_required" });
     try {
-      return world.projection(contextId, {
+      const projection=world.projection(contextId, {
         rootId: query.rootId,
         lens: query.lens ?? "overview",
         level: Number(query.level) || 0,
         budget: Math.min(500, Math.max(1, Number(query.budget) || 100)),
         cursor: query.cursor,
       });
+      return {...projection,initialized:Boolean(worldStore.lastGoodAt(contextId)),lastGoodAt:worldStore.lastGoodAt(contextId)??null};
     } catch (error) {
       const result = processError(error);
       return reply.code(result.statusCode).send(result.body);

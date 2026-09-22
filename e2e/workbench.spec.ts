@@ -3,6 +3,15 @@ import { expect, test } from "@playwright/test";
 test.setTimeout(45_000);
 const openWorkbench=async(page:any)=>{await page.goto('/');await expect(page.locator('.dv-dockview')).toBeVisible();await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('atlas.workbench.v6')??'null')?.version)).toBe(6)};
 
+test('builds the first Device Observatory from a fresh database without a manual scan',async({page})=>{
+  await page.goto('/');
+  await expect(page.locator('[aria-label="Machine Observatory"] .observatory-identity h2')).toBeVisible();
+  const contextId=await page.evaluate(()=>new URL(location.href).searchParams.get('contextId')??'local');
+  const response=await page.request.get(`/api/world/projection?contextId=${encodeURIComponent(contextId)}&lens=overview`);
+  expect(response.ok()).toBe(true);
+  expect((await response.json()).initialized).toBe(true);
+});
+
 test("orients a first-time user with the Machine Observatory", async ({ page }) => {
   await page.route("**/api/world/projection?**", async (route) => {
     await route.fulfill({
