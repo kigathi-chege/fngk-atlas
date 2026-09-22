@@ -50,4 +50,12 @@ After updating Atlas source, stop and rerun `npm run start:host`; the already-ru
 
 Container deployment is possible only when the FNGK executable, the correct user's profile, and a working network route to the profile's Signal origin are deliberately provided. Host-side launch is the canonical path because it naturally inherits all three.
 
+## Desktop companion bootstrap
+
+The Atlas desktop companion follows the same profile ownership boundary without requiring the normal path to use a terminal. It detects a bundled, configured, or `PATH` FNGK executable; checks its version and namespace protocols; installs a signed per-user replacement only after verification; and asks FNGK itself to converge its daemon. FNGK continues to own its profile and operator credential. Atlas stores only redacted onboarding state.
+
+Desktop sign-in consumes the additive JSONL protocol from `fngk login <signal-origin> --profile <profile> --json`. Its first event contains the Signal authorization URL, opaque state ID, and expiry; its final event confirms the authenticated profile. Neither event contains the operator credential. The desktop host opens the browser and lets FNGK persist the completed credential in its protected profile.
+
+System-wide FNGK installation remains an explicit advanced action requiring operating-system elevation. Atlas updates and FNGK updates remain independently approved and independently rollbackable.
+
 For a remote Device that already has terminal connectivity, Atlas can perform this same verified backup/install/converge flow from **Device actions → FNGK**. See [HTTP port sharing and exact-head handoff](http-port-sharing.md). This is explicit and does not replace the manual rollback path above.
