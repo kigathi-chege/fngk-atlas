@@ -29,6 +29,21 @@ async function harness() {
 }
 
 describe("Atlas FNGK-native server", () => {
+  it("reports typed desktop bootstrap status and converges FNGK only after confirmation", async () => {
+    const app = await harness();
+    await expect(app.inject({ method: "GET", url: "/api/onboarding/status" })).resolves.toMatchObject({ statusCode: 200 });
+    expect((await app.inject({ method: "GET", url: "/api/onboarding/status" })).json()).toMatchObject({ protocolVersion: "atlas.desktop-bootstrap.v1", state: "ready", local: { authenticated: true } });
+    expect((await app.inject({ method: "POST", url: "/api/onboarding/converge", payload: { profile: "local" } })).statusCode).toBe(409);
+    const converged = (await app.inject({ method: "POST", url: "/api/onboarding/converge", payload: { profile: "local", confirm: true } })).json();
+    expect(converged.snapshot).toMatchObject({ state: "ready" }); expect(converged.events).toEqual(expect.arrayContaining([expect.objectContaining({ phase: "complete" })]));
+  });
+  it("uses the FNGK JSON login protocol without returning an operator credential", async () => {
+    const app = await harness();
+    const started = await app.inject({ method: "POST", url: "/api/onboarding/login/begin", payload: { profile: "local", origin: "https://signal.example.test" } });
+    expect(started.statusCode).toBe(201); expect(started.json()).toMatchObject({ stateId: "fixture-login-state", authorizationUrl: "https://signal.example.test/authorize" });
+    const completed = await app.inject({ method: "POST", url: "/api/onboarding/login/complete", payload: { stateId: "fixture-login-state", origin: "https://signal.example.test", receivedAt: new Date().toISOString() } });
+    expect(completed.json()).toEqual({ profile: "local", authenticated: true }); expect(completed.body).not.toMatch(/credential|secret/i);
+  });
   it('requires confirmation and retains correction provenance without rewriting evidence',async()=>{
     const app=await harness();
     expect((await app.inject({method:'POST',url:'/api/world/refresh',payload:{contextId:'local'}})).statusCode).toBe(200);

@@ -3,6 +3,14 @@ import { expect, test } from "@playwright/test";
 test.setTimeout(45_000);
 const openWorkbench=async(page:any)=>{await page.goto('/');await expect(page.locator('.dv-dockview')).toBeVisible();await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('atlas.workbench.v7')??'null')?.version)).toBe(7)};
 
+test("offers one safe FNGK recovery action before the Observatory", async ({ page }) => {
+  await page.route("**/api/onboarding/status", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ protocolVersion: "atlas.desktop-bootstrap.v1", state: "daemon-install-choice", local: { state: "daemon-install-choice", message: "FNGK needs its local daemon.", authenticated: false } }) }));
+  await page.goto("/");
+  await expect(page.getByLabel("FNGK local runtime status")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect Atlas to this machine" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Start FNGK daemon" })).toBeVisible();
+});
+
 test('builds the first Device Observatory from a fresh database without a manual scan',async({page})=>{
   await page.goto('/');
   await expect(page.locator('[aria-label="Machine Observatory"] .observatory-identity h2')).toBeVisible();

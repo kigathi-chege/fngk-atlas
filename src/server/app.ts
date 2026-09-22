@@ -46,6 +46,9 @@ import { projectSoftwareFunctions } from "../world/software-projection.js";
 import { PortShareStore } from "../ports/store.js";
 import { PortSharingService } from "../ports/service.js";
 import { FngkHeadHandoffService } from "../fngk-head/handoff-service.js";
+import { BootstrapService } from "../onboarding/service.js";
+import { AuthFlow } from "../onboarding/auth-flow.js";
+import { createLocalFngkLoginLauncher, FngkBrowserAuthorizationRuntime } from "../onboarding/fngk-auth.js";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -158,6 +161,8 @@ export async function createApp(
     path.join(root, ".atlas", "atlas.db");
   const store = new Store(databaseFile);
   const fngk = options.fngk ?? new FngkProcessClient();
+  const bootstrap = new BootstrapService(fngk);
+  const browserAuthorizations = new Map<string, AuthFlow>();
   const contexts = new EffectiveContextService(fngk, {
     localRoot: options.localRoot,
   });
@@ -424,6 +429,38 @@ export async function createApp(
     version: "0.2.0",
     activeIndex: activeIndex?.summary ?? null,
   }));
+  app.get("/api/onboarding/status", async (request, reply) => {
+    try { return await bootstrap.check(requestSignal(request)); }
+    catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
+  });
+  app.post("/api/onboarding/converge", async (request, reply) => {
+    const body = request.body as { profile?: unknown; confirm?: unknown } | undefined;
+    if (body?.confirm !== true) return reply.code(409).send({ error: "confirmation_required", message: "FNGK daemon convergence requires confirmation." });
+    const profile = typeof body.profile === "string" ? body.profile : "local", events = [];
+    try { for await (const event of bootstrap.converge(profile, requestSignal(request))) events.push(event); return { snapshot: bootstrap.snapshot(), events }; }
+    catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
+  });
+  app.post("/api/onboarding/login/begin", async (request, reply) => {
+    const body = request.body as { profile?: unknown; origin?: unknown } | undefined;
+    if (typeof body?.origin !== "string") return reply.code(400).send({ error: "authorization_origin_invalid", message: "A secure Signal origin is required." });
+    const profile = typeof body.profile === "string" ? body.profile : "local";
+    try {
+      const runtime = new FngkBrowserAuthorizationRuntime(createLocalFngkLoginLauncher(fngk.binary, fngk.env), fngk.binary, body.origin), flow = new AuthFlow(runtime, { origin: body.origin }), start = await flow.beginLogin(profile);
+      browserAuthorizations.set(start.stateId, flow); return reply.code(201).send(start);
+    } catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
+  });
+  app.post("/api/onboarding/login/complete", async (request, reply) => {
+    const body = request.body as { stateId?: unknown; origin?: unknown; receivedAt?: unknown; code?: unknown } | undefined;
+    if (typeof body?.stateId !== "string") return reply.code(400).send({ error: "authorization_state_invalid", message: "Authorization state is required." });
+    const flow = browserAuthorizations.get(body.stateId); if (!flow) return reply.code(404).send({ error: "authorization_state_invalid", message: "Authorization state is unavailable." });
+    try {
+      const result = await flow.completeLogin({ stateId: body.stateId, origin: typeof body.origin === "string" ? body.origin : "", receivedAt: typeof body.receivedAt === "string" ? body.receivedAt : "", ...(typeof body.code === "string" ? { code: body.code } : {}) }); browserAuthorizations.delete(body.stateId); return result;
+    } catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
+  });
+  app.post("/api/onboarding/login/:stateId/cancel", async (request, reply) => {
+    const stateId = String((request.params as { stateId?: string }).stateId ?? ""), flow = browserAuthorizations.get(stateId); if (!flow) return reply.code(404).send({ error: "authorization_state_invalid", message: "Authorization state is unavailable." });
+    await flow.cancelLogin(stateId); browserAuthorizations.delete(stateId); return reply.code(204).send();
+  });
   app.get("/api/indexes", async (request) => ({
     items: store.indexes(
       String((request.query as { contextId?: string }).contextId ?? "") ||

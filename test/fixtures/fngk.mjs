@@ -48,6 +48,11 @@ if (args[0] === 'version') {
 } else if (args[0] === 'tcp' && args.includes('--stdio-json')) {
   process.stdout.write(mode==='human-tcp'?'Signal TCP relay listening on 127.0.0.1:39153\n':JSON.stringify({protocolVersion:'fngk.tcp.v1',type:'ready',listenHost:'127.0.0.1',listenPort:32123,target:args[1],targetPort:Number(args[2]),argv:args})+'\n');
   setInterval(()=>{},60_000);
+} else if (args[0] === 'login' && args.includes('--json')) {
+  process.stdout.write(JSON.stringify({protocolVersion:'fngk.login.v1',state:'authorization-required',authorizationUrl:'https://signal.example.test/authorize',stateId:'fixture-login-state',expiresAt:'2030-01-01T00:00:00.000Z',profile:args[args.indexOf('--profile')+1]??'local'})+'\n');
+  process.stdout.write(JSON.stringify({protocolVersion:'fngk.login.v1',state:'authenticated',profile:args[args.indexOf('--profile')+1]??'local'})+'\n');
+} else if (args[0] === 'install') {
+  process.stdout.write('installed\n');
 } else if (args.includes('--stdio-json')) {
   process.stdout.write(JSON.stringify({ type: 'ready', protocolVersion: 'fngk.terminal.v1', sessionId: 'session-1', argv: args }) + '\n');
   const lines = createInterface({ input: process.stdin });
