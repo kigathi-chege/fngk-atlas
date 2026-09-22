@@ -28,7 +28,26 @@ async function harness() {
   return app;
 }
 
+async function protectedHarness() {
+  const directory = await mkdtemp(path.join(tmpdir(), "fngk-atlas-protected-server-"));
+  const app = await createApp({
+    fngk: new FngkProcessClient({ binary: fixture }),
+    dbPath: path.join(directory, "atlas.db"),
+    capability: "desktop-capability-for-test",
+  });
+  cleanups.push(async () => {
+    await app.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  return app;
+}
+
 describe("Atlas FNGK-native server", () => {
+  it("requires the desktop launch capability for API access", async () => {
+    const app = await protectedHarness();
+    expect((await app.inject({ method: "GET", url: "/api/onboarding/status" })).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: "/api/onboarding/status", headers: { "x-atlas-capability": "desktop-capability-for-test" } })).statusCode).toBe(200);
+  });
   it("reports typed desktop bootstrap status and converges FNGK only after confirmation", async () => {
     const app = await harness();
     await expect(app.inject({ method: "GET", url: "/api/onboarding/status" })).resolves.toMatchObject({ statusCode: 200 });

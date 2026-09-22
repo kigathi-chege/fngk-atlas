@@ -77,6 +77,7 @@ interface CreateAppOptions {
   calculatorProvider?: CalculatorProvider;
   deviceAdapters?: RegisteredDeviceAdapter[];
   worldRefreshMode?: 'inline'|'worker';
+  capability?: string;
 }
 
 function processError(error: unknown): {
@@ -399,6 +400,15 @@ export async function createApp(
     worldRefreshes.set(contextId,pending);return pending;
   };
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 << 20 });
+  const launchCapability = options.capability ?? process.env.ATLAS_CAPABILITY;
+  if (launchCapability) app.addHook("onRequest", async (request, reply) => {
+    if (!request.url.startsWith("/api/")) return;
+    const header = request.headers["x-atlas-capability"];
+    const supplied = Array.isArray(header) ? header[0] : header;
+    const protocols = String(request.headers["sec-websocket-protocol"] ?? "").split(",").map(value => value.trim());
+    if (supplied === launchCapability || protocols.includes(launchCapability)) return;
+    return reply.code(401).send({ error: "atlas_capability_required", message: "This Atlas desktop service requires its launch capability." });
+  });
   await app.register(websocket);
   app.addHook("onClose", async () => {
     await liveProjects.close();
