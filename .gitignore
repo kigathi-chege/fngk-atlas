@@ -8,3 +8,4 @@ output/
 .playwright-cli/
 .worktrees/
 .fngk/
+desktop/runtime/

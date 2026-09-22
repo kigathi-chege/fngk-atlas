@@ -1,12 +1,16 @@
-use std::{path::PathBuf, process::Command, sync::Mutex};
+use std::{path::{Path, PathBuf}, process::Command, sync::Mutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 mod process_supervisor;
+mod fngk_install;
 #[cfg(test)]
 mod process_supervisor_test;
+#[cfg(test)]
+mod fngk_install_test;
 
+use fngk_install::{install_fngk_binary, verify_fngk_binary};
 use process_supervisor::{reserve_loopback_address, start_atlas_server, AtlasServerConfig, LocalServerHandle};
 
 const PROTOCOL_VERSION: &str = "atlas.desktop-bootstrap.v1";
@@ -38,6 +42,16 @@ struct CancelRequest {
 
 struct DesktopRuntime {
     server: Mutex<LocalServerHandle>,
+    fngk: FngkPaths,
+}
+
+struct FngkPaths {
+    bundled: PathBuf,
+    installed: PathBuf,
+}
+
+impl FngkPaths {
+    fn executable(&self) -> &Path { if self.installed.is_file() { &self.installed } else { &self.bundled } }
 }
 
 fn response(state: &'static str, message: &'static str, error_code: Option<&'static str>) -> BootstrapResponse {
@@ -76,26 +90,30 @@ mod tests {
 }
 
 #[tauri::command]
-fn atlas_get_local_status() -> BootstrapResponse {
-    fngk_status("local")
+fn atlas_get_local_status(runtime: State<DesktopRuntime>) -> BootstrapResponse {
+    fngk_status(runtime.fngk.executable(), "local")
 }
 
 #[tauri::command]
-fn atlas_install_fngk(request: InstallRequest) -> Result<BootstrapResponse, String> {
+fn atlas_install_fngk(request: InstallRequest, runtime: State<DesktopRuntime>) -> Result<BootstrapResponse, String> {
     if request.scope != "user" && request.scope != "system" {
         return Err("Invalid installation scope.".into());
     }
-    Ok(response("install-choice", "FNGK installation is not configured yet.", Some("bootstrap_not_configured")))
+    if request.scope == "system" { return Err("System installation requires explicit operating-system elevation and is unavailable in this build.".into()); }
+    let receipt = install_fngk_binary(&runtime.fngk.bundled, &runtime.fngk.installed).map_err(|error| format!("The packaged FNGK binary could not be installed safely: {error}"))?;
+    let mut result = fngk_status(&receipt.installed_path, "local");
+    if result.state == "ready" { result.message = "FNGK was installed for this user and is ready."; }
+    Ok(result)
 }
 
 #[tauri::command]
-fn atlas_converge_daemon(request: ProfileRequest) -> Result<BootstrapResponse, String> {
+fn atlas_converge_daemon(request: ProfileRequest, runtime: State<DesktopRuntime>) -> Result<BootstrapResponse, String> {
     if !valid_profile(&request.profile) {
         return Err("Invalid FNGK profile.".into());
     }
-    let result = Command::new("fngk").args(["install", "--profile", &request.profile]).status().map_err(|error| format!("FNGK daemon convergence could not start: {error}"))?;
+    let result = Command::new(runtime.fngk.executable()).args(["install", "--profile", &request.profile]).status().map_err(|error| format!("FNGK daemon convergence could not start: {error}"))?;
     if !result.success() { return Ok(response("recoverable-error", "FNGK daemon convergence did not complete.", Some("daemon_convergence_failed"))); }
-    Ok(fngk_status(&request.profile))
+    Ok(fngk_status(runtime.fngk.executable(), &request.profile))
 }
 
 #[tauri::command]
@@ -120,8 +138,8 @@ fn atlas_shutdown(app: tauri::AppHandle, runtime: State<DesktopRuntime>) {
     app.exit(0);
 }
 
-fn fngk_status(profile: &str) -> BootstrapResponse {
-    let result = Command::new("fngk").args(["status", "--json", "--profile", profile]).output();
+fn fngk_status(executable: &Path, profile: &str) -> BootstrapResponse {
+    let result = Command::new(executable).args(["status", "--json", "--profile", profile]).output();
     match result {
         Ok(output) if output.status.success() => response("ready", "FNGK is ready.", None),
         Ok(_) => response("recoverable-error", "FNGK needs attention.", Some("fngk_status_failed")),
@@ -130,27 +148,46 @@ fn fngk_status(profile: &str) -> BootstrapResponse {
     }
 }
 
-fn desktop_server_config(app: &tauri::AppHandle) -> Result<AtlasServerConfig, String> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).ok_or("Atlas project root is unavailable.")?.to_path_buf();
+fn fngk_paths(app: &tauri::AppHandle) -> Result<FngkPaths, String> {
+    let installed = app.path().app_data_dir().map_err(|error| error.to_string())?.join("bin").join("fngk");
+    let bundled = if cfg!(debug_assertions) { configured_fngk().ok_or("FNGK is not available on PATH for desktop development.")? } else { app.path().resource_dir().map_err(|error| error.to_string())?.join("fngk") };
+    if !bundled.is_file() { return Err("The packaged FNGK binary is unavailable.".into()); }
+    if !cfg!(debug_assertions) {
+        let checksum = app.path().resource_dir().map_err(|error| error.to_string())?.join("fngk.sha256");
+        let expected = std::fs::read_to_string(checksum).map_err(|_| "The packaged FNGK checksum is unavailable.")?;
+        verify_fngk_binary(&bundled, expected.trim()).map_err(|_| "The packaged FNGK binary did not pass checksum verification.")?;
+    }
+    Ok(FngkPaths { bundled, installed })
+}
+
+fn configured_fngk() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("FNGK_BIN").map(PathBuf::from).filter(|path| path.is_file()) { return Some(path); }
+    std::env::var_os("PATH").and_then(|paths| std::env::split_paths(&paths).map(|directory| directory.join("fngk")).find(|path| path.is_file()))
+}
+
+fn desktop_server_config(app: &tauri::AppHandle, fngk: &FngkPaths) -> Result<AtlasServerConfig, String> {
+    let root = if cfg!(debug_assertions) { PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).ok_or("Atlas project root is unavailable.")?.to_path_buf() } else { app.path().resource_dir().map_err(|error| error.to_string())? };
     let address = reserve_loopback_address().map_err(|error| error.to_string())?;
     let mut random = [0_u8; 32];
     getrandom::fill(&mut random).map_err(|error| format!("Could not create desktop launch capability: {error}"))?;
     let capability = random.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
-    let executable = if cfg!(debug_assertions) { std::env::var_os("ATLAS_NODE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("node")) } else { app.path().resource_dir().map_err(|error| error.to_string())?.join("atlas-server") };
+    let executable = if cfg!(debug_assertions) { std::env::var_os("ATLAS_NODE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("node")) } else { root.join("node") };
     let mut config = AtlasServerConfig::new(executable, root.clone(), address, capability);
-    if cfg!(debug_assertions) { config.arguments = vec![root.join("dist/server/index.js").to_string_lossy().into_owned()]; }
+    config.arguments = vec![root.join("dist/server/index.js").to_string_lossy().into_owned()];
     config.database_path = app.path().app_data_dir().map_err(|error| error.to_string())?.join("atlas.db");
+    config.environment.push(("FNGK_BIN".into(), fngk.executable().to_string_lossy().into_owned()));
     Ok(config)
 }
 
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            let config = desktop_server_config(&app.handle())?;
+            let fngk = fngk_paths(&app.handle())?;
+            let config = desktop_server_config(&app.handle(), &fngk)?;
             let server = start_atlas_server(config).map_err(|error| error.to_string())?;
             let url = server.base_url().parse().map_err(|error| format!("Atlas server URL is invalid: {error}"))?;
             let capability = server.capability.clone();
-            app.manage(DesktopRuntime { server: Mutex::new(server) });
+            app.manage(DesktopRuntime { server: Mutex::new(server), fngk });
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("Atlas")
                 .inner_size(1280.0, 800.0)

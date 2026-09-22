@@ -17,6 +17,7 @@ pub struct AtlasServerConfig {
     pub address: SocketAddr,
     pub capability: String,
     pub arguments: Vec<String>,
+    pub environment: Vec<(String, String)>,
     pub database_path: PathBuf,
     pub startup_timeout: Duration,
 }
@@ -29,6 +30,7 @@ impl AtlasServerConfig {
             address,
             capability: capability.into(),
             arguments: Vec::new(),
+            environment: Vec::new(),
             database_path: working_directory.join(".atlas").join("atlas.db"),
             startup_timeout: Duration::from_secs(15),
         }
@@ -119,6 +121,7 @@ pub fn start_atlas_server(config: AtlasServerConfig) -> Result<LocalServerHandle
         .env("ATLAS_PORT", config.address.port().to_string())
         .env("ATLAS_DB", &config.database_path)
         .env("ATLAS_CAPABILITY", &config.capability)
+        .envs(config.environment.iter().map(|(key, value)| (key, value)))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
