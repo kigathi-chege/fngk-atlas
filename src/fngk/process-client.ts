@@ -159,6 +159,10 @@ export class FngkProcessClient {
     }
   }
 
+  async install(profile: string, signal?: AbortSignal): Promise<void> {
+    await this.#run(['install', '--profile', profile], signal);
+  }
+
   openTerminal(target: string, options: { newSession?: boolean; sessionId?: string; profile?: string; signal?: AbortSignal } = {}): TerminalSession {
     const args = [target];
     if (options.newSession) args.push('--new');
