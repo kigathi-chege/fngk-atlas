@@ -1,4 +1,13 @@
 node_modules/
+dist/
+web-dist/
+test-results/
+playwright-report/
 .atlas/
 output/
 .playwright-cli/
+.worktrees/
+.fngk/
+desktop/runtime/
+desktop/src-tauri/gen/
+desktop/src-tauri/target/

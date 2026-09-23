@@ -1,0 +1,2 @@
+<script lang="ts">import type {AtlasView} from '../lib/atlas-navigation.js';export let views:string[]=[];export let active:AtlasView='overview';export let onchange:(view:AtlasView)=>void=()=>{};const label=(value:string)=>value.replace(/\b\w/g,letter=>letter.toUpperCase());</script>
+<nav class="atlas-view-tabs" aria-label="Atlas views">{#each views as view}<button class:active={active===view} onclick={()=>onchange(view as AtlasView)}>{label(view)}</button>{/each}</nav>

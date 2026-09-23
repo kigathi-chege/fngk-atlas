@@ -7,7 +7,11 @@ services:
       DOCKER_CONTAINER: "1"
       ATLAS_HOST: "0.0.0.0"
       ATLAS_PORT: "4317"
+      FNGK_BIN: "/usr/local/bin/fngk"
     volumes:
       - ./.atlas:/app/.atlas
+      # Mount the installed FNGK executable and its normal process context when
+      # developing in a container. The canonical launcher runs Atlas beside FNGK.
+      # - /usr/local/bin/fngk:/usr/local/bin/fngk:ro
       # Add read-only code roots explicitly when the container should inspect them:
       # - /workspace/signal:/workspace/signal:ro

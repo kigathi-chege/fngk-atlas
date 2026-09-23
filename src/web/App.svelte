@@ -1,0 +1,21 @@
+<script lang="ts">
+  import {onMount} from 'svelte';
+  import Workbench from './components/Workbench.svelte';
+  import AtlasMenu from './components/AtlasMenu.svelte';
+  import ActivityRail from './components/ActivityRail.svelte';
+  import PinnedRootsRail from './components/PinnedRootsRail.svelte';
+  import GlobalContextMenu from './components/GlobalContextMenu.svelte';
+  import DesktopOnboarding from './components/DesktopOnboarding.svelte';
+  import {createWorkbenchState} from './lib/workbench-state.js';
+  import {chooseContext} from './lib/workbench-state.js';
+  import {loadContextCatalog} from './lib/context-catalog.js';
+  import {WorkspaceRootsStore} from './lib/workspace-roots.js';
+  import PanelBottomOpen from '@lucide/svelte/icons/panel-bottom-open';
+  let persisted:any={};try{persisted=JSON.parse(localStorage.getItem('atlas.state.v1')??'{}');}catch{}
+  let persistedRoots:unknown=[];try{persistedRoots=JSON.parse(localStorage.getItem('atlas.workspace-roots.v1')??'[]')}catch{}
+  const state=createWorkbenchState(persisted),roots=new WorkspaceRootsStore(persistedRoots);let snapshot=state.snapshot(),ready=false;
+  onMount(()=>{const stateUnsub=state.subscribe(value=>{snapshot=value;localStorage.setItem('atlas.state.v1',JSON.stringify(state.persistable()));}),rootsUnsub=roots.subscribe(value=>localStorage.setItem('atlas.workspace-roots.v1',JSON.stringify(value)));const pin=(event:Event)=>roots.pin((event as CustomEvent<any>).detail),workspace=(event:Event)=>roots.addWorkspace((event as CustomEvent<any>).detail),unpin=(event:Event)=>roots.unpin((event as CustomEvent<any>).detail),remove=(event:Event)=>roots.removeWorkspace((event as CustomEvent<any>).detail);window.addEventListener('atlas:pin-root',pin);window.addEventListener('atlas:add-workspace-root',workspace);window.addEventListener('atlas:unpin-root',unpin);window.addEventListener('atlas:remove-workspace-root',remove);void loadContextCatalog().then(value=>{const contextId=chooseContext(value.contexts??[],state.snapshot());state.setContext(contextId,false);const current=value.state;if(current?.compatible)state.setConnection({phase:'connected',message:`Connected to ${current.profile??'default'}`,profile:current.profile,version:current.version});else state.setConnection({phase:current?.login==='required'?'authentication-required':'unavailable',message:current?.reason??'FNGK unavailable',profile:current?.profile,version:current?.version})}).catch(error=>state.setConnection({phase:'unavailable',message:(error as Error).message})).finally(()=>ready=true);return()=>{stateUnsub();rootsUnsub();window.removeEventListener('atlas:pin-root',pin);window.removeEventListener('atlas:add-workspace-root',workspace);window.removeEventListener('atlas:unpin-root',unpin);window.removeEventListener('atlas:remove-workspace-root',remove)}});
+</script>
+
+<svelte:head><meta name="description" content="FNGK-native systems and code atlas"></svelte:head>
+<div class="atlas-shell"><AtlasMenu {state}/>{#if ready}<ActivityRail {state}/><Workbench {state} {roots}/><PinnedRootsRail {state} {roots}/>{:else}<main class="atlas-boot" aria-label="Starting Atlas">Loading Device context…</main>{/if}<DesktopOnboarding/><footer><span class:ok={snapshot.connection.phase==='connected'}>◆</span><b>{snapshot.connection.phase==='connected'?'FNGK connected':snapshot.connection.phase==='checking'?'Checking FNGK…':'FNGK disconnected'}</b><span>{snapshot.contextId}</span><span title={snapshot.connection.message}>{snapshot.connection.message}</span><span class="footer-route">effective route · no credentials stored</span><button title="Open operations dock" aria-label="Open operations dock" onclick={()=>window.dispatchEvent(new Event('atlas:open-operations'))}><PanelBottomOpen size={13}/></button><button title="Previous selection" onclick={()=>state.back()}>←</button><button title="Next selection" onclick={()=>state.forward()}>→</button></footer></div><GlobalContextMenu {state}/>
