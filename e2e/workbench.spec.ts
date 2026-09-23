@@ -33,6 +33,16 @@ test("moves an existing layout to the workspace canvas once without resetting la
   await expect(page.getByRole("heading", { name: "kigathi" })).toBeVisible();
 });
 
+test("returns command-palette focus to the invoking control", async ({ page }) => {
+  await openWorkbench(page);
+  const trigger = page.getByRole("button", { name: "Command palette", exact: true });
+  await trigger.focus();
+  await page.keyboard.press("Control+Shift+P");
+  await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+});
+
 test('builds the first Device Observatory from a fresh database without a manual scan',async({page})=>{
   await page.goto('/');
   await page.getByRole("button", { name: "Open Device Atlas" }).click();
