@@ -9,3 +9,5 @@ output/
 .worktrees/
 .fngk/
 desktop/runtime/
+desktop/src-tauri/gen/
+desktop/src-tauri/target/
