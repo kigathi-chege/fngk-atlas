@@ -5,11 +5,12 @@ export interface WorkbenchSnapshot {
   connection: { phase: 'checking' | 'connected' | 'authentication-required' | 'unavailable'; message: string; profile?: string; version?: string };
   selection?: Selection;
   activity: string[];
+  theme: 'dark' | 'light';
   layout?: { version?: number; layout?: unknown; central?: unknown; bottom?: unknown };
 }
 
 export function createWorkbenchState(initial: Partial<WorkbenchSnapshot> = {}) {
-  let value: WorkbenchSnapshot = { contextId: initial.contextId ?? 'local', contextExplicit: initial.contextExplicit === true, connection: { phase: 'checking', message: 'Discovering installed FNGK…' }, activity: [], layout: initial.layout };
+  let value: WorkbenchSnapshot = { contextId: initial.contextId ?? 'local', contextExplicit: initial.contextExplicit === true, connection: { phase: 'checking', message: 'Discovering installed FNGK…' }, activity: [], theme: initial.theme === 'light' ? 'light' : 'dark', layout: initial.layout };
   let cursor = -1;
   const history: Selection[] = [];
   const listeners = new Set<(snapshot: WorkbenchSnapshot) => void>();
@@ -22,9 +23,10 @@ export function createWorkbenchState(initial: Partial<WorkbenchSnapshot> = {}) {
     forward() { if (cursor + 1 < history.length) { cursor++; value = { ...value, selection: history[cursor] }; publish(); } },
     setContext(contextId: string, explicit = true) { value = { ...value, contextId, contextExplicit: explicit || value.contextExplicit }; publish(); },
     setConnection(connection: WorkbenchSnapshot['connection']) { value = { ...value, connection }; publish(); },
+    setTheme(theme: WorkbenchSnapshot['theme']) { value = { ...value, theme }; publish(); },
     setLayout(layout: WorkbenchSnapshot['layout']) { value = { ...value, layout }; publish(); },
     appendActivity(message: string) { value = { ...value, activity: [...value.activity.slice(-199), message] }; publish(); },
-    persistable: () => ({ version: 2, contextId: value.contextId, contextExplicit: value.contextExplicit, selection: value.selection, layout: value.layout }),
+    persistable: () => ({ version: 3, contextId: value.contextId, contextExplicit: value.contextExplicit, selection: value.selection, theme: value.theme, layout: value.layout }),
   };
 }
 

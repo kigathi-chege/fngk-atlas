@@ -28,6 +28,28 @@
   --cyan: var(--atlas-cyan);
 }
 
+.atlas-light {
+  color-scheme: light;
+  --atlas-bg: #f4f7fa;
+  --atlas-surface-0: #ffffff;
+  --atlas-surface-1: #fbfcfe;
+  --atlas-surface-2: #eef3f7;
+  --atlas-surface-3: #e2eaf1;
+  --atlas-border: #cbd6df;
+  --atlas-border-strong: #9caebb;
+  --atlas-text: #15212b;
+  --atlas-text-soft: #3d4e5c;
+  --atlas-muted: #637485;
+  --atlas-accent: #456f14;
+  --atlas-accent-soft: #456f141c;
+  --atlas-cyan: #087a72;
+  --atlas-danger: #b3261e;
+  --atlas-warning: #8a5900;
+  --atlas-focus: #155bb0;
+  --atlas-shadow-popover: 0 18px 60px #23384b22;
+  --atlas-shadow-float: 0 24px 90px #23384b2e;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }

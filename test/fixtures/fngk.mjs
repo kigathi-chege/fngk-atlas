@@ -7,6 +7,8 @@ const mode = process.env.FNGK_FIXTURE_MODE ?? 'ok';
 if (args[0] === 'version') {
   if (mode === 'missing-version') process.exit(17);
   process.stdout.write('fngk v1.4.0\n');
+} else if (args[0] === 'profiles' && args.includes('--json')) {
+  process.stdout.write(JSON.stringify({protocolVersion:'fngk.profiles.v1',profiles:[{name:'local',current:true,mode:'user',paired:true,operatorAuthorized:true,daemon:'running',executable:'/secret/path',agentVersion:'v1.4.0'},{name:'work',current:false,mode:'user',paired:true,operatorAuthorized:false,daemon:'stopped',executable:'/secret/path',agentVersion:'v1.4.0'}]})+'\n');
 } else if (args[0] === 'status' && args.includes('--json')) {
   if (mode === 'timeout') setTimeout(() => {}, 60_000);
   else if (mode === 'invalid') process.stdout.write('not json\n');

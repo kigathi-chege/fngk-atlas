@@ -3,7 +3,7 @@
   import Monitor from '@lucide/svelte/icons/monitor';import Search from '@lucide/svelte/icons/search';import FolderOpen from '@lucide/svelte/icons/folder-open';import SquareTerminal from '@lucide/svelte/icons/square-terminal';import Command from '@lucide/svelte/icons/command';import RefreshCw from '@lucide/svelte/icons/refresh-cw';import Settings2 from '@lucide/svelte/icons/settings-2';
   export let state:WorkbenchState;let contexts:any[]=[];let selected=state.snapshot().contextId;let loading=false;
   const label=(item:any)=>`${item.name}${item.device?.agentMode?` · ${item.device.agentMode}`:''}${item.device?.id?` · ${item.device.id.slice(0,8)}`:''}`;
-  async function load(force=false){loading=true;try{const value=await loadContextCatalog(force);contexts=value.contexts??[];selected=chooseContext(contexts,state.snapshot());state.setContext(selected,false);}finally{loading=false}}
+  async function load(force=false){loading=true;try{const value=await loadContextCatalog(force,state.snapshot().connection.profile);contexts=value.contexts??[];selected=chooseContext(contexts,state.snapshot());state.setContext(selected,false);}finally{loading=false}}
   function choose(id:string){selected=id;state.setContext(id);window.dispatchEvent(new CustomEvent('atlas:context',{detail:id}));}
   onMount(()=>{const unsubscribe=state.subscribe(value=>selected=value.contextId);void load();return unsubscribe});
 </script>

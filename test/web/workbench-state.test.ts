@@ -46,4 +46,11 @@ describe('shared workbench state', () => {
     expect(state.snapshot().connection.phase).toBe('unavailable');
     expect(JSON.stringify(state.persistable())).not.toContain('binary_missing');
   });
+
+  it('persists the selected workspace theme without connection state', () => {
+    const state = createWorkbenchState();
+    state.setTheme('light');
+    expect(state.snapshot().theme).toBe('light');
+    expect(state.persistable()).toMatchObject({ theme: 'light' });
+  });
 });

@@ -259,6 +259,14 @@ describe("Atlas FNGK-native server", () => {
     });
     expect(context.body).not.toMatch(/credential|cookie|operator-secret/);
 
+    const profiles = await app.inject({ method: "GET", url: "/api/fngk/profiles" });
+    expect(profiles.statusCode).toBe(200);
+    expect(profiles.json()).toEqual(expect.objectContaining({
+      protocolVersion: "fngk.profiles.v1",
+      profiles: expect.arrayContaining([expect.objectContaining({ name: "local", current: true })]),
+    }));
+    expect(profiles.body).not.toMatch(/credential|cookie|operator-secret|secret\/path/);
+
     const namespace = await app.inject({
       method: "GET",
       url: "/api/fngk/namespace?profile=work",

@@ -485,6 +485,14 @@ export async function createApp(
     const state = await fngk.probe(profile, requestSignal(request));
     return state.installed ? state : reply.code(503).send(state);
   });
+  app.get("/api/fngk/profiles", async (request, reply) => {
+    try {
+      return await fngk.profiles(requestSignal(request));
+    } catch (error) {
+      const result = processError(error);
+      return reply.code(result.statusCode).send(result.body);
+    }
+  });
   app.get("/api/fngk/namespace", async (request, reply) => {
     const profile =
       String((request.query as { profile?: string }).profile ?? "") ||
@@ -498,7 +506,8 @@ export async function createApp(
   });
   app.get("/api/contexts", async (request, reply) => {
     try {
-      return await contexts.contexts({force:String((request.query as {refresh?:string}).refresh??'')==='1'});
+      const query = request.query as { refresh?: string; profile?: string };
+      return await contexts.contexts({force:String(query.refresh??'')==='1',profile:String(query.profile??'')||undefined});
     } catch (error) {
       const result = processError(error);
       return reply.code(result.statusCode).send(result.body);

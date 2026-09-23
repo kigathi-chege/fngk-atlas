@@ -13,6 +13,17 @@ describe('FngkProcessClient', () => {
     expect(state.namespace?.devices).toEqual([expect.objectContaining({ id: 'device-1', name: 'kigathi', online: true })]);
   });
 
+  it('lists only safe local profile readiness metadata', async () => {
+    const profiles = await new FngkProcessClient({ binary: fixture }).profiles();
+    expect(profiles).toEqual({
+      protocolVersion: 'fngk.profiles.v1',
+      profiles: [
+        { name: 'local', current: true, mode: 'user', paired: true, operatorAuthorized: true, daemon: 'running' },
+        { name: 'work', current: false, mode: 'user', paired: true, operatorAuthorized: false, daemon: 'stopped' },
+      ],
+    });
+  });
+
   it('reports unsupported protocols without accepting their data', async () => {
     const client = new FngkProcessClient({ binary: fixture, env: { FNGK_FIXTURE_MODE: 'unsupported' } });
     await expect(client.namespace()).rejects.toMatchObject({ code: 'unsupported_protocol' });

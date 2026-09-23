@@ -27,6 +27,7 @@ export class EffectiveContextService {
   #remote = new Map<string, TerminalFileTransport>();
   #adapters = new Map<string, AdapterFileTransport[]>();
   #profile: string | undefined;
+  #contextProfile: string | undefined;
   #contextSnapshot: { expiresAt: number; value: any } | undefined;
   #contextPromise: Promise<any> | undefined;
   readonly contextCacheMs: number;
@@ -34,12 +35,14 @@ export class EffectiveContextService {
     this.direct = new DirectTransport({ id: 'direct:local', contextId: 'local', root: options.localRoot ?? '/' });
     this.contextCacheMs = Math.max(0, options.contextCacheMs ?? 10_000);
   }
-  async contexts(options: { force?: boolean } = {}) {
-    if(!options.force&&this.#contextSnapshot&&this.#contextSnapshot.expiresAt>Date.now())return this.#contextSnapshot.value;
+  async contexts(options: { force?: boolean; profile?: string } = {}) {
+    const profile = options.profile || undefined;
+    if(!options.force&&this.#contextProfile===profile&&this.#contextSnapshot&&this.#contextSnapshot.expiresAt>Date.now())return this.#contextSnapshot.value;
     if(this.#contextPromise)return this.#contextPromise;
     const pending=(async()=>{
-      const state = await this.fngk.probe();
+      const state = await this.fngk.probe(profile);
       this.#profile=state.profile;
+      this.#contextProfile=profile;
       if(state.compatible)await this.#refreshAdapters(state.profile).catch(()=>{});
       const local = { id: 'local', name: 'Atlas process host', kind: 'local', online: true, root: this.direct.root, workspaceRoot: process.cwd(), routes: [this.#evidence(this.direct)] };
       const devices = (state.namespace?.devices ?? []).map(device => {const id=`device:${device.id}`,routes=[...(this.#remote.has(id)?[this.#remote.get(id)!]:[]),...(this.#adapters.get(id)??[])];return { id, name: device.name, kind: 'fngk-device', online: device.online ?? false, device, routes:routes.map(value=>this.#evidence(value)) }});
@@ -78,5 +81,5 @@ export class EffectiveContextService {
     if (route.executor instanceof FngkTerminalCommandExecutor) stop ? route.executor.session.stop('atlas-release') : route.executor.session.detach('atlas-release');
     this.#remote.delete(contextId); return true;
   }
-  close(): void { for (const route of this.#remote.values()) route.executor instanceof FngkTerminalCommandExecutor && route.executor.session.detach('atlas-shutdown'); this.#remote.clear();this.#contextSnapshot=undefined; }
+  close(): void { for (const route of this.#remote.values()) route.executor instanceof FngkTerminalCommandExecutor && route.executor.session.detach('atlas-shutdown'); this.#remote.clear();this.#contextSnapshot=undefined;this.#contextProfile=undefined; }
 }
