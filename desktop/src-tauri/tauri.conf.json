@@ -24,7 +24,7 @@
     ],
     "externalBin": [],
     "resources": {
-      "../runtime/": ""
+      "../runtime/": "runtime"
     },
     "icon": [
       "icons/32x32.png",

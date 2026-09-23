@@ -78,7 +78,9 @@ fn valid_operation_id(operation_id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{valid_operation_id, valid_profile};
+    use std::path::PathBuf;
+
+    use super::{packaged_runtime_root, valid_operation_id, valid_profile};
 
     #[test]
     fn rejects_path_like_profiles_and_operation_ids() {
@@ -86,6 +88,11 @@ mod tests {
         assert!(!valid_profile("../other"));
         assert!(valid_operation_id("install-1:step"));
         assert!(!valid_operation_id("/bin/sh"));
+    }
+
+    #[test]
+    fn keeps_packaged_runtime_under_a_named_resource_directory() {
+        assert_eq!(packaged_runtime_root(PathBuf::from("/resources")), PathBuf::from("/resources/runtime"));
     }
 }
 
@@ -142,14 +149,18 @@ fn fngk_status(executable: &Path, profile: &str) -> BootstrapResponse {
 
 fn fngk_paths(app: &tauri::AppHandle) -> Result<FngkPaths, String> {
     let installed = app.path().app_data_dir().map_err(|error| error.to_string())?.join("bin").join("fngk");
-    let bundled = if cfg!(debug_assertions) { configured_fngk().ok_or("FNGK is not available on PATH for desktop development.")? } else { app.path().resource_dir().map_err(|error| error.to_string())?.join("fngk") };
+    let bundled = if cfg!(debug_assertions) { configured_fngk().ok_or("FNGK is not available on PATH for desktop development.")? } else { packaged_runtime_root(app.path().resource_dir().map_err(|error| error.to_string())?).join("fngk") };
     if !bundled.is_file() { return Err("The packaged FNGK binary is unavailable.".into()); }
     if !cfg!(debug_assertions) {
-        let checksum = app.path().resource_dir().map_err(|error| error.to_string())?.join("fngk.sha256");
+        let checksum = packaged_runtime_root(app.path().resource_dir().map_err(|error| error.to_string())?).join("fngk.sha256");
         let expected = std::fs::read_to_string(checksum).map_err(|_| "The packaged FNGK checksum is unavailable.")?;
         verify_fngk_binary(&bundled, expected.trim()).map_err(|_| "The packaged FNGK binary did not pass checksum verification.")?;
     }
     Ok(FngkPaths { bundled, installed })
+}
+
+fn packaged_runtime_root(resource_dir: PathBuf) -> PathBuf {
+    resource_dir.join("runtime")
 }
 
 fn configured_fngk() -> Option<PathBuf> {
@@ -158,7 +169,7 @@ fn configured_fngk() -> Option<PathBuf> {
 }
 
 fn desktop_server_config(app: &tauri::AppHandle, fngk: &FngkPaths) -> Result<AtlasServerConfig, String> {
-    let root = if cfg!(debug_assertions) { PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).ok_or("Atlas project root is unavailable.")?.to_path_buf() } else { app.path().resource_dir().map_err(|error| error.to_string())? };
+    let root = if cfg!(debug_assertions) { PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).ok_or("Atlas project root is unavailable.")?.to_path_buf() } else { packaged_runtime_root(app.path().resource_dir().map_err(|error| error.to_string())?) };
     let address = reserve_loopback_address().map_err(|error| error.to_string())?;
     let mut random = [0_u8; 32];
     getrandom::fill(&mut random).map_err(|error| format!("Could not create desktop launch capability: {error}"))?;

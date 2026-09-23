@@ -21,4 +21,6 @@ test -x "$node_binary" || { echo "A Node runtime is required to package Atlas." 
 cp "$node_binary" "$runtime_root/node"
 cp -a dist "$runtime_root/dist"
 cp -a web-dist "$runtime_root/web-dist"
-cp -a node_modules "$runtime_root/node_modules"
+cp package.json package-lock.json "$runtime_root/"
+(cd "$runtime_root" && npm ci --omit=dev --ignore-scripts)
+rm "$runtime_root/package.json" "$runtime_root/package-lock.json"

@@ -25,12 +25,36 @@ Debian/Ubuntu Linux, install the documented Tauri build prerequisites once;
 they are **build-machine dependencies**, not requirements for people who
 install the resulting package.
 
+For the Linux AppImage target, the host also needs `squashfs-tools` (it
+provides `mksquashfs`, which turns Tauri's prepared AppDir into the final
+`.AppImage`) and `libfuse2` (used by the AppImage builder). A complete
+Debian/Ubuntu build-host setup is:
+
+```sh
+sudo apt update
+sudo apt install -y build-essential curl file libssl-dev libwebkit2gtk-4.1-dev \
+  libayatana-appindicator3-dev librsvg2-dev squashfs-tools libfuse2
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+source "$HOME/.cargo/env"
+rustup component add rustfmt
+```
+
 Build the exact-head FNGK artifacts and then package Atlas:
 
 ```sh
 npm run build:fngk-head
 npm run desktop:build
 ```
+
+To build only the portable Linux artifact, use:
+
+```sh
+npm run desktop:build -- --bundles appimage
+```
+
+In a container without `/dev/fuse`, prefix the command with
+`APPIMAGE_EXTRACT_AND_RUN=1`. A normal desktop Linux build host should not
+need that compatibility setting.
 
 `desktop:build` first runs `scripts/prepare-desktop-runtime.sh`. The script
 selects the current platform/architecture archive from `output/fngk-head`,
