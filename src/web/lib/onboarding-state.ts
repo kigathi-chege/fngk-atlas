@@ -1,5 +1,5 @@
 export type OnboardingPresentation = {
-  kind: "ready" | "setup" | "atlas-unavailable";
+  kind: "quiet" | "setup" | "atlas-unavailable";
   title: string;
   message: string;
   action?: string;
@@ -14,6 +14,6 @@ export function resolveOnboardingPresentation(status: { state?: string; local?: 
       action: "Retry Atlas connection",
     };
   }
-  if (status.state === "ready") return { kind: "ready", title: "FNGK ready", message: status.local?.message ?? "FNGK is ready." };
+  if (status.state === "ready") return { kind: "quiet", title: "FNGK ready", message: status.local?.message ?? "FNGK is ready." };
   return { kind: "setup", title: "Connect Atlas to this machine", message: status.local?.message ?? (error || "FNGK needs attention.") };
 }

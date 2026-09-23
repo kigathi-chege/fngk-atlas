@@ -11,10 +11,9 @@ describe("desktop onboarding presentation", () => {
     });
   });
 
-  it("keeps a verified FNGK runtime out of setup", () => {
+  it("keeps a verified FNGK runtime out of setup and out of persistent notifications", () => {
     expect(resolveOnboardingPresentation({ state: "ready", local: { message: "FNGK is ready." } })).toMatchObject({
-      kind: "ready",
-      title: "FNGK ready",
+      kind: "quiet",
     });
   });
 });
