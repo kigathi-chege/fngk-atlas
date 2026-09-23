@@ -11,8 +11,31 @@ test("offers one safe FNGK recovery action before the Observatory", async ({ pag
   await expect(page.getByRole("button", { name: "Start FNGK daemon" })).toBeVisible();
 });
 
+test("starts in a workspace-first canvas while keeping Device Atlas available as a tab", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openWorkbench(page);
+  await expect(page.getByRole("heading", { name: "Start working" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Device Atlas" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "kigathi" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Open Device Atlas" }).click();
+  await expect(page.getByRole("heading", { name: "kigathi" })).toBeVisible();
+});
+
+test("moves an existing layout to the workspace canvas once without resetting later tab choices", async ({ page }) => {
+  await openWorkbench(page);
+  await page.getByRole("button", { name: "Open Device Atlas" }).click();
+  await expect(page.getByRole("heading", { name: "kigathi" })).toBeVisible();
+  await page.evaluate(() => localStorage.removeItem("atlas.workspace-welcome.v1"));
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Start working" })).toBeVisible();
+  await page.getByRole("button", { name: "Open Device Atlas" }).click();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "kigathi" })).toBeVisible();
+});
+
 test('builds the first Device Observatory from a fresh database without a manual scan',async({page})=>{
   await page.goto('/');
+  await page.getByRole("button", { name: "Open Device Atlas" }).click();
   await expect(page.locator('[aria-label="Machine Observatory"] .observatory-identity h2')).toBeVisible();
   const contextId=await page.evaluate(()=>new URL(location.href).searchParams.get('contextId')??'local');
   const response=await page.request.get(`/api/world/projection?contextId=${encodeURIComponent(contextId)}&lens=overview`);
@@ -64,6 +87,7 @@ test("orients a first-time user with the Machine Observatory", async ({ page }) 
   await page.setViewportSize({ width: 1440, height: 900 });
   await openWorkbench(page);
   expect(await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
+  await page.getByRole("button", { name: "Open Device Atlas" }).click();
   await expect(page.getByRole("heading", { name: "kigathi" })).toBeVisible();
   await expect(page.getByText("Applications", { exact: true })).toBeVisible();
   await expect(page.getByText("Web → PostgreSQL", { exact: true })).toBeVisible();
@@ -103,6 +127,7 @@ test("uses only canonical observatory APIs", async ({ page }) => {
   await page.route("**/api/state?**", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ index: { id: "index:web", root: "/repo" }, indexes: [{ id: "index:web", root: "/repo" }], runs: [] }) }));
   await page.route("**/api/software/functions?**", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ id: "function:main", label: "main", qualifiedName: "main", path: "src/main.ts", line: 1, complexity: 2, coverage: { fraction: 1, stale: false }, crap: 2, stale: false }] }) }));
   await openWorkbench(page);
+  await page.getByRole("button", { name: "Open Device Atlas" }).click();
   await page.getByRole("button", { name: "Inspect Web" }).click();
   await expect(page.locator(".semantic-details").getByRole("heading", { name: "Web" })).toBeVisible();
   await page.getByRole("button", { name: /Web, healthy, running/ }).click();
@@ -131,6 +156,7 @@ test("opens on the semantic Device atlas and preserves deep navigation in browse
   page.on("pageerror", (error) => errors.push(error.message));
   await openWorkbench(page);
   await expect(page.getByRole("tab", { name: "Device Atlas" })).toBeVisible();
+  await page.getByRole("button", { name: "Open Device Atlas" }).click();
   await expect(
     page.getByRole("navigation", { name: "Atlas views" }),
   ).toBeVisible();
@@ -428,7 +454,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
     if (!(await minimize.count())) break;
     await minimize.click({ force: true });
   }
-  await expect(page.getByLabel("Empty workspace")).toBeVisible();
+  await expect(page.getByLabel("Workspace start")).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Atlas activity" }),
   ).toBeVisible();
@@ -479,7 +505,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
           .querySelector(".tree-explorer")
           ?.closest(".dv-groupview");
         const workspace = document
-          .querySelector('[aria-label="Empty workspace"]')
+          .querySelector('[aria-label="Workspace start"]')
           ?.closest(".dv-groupview");
         return Boolean(filesystem && workspace && filesystem !== workspace);
       },
@@ -694,7 +720,7 @@ test("keeps the persistent shell polished and reachable at desktop and narrow wi
         ?.closest(".dv-groupview")
         ?.getBoundingClientRect(),
       center = document
-        .querySelector(".semantic-atlas")
+        .querySelector(".workspace-welcome")
         ?.closest(".dv-groupview")
         ?.getBoundingClientRect(),
       sash = document.querySelector(".dv-sash"),
@@ -761,7 +787,7 @@ test("keeps the persistent shell polished and reachable at desktop and narrow wi
   await expect(page.locator(".tree-explorer")).toBeHidden();
   expect(
     await page
-      .locator(".semantic-atlas")
+      .locator(".workspace-welcome")
       .evaluate(
         (element) =>
           element.closest(".dv-groupview")?.getBoundingClientRect().width ?? 0,
@@ -841,7 +867,7 @@ test("keeps sidebar widths and the center workspace when central tabs close", as
     await page
       .locator(`.atlas-tab[data-panel-id="${id}"] .atlas-tab-minimize`)
       .click();
-  await expect(page.locator(".workspace-placeholder")).toBeVisible();
+  await expect(page.getByLabel("Workspace start")).toBeVisible();
   const centerGroup = page
     .locator(".dv-groupview")
     .filter({ has: page.locator(".atlas-workspace-anchor") });
