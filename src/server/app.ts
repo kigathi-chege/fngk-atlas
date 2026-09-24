@@ -1,3 +1,4 @@
+import {createProfileScope} from './profile-scope.js';
 import Fastify, { type FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
 import staticFiles from "@fastify/static";
@@ -49,6 +50,7 @@ import { FngkHeadHandoffService } from "../fngk-head/handoff-service.js";
 import { BootstrapService } from "../onboarding/service.js";
 import { AuthFlow } from "../onboarding/auth-flow.js";
 import { createLocalFngkLoginLauncher, FngkBrowserAuthorizationRuntime } from "../onboarding/fngk-auth.js";
+import { DeviceLifecycleService } from "../lifecycle/service.js";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -164,7 +166,10 @@ export async function createApp(
   const fngk = options.fngk ?? new FngkProcessClient();
   const bootstrap = new BootstrapService(fngk);
   const browserAuthorizations = new Map<string, AuthFlow>();
+  const profileScope=createProfileScope();
+  fngk.setProfileProvider?.(profileScope.current);
   const contexts = new EffectiveContextService(fngk, {
+    profile:profileScope.current,
     localRoot: options.localRoot,
   });
   const retryableFileFailure=(error:unknown)=>{const value=error as {code?:string;causes?:Array<{code?:string}>};return value.code==='route_unavailable'&&value.causes?.some(cause=>['terminal_closed','timeout','process_error','process_failed','invalid_json','unsupported_protocol'].includes(String(cause.code)))===true};
@@ -212,6 +217,10 @@ export async function createApp(
         ? store.latestIndex(contextId)
         : activeIndex;
   const diagnostics = options.diagnosticRegistry ?? new DiagnosticRegistry();
+  const lifecycle = new DeviceLifecycleService({
+    profiles: () => fngk.profiles(),
+    contexts: (profile) => contexts.contexts({profile}),
+  });
   const portStore = new PortShareStore(databaseFile);
   const portSharing = new PortSharingService(portStore,fngk,{diagnostics,executorFor:(contextId)=>contexts.commandExecutor(contextId)});
   const headHandoffs = new FngkHeadHandoffService({artifactRoot:process.env.FNGK_HEAD_OUTPUT??path.join(root,'output','fngk-head'),signalRoot:process.env.SIGNAL_SOURCE??path.resolve(root,'../signal'),ports:portSharing,executorFor:(contextId)=>contexts.commandExecutor(contextId),diagnostics});
@@ -400,6 +409,7 @@ export async function createApp(
     worldRefreshes.set(contextId,pending);return pending;
   };
   const app = Fastify({ logger: options.logger ?? false, bodyLimit: 2 << 20 });
+  profileScope.install(app);
   const launchCapability = options.capability ?? process.env.ATLAS_CAPABILITY;
   if (launchCapability) app.addHook("onRequest", async (request, reply) => {
     if (!request.url.startsWith("/api/")) return;
@@ -440,13 +450,13 @@ export async function createApp(
     activeIndex: activeIndex?.summary ?? null,
   }));
   app.get("/api/onboarding/status", async (request, reply) => {
-    try { return await bootstrap.check(requestSignal(request)); }
+    try { return await bootstrap.check(profileScope.current(), requestSignal(request)); }
     catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
   });
   app.post("/api/onboarding/converge", async (request, reply) => {
     const body = request.body as { profile?: unknown; confirm?: unknown } | undefined;
     if (body?.confirm !== true) return reply.code(409).send({ error: "confirmation_required", message: "FNGK daemon convergence requires confirmation." });
-    const profile = typeof body.profile === "string" ? body.profile : "local", events = [];
+    const profile = typeof body.profile === "string" ? body.profile : profileScope.current(), events = [];
     try { for await (const event of bootstrap.converge(profile, requestSignal(request))) events.push(event); return { snapshot: bootstrap.snapshot(), events }; }
     catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
   });
@@ -488,6 +498,17 @@ export async function createApp(
   app.get("/api/fngk/profiles", async (request, reply) => {
     try {
       return await fngk.profiles(requestSignal(request));
+    } catch (error) {
+      const result = processError(error);
+      return reply.code(result.statusCode).send(result.body);
+    }
+  });
+  app.get("/api/device-lifecycle", async (request, reply) => {
+    const query = request.query as { contextId?: string; profile?: string };
+    const contextId = String(query.contextId ?? "");
+    if (!contextId) return reply.code(400).send({ error: "context_required", message: "A Device context is required." });
+    try {
+      return await lifecycle.inspect(contextId, String(query.profile ?? "") || undefined);
     } catch (error) {
       const result = processError(error);
       return reply.code(result.statusCode).send(result.body);

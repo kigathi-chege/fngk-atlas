@@ -56,6 +56,12 @@ describe("Atlas FNGK-native server", () => {
     const converged = (await app.inject({ method: "POST", url: "/api/onboarding/converge", payload: { profile: "local", confirm: true } })).json();
     expect(converged.snapshot).toMatchObject({ state: "ready" }); expect(converged.events).toEqual(expect.arrayContaining([expect.objectContaining({ phase: "complete" })]));
   });
+  it("scopes onboarding checks to the Atlas-selected profile", async () => {
+    const app = await harness();
+    const response = await app.inject({ method: "GET", url: "/api/onboarding/status", headers: { "x-atlas-profile": "work" } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ local: { profile: "work" } });
+  });
   it("uses the FNGK JSON login protocol without returning an operator credential", async () => {
     const app = await harness();
     const started = await app.inject({ method: "POST", url: "/api/onboarding/login/begin", payload: { profile: "local", origin: "https://signal.example.test" } });

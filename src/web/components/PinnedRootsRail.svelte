@@ -17,11 +17,11 @@
   function open(item:WorkspaceRoot){window.dispatchEvent(new CustomEvent('atlas:open-root',{detail:Object.freeze({contextId:item.contextId,path:item.path})}));}
   function remove(){if(!menu)return;const event=menu.item.kind==='workspace'?'atlas:remove-workspace-root':'atlas:unpin-root';window.dispatchEvent(new CustomEvent(event,{detail:{contextId:menu.item.contextId,path:menu.item.path}}));menu=undefined}
   onMount(()=>{
-    try{const saved=JSON.parse(localStorage.getItem('atlas.minimized-panels.v1')??'[]');if(Array.isArray(saved))minimized=saved}catch{}
+    try{const saved=panelHost()?.__atlasMinimizedPanels??[];if(Array.isArray(saved))minimized=saved.filter((item:AtlasPanelDescriptor)=>item.kind!=='terminal'&&item.id!=='atlas.navigator')}catch{}
     const measure=()=>maxMinimized=Math.max(1,Math.floor((rail.clientHeight-52-Math.min(items.length,5)*52)/44));
     const resize=new ResizeObserver(measure);resize.observe(rail);
     const stateUnsub=state.subscribe(value=>{contextId=value.contextId;refresh();measure()}),rootsUnsub=roots.subscribe(()=>{refresh();measure()});
-    const panels=(event:Event)=>{minimized=[...((event as CustomEvent<AtlasPanelDescriptor[]>).detail??[])];measure()};
+    const panels=(event:Event)=>{minimized=[...((event as CustomEvent<AtlasPanelDescriptor[]>).detail??[])].filter(item=>item.kind!=='terminal'&&item.id!=='atlas.navigator');measure()};
     window.addEventListener('atlas:minimized-panels',panels);
     return()=>{resize.disconnect();stateUnsub();rootsUnsub();window.removeEventListener('atlas:minimized-panels',panels)};
   });

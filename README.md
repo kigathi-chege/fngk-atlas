@@ -70,6 +70,19 @@ npm run test:e2e
 
 The browser suite builds the web assets, launches a disposable fixture server and FNGK process, and checks empty-workspace recovery, persistent rails, minimize/restore/float behavior, unified search, memory-only buffers, exclusive saves, responsive layout, filesystem menus, bounded terminal-session ownership, JSONL terminal input, and console errors.
 
+## Desktop acceptance
+
+Atlas packages the exact FNGK head artifact deliberately: desktop release builds stop if that artifact has not been built and verified. On Debian or Ubuntu, install the Tauri WebKit prerequisites once, then build and launch the AppImage:
+
+```bash
+sudo apt-get install libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev
+npm run build:fngk-head
+APPIMAGE_EXTRACT_AND_RUN=1 npm run desktop:build -- --bundles appimage
+APPIMAGE_EXTRACT_AND_RUN=1 ./desktop/src-tauri/target/release/bundle/appimage/Atlas_0.1.0_amd64.AppImage
+```
+
+In the packaged application, choose the intended FNGK profile from the title-bar profile picker, open two terminals, minimize and restore one from the bottom dock, switch to a read-only Device lifecycle inspection, then reopen the application. Terminal session ownership remains with FNGK; layout metadata restores without saving terminal output, credentials, or tokens. The selected profile is sent with every Atlas API and terminal request. A remote device can only be retired or deleted when FNGK exposes a verified lifecycle-control protocol; Atlas intentionally does not imitate those destructive operations locally.
+
 
 ## UPDATING FNGK
 

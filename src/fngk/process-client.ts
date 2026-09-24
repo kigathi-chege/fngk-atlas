@@ -46,6 +46,8 @@ export class FngkProcessError extends Error {
 }
 
 export class FngkProcessClient {
+  #profileProvider:()=>string|undefined=()=>undefined;
+  setProfileProvider(provider:()=>string|undefined){this.#profileProvider=provider;}
   readonly binary: string;
   readonly timeoutMs: number;
   readonly env: NodeJS.ProcessEnv;
@@ -57,6 +59,8 @@ export class FngkProcessClient {
   }
 
   async #run(args: string[], signal?: AbortSignal, input?:string): Promise<string> {
+    const profile=this.#profileProvider();
+    if(profile&&!args.includes('--profile')&&!['version','profiles'].includes(args[0]))args=[...args,'--profile',profile];
     return await new Promise((resolve, reject) => {
       const child = spawn(this.binary, args, { env: this.env, stdio: [input===undefined?'ignore':'pipe', 'pipe', 'pipe'] });
       let stdout = '', stderr = '', settled = false;
@@ -199,6 +203,7 @@ export class FngkProcessClient {
 
   openTerminal(target: string, options: { newSession?: boolean; sessionId?: string; profile?: string; signal?: AbortSignal } = {}): TerminalSession {
     const args = [target];
+    options={...options,profile:options.profile??this.#profileProvider()};
     if (options.newSession) args.push('--new');
     if (options.sessionId) args.push('--session', options.sessionId);
     if (options.profile) args.push('--profile', options.profile);

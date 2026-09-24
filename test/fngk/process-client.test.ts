@@ -6,6 +6,16 @@ import { FngkProcessClient, FngkProcessError } from '../../src/fngk/process-clie
 const fixture = path.resolve('test/fixtures/fngk.mjs');
 
 describe('FngkProcessClient', () => {
+  it('inherits request-local profiles without overriding explicit choices',async()=>{
+    const client=new FngkProcessClient({binary:fixture});
+    client.setProfileProvider(()=> 'work');
+    expect((await client.namespace()).profile.name).toBe('work');
+    expect((await client.namespace('personal')).profile.name).toBe('personal');
+    const terminal=client.openTerminal('device:one');
+    const [ready]=await once(terminal,'ready');
+    expect(ready.argv).toContain('work');
+    terminal.detach('test');
+  });
   it('probes the installed binary and consumes the secret-free namespace protocol', async () => {
     const client = new FngkProcessClient({ binary: fixture });
     const state = await client.probe('work');

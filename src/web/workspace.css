@@ -1,0 +1,50 @@
+/* Final shell layer: shared tokens keep desktop and browser surfaces consistent. */
+.atlas-dock .dv-sash:focus-visible { outline:2px solid var(--atlas-focus);outline-offset:2px;z-index:30; }
+.atlas-light .dv-dockview,.atlas-light .dv-grid-view { background:var(--atlas-bg)!important; }
+.atlas-light .repository-config strong { color:var(--atlas-text); }
+.atlas-shell .workspace-welcome { display:grid;grid-template-columns:minmax(0,1fr);padding:clamp(24px,4vw,64px);gap:28px; }
+.atlas-shell .workspace-welcome-copy { max-width:460px; }
+.atlas-shell .workspace-welcome h1 { font-size:36px;line-height:1.15; }
+.atlas-shell .workspace-actions { width:100%;grid-template-columns:repeat(2,minmax(0,1fr)); }
+.atlas-shell .workspace-actions button { min-width:0; }
+.atlas-shell .workspace-actions svg { flex-shrink:0; }
+.atlas-shell .workspace-welcome footer { grid-column:auto;grid-row:auto;background:transparent;border:0;padding:0;flex-wrap:wrap; }
+.atlas-shell .rail-contexts { align-content:start;grid-auto-rows:40px;max-height:none; }
+.atlas-shell .rail-contexts button { height:40px; }
+.atlas-light { --line:var(--atlas-border);--panel:var(--atlas-surface-1);--muted:var(--atlas-muted);--accent:var(--atlas-accent);--cyan:var(--atlas-cyan); }
+.atlas-light .title-brand b,.atlas-light .repository-title strong { color:var(--atlas-text); }
+.atlas-light .atlas-dock { background:var(--atlas-bg)!important;--dv-background-color:var(--atlas-bg); }
+.atlas-light .atlas-dock .dv-tabs-and-actions-container,.atlas-light .atlas-dock .dv-tab,.atlas-light .atlas-dock header { background:var(--atlas-surface-2)!important;color:var(--atlas-text)!important; }
+.atlas-light .atlas-dock button,.atlas-light .title-actions button,.atlas-light .title-actions select { background:var(--atlas-surface-2);color:var(--atlas-text);border-color:var(--atlas-border); }
+.atlas-light .atlas-dock input,.atlas-light .atlas-dock select,.atlas-light .unified-search input,.atlas-light .unified-search select { background:var(--atlas-surface-0)!important;color:var(--atlas-text)!important; }
+.atlas-light .unified-search-box,.atlas-light .filesystem-search,.atlas-light .repository-config,.atlas-light .context-search { background:var(--atlas-surface-0)!important;box-shadow:none; }
+.atlas-light .activity-rail button.active { background:var(--atlas-surface-2);color:var(--atlas-accent); }
+.atlas-light .route-chip { background:var(--atlas-accent-soft);color:var(--atlas-accent);border-color:var(--atlas-border); }
+.atlas-light .cm-editor,.atlas-light .cm-content { background:var(--atlas-surface-0);color:var(--atlas-text); }
+.atlas-light .cm-gutters { background:var(--atlas-surface-2)!important;color:var(--atlas-muted)!important; }
+.atlas-light .cm-activeLine,.atlas-light .cm-activeLineGutter { background:var(--atlas-surface-2)!important; }
+.atlas-light .workspace-actions button { background:var(--atlas-surface-1); }
+@container (max-width:480px) { .atlas-shell .workspace-actions { grid-template-columns:1fr; } }
+.dock-panel-host { container-type:inline-size; }
+.command-palette button.command-selected { background:var(--atlas-surface-2); outline:1px solid var(--atlas-cyan);outline-offset:-1px; }
+.command-palette button:disabled { opacity:.4; }
+.palette-empty { padding:16px;color:var(--atlas-muted); }
+.atlas-shell { grid-template-rows: 40px minmax(0, 1fr) 30px 24px; background: var(--atlas-bg); color: var(--atlas-text); }
+.atlas-shell > .atlas-command-menu { height:40px; background:var(--atlas-surface-0); }
+.atlas-shell > .terminal-dock { grid-column:1/-1; grid-row:3; }
+.atlas-shell > footer { grid-row:4; background:var(--atlas-surface-0); border-color:var(--atlas-border); }
+.atlas-shell .activity-rail, .atlas-shell .pinned-roots-rail { background:var(--atlas-surface-0); }
+.atlas-shell .rail-contexts { flex:1; min-height:48px; overflow-y:auto; scrollbar-width:thin; }
+.atlas-shell .rail-spacer { flex:0; }
+.atlas-shell button:focus-visible, .atlas-shell select:focus-visible, .atlas-shell input:focus-visible { outline:2px solid var(--atlas-focus); outline-offset:2px; }
+.atlas-shell .panel, .atlas-shell .navigator, .atlas-shell .context-sidebar, .atlas-shell .tree-explorer { background:var(--atlas-surface-1); color:var(--atlas-text); }
+.atlas-shell input, .atlas-shell select { background:var(--atlas-surface-0); color:var(--atlas-text); border-color:var(--atlas-border); }
+.atlas-shell .panel header, .atlas-shell .context-sidebar header, .atlas-shell .tree-explorer header { border-color:var(--atlas-border); }
+.atlas-shell .workspace-welcome { background:var(--atlas-surface-0); overflow:auto; }
+.atlas-shell .workspace-actions button { min-height:60px; }
+.atlas-shell .title-brand b { font-weight:650; letter-spacing:-.025em; }
+.atlas-shell .title-brand span { font-size:10px; color:var(--atlas-muted); }
+.atlas-shell .atlas-dock { --dv-group-view-background-color:var(--atlas-surface-1); --dv-tabs-and-actions-container-background-color:var(--atlas-surface-0); --dv-activegroup-visiblepanel-tab-background-color:var(--atlas-surface-2); --dv-activegroup-visiblepanel-tab-color:var(--atlas-text); --dv-inactivegroup-visiblepanel-tab-color:var(--atlas-text-soft); }
+.atlas-light .context-sidebar, .atlas-light .repository-config, .atlas-light .device-capabilities, .atlas-light .file-row, .atlas-light .pathbar, .atlas-light .context-search, .atlas-light .search-results { background:var(--atlas-surface-1); color:var(--atlas-text); border-color:var(--atlas-border); }
+.atlas-light .context-sidebar button, .atlas-light .device-capabilities button, .atlas-light .pathbar button { background:var(--atlas-surface-2); color:var(--atlas-text); border-color:var(--atlas-border); }
+@media(max-width:700px) { .atlas-shell .title-brand { gap:4px; } .atlas-shell .title-brand b { font-size:11px; } .atlas-shell .title-brand span { display:none; } .atlas-shell .footer-route { display:none; } .atlas-shell > footer { overflow:hidden;white-space:nowrap; } }

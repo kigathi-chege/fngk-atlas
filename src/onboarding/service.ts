@@ -42,9 +42,11 @@ export class BootstrapService {
     this.#now = runtime.now ?? Date.now;
   }
 
-  async check(signal?: AbortSignal): Promise<BootstrapSnapshot> {
-    abortIfNeeded(signal);
-    const runtime = await this.runtime.probe(this.#profile, signal);
+  async check(profileOrSignal?: string | AbortSignal, signal?: AbortSignal): Promise<BootstrapSnapshot> {
+    const { profile, signal: effectiveSignal } = bootstrapCheckOptions(this.#profile, profileOrSignal, signal);
+    ensureProfile(profile);
+    abortIfNeeded(effectiveSignal);
+    const runtime = await this.runtime.probe(profile, effectiveSignal);
     const state = bootstrapState(runtime);
     const local: FngkLocalStatus = {
       protocolVersion: BOOTSTRAP_PROTOCOL_VERSION,
@@ -79,7 +81,7 @@ export class BootstrapService {
     const deadline = this.#now() + this.#timeoutMs;
     while (true) {
       abortIfNeeded(signal);
-      const snapshot = await this.check(signal);
+      const snapshot = await this.check(profile, signal);
       if (snapshot.state === "ready") { yield this.#progress("complete", 100, "FNGK is ready.", "ready"); return; }
       if (this.#now() >= deadline) throw onboardingError("FNGK did not become ready before the deadline.", "bootstrap_timeout");
       yield this.#progress("converging", 40, "Waiting for the FNGK daemon.", snapshot.state);
@@ -87,9 +89,10 @@ export class BootstrapService {
     }
   }
 
-  async *repair(signal?: AbortSignal): AsyncIterable<BootstrapProgress> {
-    const snapshot = await this.check(signal);
-    if (snapshot.state === "daemon-install-choice" || snapshot.state === "recoverable-error") { yield* this.converge(this.#profile, signal); return; }
+  async *repair(profileOrSignal?: string | AbortSignal, signal?: AbortSignal): AsyncIterable<BootstrapProgress> {
+    const { profile, signal: effectiveSignal } = bootstrapCheckOptions(this.#profile, profileOrSignal, signal);
+    const snapshot = await this.check(profile, effectiveSignal);
+    if (snapshot.state === "daemon-install-choice" || snapshot.state === "recoverable-error") { yield* this.converge(profile, effectiveSignal); return; }
     yield this.#progress("complete", 100, snapshot.local.message, snapshot.state);
   }
 
@@ -115,6 +118,9 @@ function localMessage(state: BootstrapState): string {
 
 function safeErrorCode(value: string): string | undefined { return /^[a-z0-9_]{1,96}$/i.test(value) ? value : undefined; }
 function ensureProfile(value: string): void { if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value)) throw onboardingError("FNGK profile is invalid.", "profile_invalid"); }
+function bootstrapCheckOptions(defaultProfile: string, profileOrSignal?: string | AbortSignal, signal?: AbortSignal): { profile: string; signal?: AbortSignal } {
+  return typeof profileOrSignal === "string" ? { profile: profileOrSignal, signal } : { profile: defaultProfile, signal: profileOrSignal };
+}
 function abortIfNeeded(signal?: AbortSignal): void { if (signal?.aborted) throw onboardingError("FNGK bootstrap was cancelled.", "cancelled"); }
 function redactedProgress(event: BootstrapProgress): BootstrapProgress { return { ...event, message: event.message.replace(/(?:credential|password|secret|token|cookie)\s*[:=]\s*\S+/ig, "[redacted]").slice(0, 480) }; }
 function wait(milliseconds: number, signal?: AbortSignal): Promise<void> { return new Promise((resolve, reject) => { const timer = setTimeout(resolve, milliseconds); const abort = () => { clearTimeout(timer); reject(onboardingError("FNGK bootstrap was cancelled.", "cancelled")); }; if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true }); }); }

@@ -1,7 +1,83 @@
 import { expect, test } from "@playwright/test";
 
 test.setTimeout(45_000);
-const openWorkbench=async(page:any)=>{await page.goto('/');await expect(page.locator('.dv-dockview')).toBeVisible();await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('atlas.workbench.v7')??'null')?.version)).toBe(7)};
+test('does not load optional engines until their panels are opened',async({page})=>{
+  const scripts:string[]=[];
+  page.on('request',request=>{if(request.resourceType()==='script')scripts.push(request.url())});
+  await page.goto('/');
+  await expect(page.locator('.root-dock')).toHaveAttribute('data-layout-ready','true');
+  await expect(page.getByRole('heading',{name:'Start working'})).toBeVisible();
+  expect(scripts.some(url=>/TerminalPanel-|FilePanel-|SemanticAtlas-/.test(url))).toBe(false);
+  await page.getByRole('button',{name:'Open Device Atlas'}).click();
+  await expect(page.locator('[aria-label="Machine Observatory"]')).toBeVisible();
+  expect(scripts.some(url=>/SemanticAtlas-/.test(url))).toBe(true);
+});
+test('resizes workspace splitters with a keyboard',async({page})=>{
+  await page.goto('/');
+  await expect(page.locator('.root-dock')).toHaveAttribute('data-layout-ready','true');
+  const separator=page.getByRole('separator',{name:'Resize workspace columns'}).first();
+  await separator.focus();
+  const before=Number(await separator.getAttribute('aria-valuenow'));
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async()=>Number(await separator.getAttribute('aria-valuenow'))).toBeGreaterThan(before);
+});
+
+test('reopens a minimized edited preview without duplicating or losing the buffer',async({page})=>{
+  await page.goto('/');
+  await expect(page.locator('.root-dock')).toHaveAttribute('data-layout-ready','true');
+  const resource={contextId:'local',path:'/package.json'};
+  await page.evaluate(detail=>window.dispatchEvent(new CustomEvent('atlas:open-file',{detail})),resource);
+  await page.locator('.file-panel:visible .cm-content').fill('unsaved preview');
+  await page.locator('.atlas-tab[data-panel-id^="file:"] .atlas-tab-minimize').click();
+  await page.evaluate(detail=>window.dispatchEvent(new CustomEvent('atlas:open-file',{detail})),resource);
+  await expect(page.locator('.file-panel:visible .cm-content')).toContainText('unsaved preview');
+  await expect(page.locator('.file-panel')).toHaveCount(1);
+});
+test('operates commands entirely from the keyboard and reports empty results',async({page})=>{
+  await page.goto('/');
+  await expect(page.locator('.root-dock')).toHaveAttribute('data-layout-ready','true');
+  await page.keyboard.press('Control+Shift+P');
+  await page.getByRole('textbox',{name:'Command search'}).fill('no-such-command');
+  await expect(page.getByText('No matching commands')).toBeVisible();
+  await page.getByRole('textbox',{name:'Command search'}).fill('File: New Buffer');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog',{name:'Command palette'})).toBeHidden();
+  await expect(page.locator('.atlas-tab[data-panel-id^="buffer:"]')).toBeVisible();
+});
+
+test('restores minimized sidebars after reload without resetting the workspace',async({page})=>{
+  await page.goto('/');
+  await expect(page.locator('.root-dock')).toHaveAttribute('data-layout-ready','true');
+  await page.getByRole('button',{name:'Minimize Filesystem',exact:true}).click();
+  await page.reload();
+  await expect(page.locator('.root-dock')).toHaveAttribute('data-layout-ready','true');
+  await expect(page.locator('.tree-explorer')).toBeHidden();
+  await page.getByRole('button',{name:'Restore Filesystem',exact:true}).click();
+  await expect(page.locator('.tree-explorer')).toBeVisible();
+});
+
+test('keeps two terminal panes alive while minimized and restored',async({page})=>{
+  await page.goto('/');
+  await expect(page.locator('.root-dock')).toHaveAttribute('data-layout-ready','true');
+  await page.evaluate(()=>window.dispatchEvent(new Event('atlas:open-terminal')));
+  await expect(page.locator('.terminal-panel')).toContainText('Live');
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('atlas:open-terminal',{detail:{create:true,title:'Second terminal'}})));
+  await expect(page.locator('.terminal-panel')).toHaveCount(2);
+  await page.getByRole('button',{name:'Minimize Second terminal',exact:true}).click();
+  await page.getByRole('button',{name:'Restore Second terminal',exact:true}).click();
+  await expect(page.locator('.terminal-panel')).toHaveCount(2);
+});
+
+test('dismisses informational notifications automatically and errors explicitly',async({page})=>{
+  await page.goto('/');
+  await expect(page.locator('.root-dock')).toHaveAttribute('data-layout-ready','true');
+  await page.evaluate(()=>{for(const level of ['info','error'])window.dispatchEvent(new CustomEvent('atlas:notice',{detail:{id:level,message:level+' fixture',level}}))});
+  await expect(page.getByRole('button',{name:'Dismiss info fixture'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Dismiss info fixture'})).toBeHidden({timeout:7000});
+  await page.getByRole('button',{name:'Dismiss error fixture'}).click();
+  await expect(page.getByText('error fixture',{exact:true})).toBeHidden();
+});
+const openWorkbench=async(page:any)=>{await page.goto('/');await expect(page.locator('.root-dock')).toHaveAttribute('data-layout-ready','true');await expect.poll(()=>page.evaluate(()=>Object.keys(localStorage).some(key=>key.startsWith('atlas.workspace.v1:'))?7:0)).toBe(7)};
 
 test("offers one safe FNGK recovery action before the Observatory", async ({ page }) => {
   await page.route("**/api/onboarding/status", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ protocolVersion: "atlas.desktop-bootstrap.v1", state: "daemon-install-choice", local: { state: "daemon-install-choice", message: "FNGK needs its local daemon.", authenticated: false } }) }));
@@ -11,13 +87,14 @@ test("offers one safe FNGK recovery action before the Observatory", async ({ pag
   await expect(page.getByRole("button", { name: "Start FNGK daemon" })).toBeVisible();
 });
 
-test("starts in a workspace-first canvas while keeping Device Atlas available as a tab", async ({ page }) => {
+test("starts in a workspace-first canvas and opens Device Atlas on demand", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openWorkbench(page);
   await expect(page.getByRole("heading", { name: "Start working" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Device Atlas" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Device Atlas" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "kigathi" })).toHaveCount(0);
   await page.getByRole("button", { name: "Open Device Atlas" }).click();
+  await expect(page.getByRole("tab", { name: "Device Atlas" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "kigathi" })).toBeVisible();
 });
 
@@ -41,6 +118,36 @@ test("returns command-palette focus to the invoking control", async ({ page }) =
   await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(trigger).toBeFocused();
+});
+
+test('minimizes a live terminal without closing its socket or losing its renderer', async ({ page }) => {
+  const opened: string[] = [], closed: string[] = [];
+  page.on('websocket', socket => { if(socket.url().includes('/api/fngk/terminals')) { opened.push(socket.url()); socket.on('close', () => closed.push(socket.url())); } });
+  await openWorkbench(page);
+  await page.evaluate(() => window.dispatchEvent(new Event('atlas:open-terminal')));
+  await expect(page.locator('.terminal-panel')).toContainText('Live');
+  const before = opened.length;
+  await page.getByRole('button', {name:'Minimize Terminal', exact:true}).click();
+  await expect(page.locator('.terminal-panel')).toBeHidden();
+  await expect(page.getByRole('navigation', {name:'Terminal dock'})).toBeVisible();
+  await page.getByRole('button', {name:'Restore Terminal', exact:true}).click();
+  await expect(page.locator('.terminal-panel')).toContainText('Live');
+  expect(closed).toHaveLength(0);
+  expect(opened).toHaveLength(before);
+});
+
+test("opens lifecycle from the rail and explains selected-device readiness", async ({ page }) => {
+  await page.route("**/api/device-lifecycle?**", route => route.fulfill({ json: {
+    protocolVersion: "atlas.device-lifecycle.v1", contextId: "device:device-1", state: "needs-login", profileSelection: "automatic",
+    profiles: [{ name: "local", current: true, mode: "user", paired: true, operatorAuthorized: false, daemon: "running" }],
+    profile: { name: "local", current: true, mode: "user", paired: true, operatorAuthorized: false, daemon: "running" },
+    diagnostics: [{ code: "operator_authorization_required", message: "Authorize the selected FNGK profile before managing this Device." }],
+  } }));
+  await openWorkbench(page);
+  await page.getByLabel(/kigathi/).first().click();
+  await page.getByRole("button", { name: "Open Device lifecycle" }).click();
+  await expect(page.locator(".device-lifecycle-panel")).toContainText("Sign in required");
+  await expect(page.getByText("Authorize the selected FNGK profile before managing this Device.")).toBeVisible();
 });
 
 test('builds the first Device Observatory from a fresh database without a manual scan',async({page})=>{
@@ -156,7 +263,7 @@ test("uses only canonical observatory APIs", async ({ page }) => {
   expect(forbidden).toEqual([]);
 });
 
-test("opens on the semantic Device atlas and preserves deep navigation in browser history", async ({
+test("opens the semantic Device atlas and preserves deep navigation in browser history", async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -165,8 +272,8 @@ test("opens on the semantic Device atlas and preserves deep navigation in browse
   });
   page.on("pageerror", (error) => errors.push(error.message));
   await openWorkbench(page);
-  await expect(page.getByRole("tab", { name: "Device Atlas" })).toBeVisible();
   await page.getByRole("button", { name: "Open Device Atlas" }).click();
+  await expect(page.getByRole("tab", { name: "Device Atlas" })).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Atlas views" }),
   ).toBeVisible();
@@ -217,9 +324,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
   await page.getByRole("button", { name: "Search" }).first().click();
   await expect(page.getByLabel("Search Atlas")).toBeFocused();
   await expect(page.locator(".context-rail")).toBeVisible();
-  await expect(
-    page.getByText("Device Atlas", { exact: true }).first(),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Device Atlas" })).toBeVisible();
   await expect(page.getByText("Functions & coverage", { exact: true })).toHaveCount(0);
   await expect(
     page.getByText("Filesystem", { exact: true }).first(),
@@ -846,7 +951,7 @@ test("discards the legacy workbench schema and restores a full-height six-pixel 
       center: group(".atlas-workspace-anchor"),
       filesystem: group(".tree-explorer"),
       legacy: localStorage.getItem("atlas.workbench.v2"),
-      saved: JSON.parse(localStorage.getItem("atlas.workbench.v7") ?? "null"),
+      saved: JSON.parse(localStorage.getItem(Object.keys(localStorage).find(key=>key.startsWith('atlas.workspace.v1:'))??'') ?? "null")?.layout,
     };
   });
   expect(geometry.legacy).toBeNull();
@@ -863,6 +968,8 @@ test("keeps sidebar widths and the center workspace when central tabs close", as
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openWorkbench(page);
+  await page.getByRole("button", { name: "Open Device Atlas" }).click();
+  await expect(page.getByRole("tab", { name: "Device Atlas" })).toBeVisible();
   const widths = await page.evaluate(() => ({
     left: document
       .querySelector(".context-sidebar")
@@ -933,6 +1040,8 @@ test('keeps Operations closed until requested and manages a verified HTTP share'
   await page.route('**/api/ports/http-8000/publish',route=>{const value={id:'share-1',candidateId:candidate.id,contextId:'local',port:8000,connectionId:'connection-1',hostname:'fixture.hkmn.test',url:'https://fixture.hkmn.test/',publishedAt:new Date().toISOString(),status:'published'};published=[value];return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify(value)})});
   await page.route('**/api/ports/http-8000/stop',route=>{published=published.map(value=>({...value,status:'stopped'}));return route.fulfill({contentType:'application/json',body:JSON.stringify(published[0])})});
   await openWorkbench(page);
+  await page.getByRole('button',{name:'Open Device Atlas'}).click();
+  await expect(page.getByRole('tab',{name:'Device Atlas'})).toBeVisible();
   await expect(page.locator('.atlas-tab[data-panel-id="atlas.operations"]')).toHaveCount(0);
   await page.locator('.context-sidebar').getByRole('button',{name:'Ports'}).click();
   await expect(page.getByRole('tab',{name:'HTTP ports'})).toBeVisible();
