@@ -6,11 +6,32 @@ import { FngkProcessClient, FngkProcessError } from '../../src/fngk/process-clie
 const fixture = path.resolve('test/fixtures/fngk.mjs');
 
 describe('FngkProcessClient', () => {
+  it('inherits request-local profiles without overriding explicit choices',async()=>{
+    const client=new FngkProcessClient({binary:fixture});
+    client.setProfileProvider(()=> 'work');
+    expect((await client.namespace()).profile.name).toBe('work');
+    expect((await client.namespace('personal')).profile.name).toBe('personal');
+    const terminal=client.openTerminal('device:one');
+    const [ready]=await once(terminal,'ready');
+    expect(ready.argv).toContain('work');
+    terminal.detach('test');
+  });
   it('probes the installed binary and consumes the secret-free namespace protocol', async () => {
     const client = new FngkProcessClient({ binary: fixture });
     const state = await client.probe('work');
     expect(state).toMatchObject({ binary: fixture, installed: true, compatible: true, version: '1.4.0', profile: 'work', namespaceProtocol: 'fngk.namespace.v1' });
     expect(state.namespace?.devices).toEqual([expect.objectContaining({ id: 'device-1', name: 'kigathi', online: true })]);
+  });
+
+  it('lists only safe local profile readiness metadata', async () => {
+    const profiles = await new FngkProcessClient({ binary: fixture }).profiles();
+    expect(profiles).toEqual({
+      protocolVersion: 'fngk.profiles.v1',
+      profiles: [
+        { name: 'local', current: true, mode: 'user', paired: true, operatorAuthorized: true, daemon: 'running' },
+        { name: 'work', current: false, mode: 'user', paired: true, operatorAuthorized: false, daemon: 'stopped' },
+      ],
+    });
   });
 
   it('reports unsupported protocols without accepting their data', async () => {

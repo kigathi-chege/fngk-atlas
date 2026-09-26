@@ -24,6 +24,20 @@ export interface FngkContextState {
   namespace?: NamespaceSnapshot;
 }
 
+export interface FngkProfileSummary {
+  name: string;
+  current: boolean;
+  mode: string;
+  paired: boolean;
+  operatorAuthorized: boolean;
+  daemon: 'running' | 'stopped' | 'unknown';
+}
+
+export interface FngkProfilesDocument {
+  protocolVersion: 'fngk.profiles.v1';
+  profiles: FngkProfileSummary[];
+}
+
 export class FngkProcessError extends Error {
   constructor(readonly code: string, message: string, readonly exitCode?: number | null) {
     super(redact(message));
@@ -32,6 +46,8 @@ export class FngkProcessError extends Error {
 }
 
 export class FngkProcessClient {
+  #profileProvider:()=>string|undefined=()=>undefined;
+  setProfileProvider(provider:()=>string|undefined){this.#profileProvider=provider;}
   readonly binary: string;
   readonly timeoutMs: number;
   readonly env: NodeJS.ProcessEnv;
@@ -43,6 +59,8 @@ export class FngkProcessClient {
   }
 
   async #run(args: string[], signal?: AbortSignal, input?:string): Promise<string> {
+    const profile=this.#profileProvider();
+    if(profile&&!args.includes('--profile')&&!['version','profiles'].includes(args[0]))args=[...args,'--profile',profile];
     return await new Promise((resolve, reject) => {
       const child = spawn(this.binary, args, { env: this.env, stdio: [input===undefined?'ignore':'pipe', 'pipe', 'pipe'] });
       let stdout = '', stderr = '', settled = false;
@@ -80,6 +98,26 @@ export class FngkProcessClient {
     const value=JSON.parse((await this.#run(args,signal)).trim()) as NativeFileBindings;
     if(value.protocolVersion!==FILES_PROTOCOL||!value.profile||!Array.isArray(value.bindings))throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported Files protocol.');
     return value;
+  }
+
+  async profiles(signal?: AbortSignal): Promise<FngkProfilesDocument> {
+    let value: unknown;
+    try {
+      value = JSON.parse((await this.#run(['profiles', '--json'], signal)).trim());
+    } catch (error) {
+      if (error instanceof FngkProcessError) throw error;
+      throw new FngkProcessError('profiles_protocol_invalid', 'FNGK returned malformed profile metadata.');
+    }
+    const document = value as Partial<FngkProfilesDocument>;
+    const validState = (candidate: unknown, allowed: readonly string[]) => typeof candidate === 'string' && allowed.includes(candidate);
+    if (document.protocolVersion !== 'fngk.profiles.v1' || !Array.isArray(document.profiles) || document.profiles.some(profile =>
+      !profile || typeof profile.name !== 'string' || !profile.name || typeof profile.current !== 'boolean' || typeof profile.mode !== 'string' ||
+      typeof profile.paired !== 'boolean' || typeof profile.operatorAuthorized !== 'boolean' || !validState(profile.daemon, ['running', 'stopped', 'unknown']),
+    )) throw new FngkProcessError('unsupported_protocol', 'FNGK returned an unsupported profile protocol.');
+    return {
+      protocolVersion: 'fngk.profiles.v1',
+      profiles: document.profiles.map(profile => ({ name: profile.name, current: profile.current, mode: profile.mode, paired: profile.paired, operatorAuthorized: profile.operatorAuthorized, daemon: profile.daemon })),
+    } as FngkProfilesDocument;
   }
 
   async invokeFileBinding(bindingId:string,capability:string,input:Record<string,unknown>,options:{profile?:string;confirm?:boolean;signal?:AbortSignal}={}):Promise<{protocolVersion:typeof FILES_PROTOCOL;output:any}>{
@@ -165,6 +203,7 @@ export class FngkProcessClient {
 
   openTerminal(target: string, options: { newSession?: boolean; sessionId?: string; profile?: string; signal?: AbortSignal } = {}): TerminalSession {
     const args = [target];
+    options={...options,profile:options.profile??this.#profileProvider()};
     if (options.newSession) args.push('--new');
     if (options.sessionId) args.push('--session', options.sessionId);
     if (options.profile) args.push('--profile', options.profile);

@@ -31,6 +31,16 @@ describe("desktop FNGK onboarding", () => {
     expect(progress.at(-1)).toMatchObject({ phase: "complete", state: "ready" });
   });
 
+  it("checks the selected profile rather than silently falling back to local", async () => {
+    const profiles: string[] = [];
+    const service = new BootstrapService({
+      probe: async profile => { profiles.push(profile ?? ""); return state({ profile }); },
+      install: async () => {},
+    });
+    await service.check("work");
+    expect(profiles).toEqual(["work"]);
+  });
+
   it("reports a bounded timeout and observes cancellation without leaking stderr", async () => {
     const service = new BootstrapService({ probe: async () => state({ compatible: false, daemon: "unknown", reason: "daemon_unavailable" }), install: async () => {}, delay: async () => {} }, { timeoutMs: 0 });
     await expect(async () => { for await (const _event of service.converge("local")) { /* exhaust */ } }).rejects.toMatchObject({ code: "bootstrap_timeout" });

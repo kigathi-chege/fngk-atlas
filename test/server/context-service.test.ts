@@ -13,6 +13,22 @@ class TerminalDouble extends EventEmitter {
 }
 
 describe('effective context route lifecycle',()=>{
+  it('isolates simultaneous profile discovery and remote routes',async()=>{
+    const probes:string[]=[],opened:string[]=[],namespaces:string[]=[];
+    const fngk={
+      probe:async(profile:string)=>{probes.push(profile);await new Promise(resolve=>setTimeout(resolve,5));return{compatible:true,profile,namespace:{devices:[]}}},
+      fileBindings:async(profile:string)=>({profile:{name:profile},bindings:[]}),
+      namespace:async(profile:string)=>{namespaces.push(profile);return{devices:[{id:'online',online:true}]}},
+      openTerminal:(_target:string,options:any)=>{opened.push(options.profile);return new TerminalDouble()}
+    };
+    const contexts=new EffectiveContextService(fngk as any);
+    const [a,b]=await Promise.all([contexts.contexts({profile:'a'}),contexts.contexts({profile:'b'})]);
+    expect(a.state.profile).toBe('a');expect(b.state.profile).toBe('b');
+    expect(probes).toEqual(['a','b']);
+    const left=await contexts.route('device:online','a'),right=await contexts.route('device:online','b');
+    expect(left).not.toBe(right);expect(opened).toEqual(['a','b']);expect(namespaces).toEqual(['a','b']);
+    contexts.close();
+  });
   it('coalesces and briefly caches namespace and file-binding discovery',async()=>{
     let probes=0,bindings=0;
     const fngk={
