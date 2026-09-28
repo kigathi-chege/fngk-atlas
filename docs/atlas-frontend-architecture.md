@@ -54,3 +54,11 @@ npm run test:e2e -- --grep "documentation|terminal"
 | terminal behavior | `TerminalPanel.svelte`, `api.ts` | terminal e2e tests |
 | docs/help | `documentation.ts`, `DocumentationPanel.svelte` | `test/web/documentation.test.ts` |
 | visual shell | `workspace.css`, target component | `npm run check:web` |
+
+## Manual acceptance checklist
+
+- Open Documentation from the rail and with `Ctrl/Cmd+Shift+P`; verify the guide is readable with no network connection.
+- Open contextual Help from Terminal, Filesystem, Database, Live Project, Deployment, Ports, Lifecycle, Logs, and Observatory; verify the matching topic opens.
+- Dispatch an unknown topic only in development tools; verify the reader shows its recoverable unavailable state rather than throwing.
+- Follow a related-tool action and verify it focuses or creates the intended standard workspace panel, never Operations unless that tool normally belongs there.
+- With a live terminal open, open terminal documentation, minimize and restore the guide, then minimize and restore the terminal. The original session must remain live and no profile-switch confirmation should appear.
