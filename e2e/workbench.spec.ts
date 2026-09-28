@@ -136,7 +136,9 @@ test('minimizes a live terminal without closing its socket or losing its rendere
   expect(opened).toHaveLength(before);
 });
 
-test('opens local documentation from the rail without changing a live terminal session', async ({ page }) => {
+test('documentation preserves terminal session continuity', async ({ page }) => {
+  const opened: string[] = [], closed: string[] = [];
+  page.on('websocket', socket => { if (socket.url().includes('/api/fngk/terminals')) { opened.push(socket.url()); socket.on('close', () => closed.push(socket.url())); } });
   await openWorkbench(page);
   await page.evaluate(() => window.dispatchEvent(new Event('atlas:open-terminal')));
   await expect(page.locator('.terminal-panel')).toContainText('Live');
@@ -144,9 +146,14 @@ test('opens local documentation from the rail without changing a live terminal s
   await page.getByRole('button', { name: 'Open documentation' }).click();
   await expect(page.getByRole('region', { name: 'Atlas documentation' })).toBeVisible();
   await expect(page.locator('.documentation-article h1', { hasText: 'Workspace and panels' })).toBeVisible();
+  const openedBeforeDocumentation = opened.length;
+  await page.getByRole('button', { name: 'Minimize Documentation', exact: true }).click();
+  await page.getByRole('button', { name: 'Restore Documentation', exact: true }).click();
   await page.getByRole('button', { name: /Terminals and sessions/ }).click();
   await page.getByRole('button', { name: 'Open Terminal', exact: true }).click();
   await expect(page.locator('.terminal-panel')).toHaveCount(terminalCount);
+  expect(closed).toHaveLength(0);
+  expect(opened).toHaveLength(openedBeforeDocumentation);
 });
 
 test("opens lifecycle from the rail and explains selected-device readiness", async ({ page }) => {
