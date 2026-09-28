@@ -34,6 +34,8 @@ Or use `docker compose up --build`, then open <http://localhost:4317> on the hos
 
 ## Analysis model
 
+Maintainers: see the [Atlas frontend architecture guide](docs/atlas-frontend-architecture.md) for the renderer, workspace, terminal, documentation, and verification model.
+
 - TypeScript/JavaScript/Svelte use the TypeScript compiler AST.
 - Python uses its standard AST in an external parser process.
 - Go and PHP currently receive structural function analysis; their analyzer boundary is ready for compiler-grade enrichers.
