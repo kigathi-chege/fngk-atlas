@@ -1,5 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {AtlasCommandRegistry} from '../../src/web/lib/command-registry.js';
+import { registerDocumentationCommands } from '../../src/web/lib/command-registry.js';
 
 describe('Atlas command registry',()=>{
   it('routes every trigger through one canonical command',async()=>{
@@ -23,5 +24,16 @@ describe('Atlas command registry',()=>{
     registry.register({id:'z',label:'Zulu',run:()=>{}});registry.register({id:'a',label:'Alpha',run:()=>{}});
     unsubscribe();registry.register({id:'b',label:'Beta',run:()=>{}});
     expect(snapshots).toEqual([[],['Zulu'],['Alpha','Zulu']]);
+  });
+
+  it('registers searchable documentation commands that use one opening callback', async () => {
+    const registry = new AtlasCommandRegistry();
+    const opened: Array<string | undefined> = [];
+    const unregister = registerDocumentationCommands(registry, topicId => opened.push(topicId));
+    expect(registry.search('documentation').map(command => command.label)).toContain('Documentation: Open guide');
+    expect(registry.search('sessions').map(command => command.label)).toContain('Documentation: Terminals and sessions');
+    await registry.execute('documentation.terminals');
+    expect(opened).toEqual(['terminals']);
+    unregister();
   });
 });

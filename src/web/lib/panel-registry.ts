@@ -7,7 +7,7 @@ export interface AtlasPanelDescriptor {
   minimized?:boolean;
 }
 
-const safeKeys=new Set(['contextId','path','line','sessionId','session','panelId','targetContextId','repositoryPath','view','diagnosticId','target','profile','bufferId','root','lens','indexId']);
+const safeKeys=new Set(['contextId','path','line','sessionId','session','panelId','targetContextId','repositoryPath','view','diagnosticId','target','profile','bufferId','root','lens','indexId','topicId']);
 const safeParams=(params:Record<string,unknown>|undefined)=>{
   if(!params)return undefined;
   const safe=Object.fromEntries(Object.entries(params).filter(([key,value])=>safeKeys.has(key)&&['string','number','boolean'].includes(typeof value)));

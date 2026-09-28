@@ -136,6 +136,19 @@ test('minimizes a live terminal without closing its socket or losing its rendere
   expect(opened).toHaveLength(before);
 });
 
+test('opens local documentation from the rail without changing a live terminal session', async ({ page }) => {
+  await openWorkbench(page);
+  await page.evaluate(() => window.dispatchEvent(new Event('atlas:open-terminal')));
+  await expect(page.locator('.terminal-panel')).toContainText('Live');
+  const terminalCount = await page.locator('.terminal-panel').count();
+  await page.getByRole('button', { name: 'Open documentation' }).click();
+  await expect(page.getByRole('region', { name: 'Atlas documentation' })).toBeVisible();
+  await expect(page.locator('.documentation-article h1', { hasText: 'Workspace and panels' })).toBeVisible();
+  await page.getByRole('button', { name: /Terminals and sessions/ }).click();
+  await page.getByRole('button', { name: 'Open Terminal', exact: true }).click();
+  await expect(page.locator('.terminal-panel')).toHaveCount(terminalCount);
+});
+
 test("opens lifecycle from the rail and explains selected-device readiness", async ({ page }) => {
   await page.route("**/api/device-lifecycle?**", route => route.fulfill({ json: {
     protocolVersion: "atlas.device-lifecycle.v1", contextId: "device:device-1", state: "needs-login", profileSelection: "automatic",

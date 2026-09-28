@@ -36,4 +36,13 @@ describe('Atlas documentation registry', () => {
     expect(panel).toContain('Documentation unavailable');
     expect(panel).toContain('atlas:open-documentation-action');
   });
+
+  it('opens documentation through a validated workbench event instead of the operations dock', async () => {
+    const root = resolve(import.meta.dirname, '../..');
+    const workbench = await readFile(resolve(root, 'src/web/components/Workbench.svelte'), 'utf8');
+    expect(workbench).toContain("const openDocumentation=(event?:Event)=>");
+    expect(workbench).toContain("window.addEventListener('atlas:open-documentation',openDocumentation)");
+    expect(workbench).toContain("window.addEventListener('atlas:open-documentation-action',openDocumentationAction)");
+    expect(workbench).toContain("id='atlas.documentation'");
+  });
 });

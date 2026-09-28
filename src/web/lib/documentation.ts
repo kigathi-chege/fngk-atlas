@@ -21,7 +21,7 @@ export interface AtlasDocumentationTopic {
 const raw = (loader: () => Promise<{ default: string }>) => async () => (await loader()).default;
 
 export const atlasDocumentation: readonly AtlasDocumentationTopic[] = Object.freeze([
-  {id:'workspace',title:'Workspace and panels',category:'Getting started',summary:'Arrange tools without losing their state.',relatedPanels:['atlas.workspace','atlas.navigator','atlas.filesystem'],actions:[{label:'Open Workspace',event:'atlas:open-workspace'}],load:raw(()=>import('../docs/workspace.md?raw'))},
+  {id:'workspace',title:'Workspace and panels',category:'Getting started',summary:'Arrange tools without losing their state.',relatedPanels:['atlas.workspace','atlas.navigator','atlas.filesystem'],actions:[{label:'Open Filesystem',event:'atlas:focus-files'}],load:raw(()=>import('../docs/workspace.md?raw'))},
   {id:'devices',title:'Devices and contexts',category:'Getting started',summary:'Choose the FNGK Device and context that Atlas is operating on.',relatedPanels:['atlas.observatory','atlas.navigator'],actions:[{label:'Open Device Atlas',event:'atlas:open-device-atlas'}],load:raw(()=>import('../docs/devices.md?raw'))},
   {id:'terminals',title:'Terminals and sessions',category:'Operate',summary:'Open, reconnect, minimize, archive, and recover retained terminal sessions.',relatedPanels:['atlas.terminal'],actions:[{label:'Open Terminal',event:'atlas:open-terminal'}],load:raw(()=>import('../docs/terminals.md?raw'))},
   {id:'files',title:'Files and editors',category:'Operate',summary:'Browse, open, edit, save, and pin files on the selected Device.',relatedPanels:['atlas.filesystem'],actions:[{label:'Open Filesystem',event:'atlas:open-root',detail:{path:'/'} }],load:raw(()=>import('../docs/files.md?raw'))},
@@ -36,4 +36,5 @@ export const atlasDocumentation: readonly AtlasDocumentationTopic[] = Object.fre
 export const documentationTopicIds = Object.freeze(atlasDocumentation.map(topic => topic.id));
 const byId = new Map(atlasDocumentation.map(topic => [topic.id, topic]));
 export function findDocumentationTopic(id: string | undefined): AtlasDocumentationTopic | undefined { return id ? byId.get(id as DocumentationTopicId) : undefined; }
+export function findDocumentationAction(topicId: string | undefined,event: string | undefined): AtlasDocumentationAction | undefined { return findDocumentationTopic(topicId)?.actions.find(action=>action.event===event); }
 export async function loadDocumentationTopic(id: string | undefined): Promise<string | undefined> { return await findDocumentationTopic(id)?.load(); }

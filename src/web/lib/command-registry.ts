@@ -1,3 +1,5 @@
+import {atlasDocumentation,type DocumentationTopicId} from './documentation.js';
+
 export interface AtlasCommand {
   id:string;
   label:string;
@@ -29,4 +31,10 @@ export class AtlasCommandRegistry {
   subscribe(listener:(commands:AtlasCommand[])=>void){this.#listeners.add(listener);listener(this.#snapshot());return()=>this.#listeners.delete(listener)}
   #snapshot(){return [...this.#commands.values()].sort((left,right)=>left.label.localeCompare(right.label))}
   #publish(){const snapshot=this.#snapshot();for(const listener of this.#listeners)listener(snapshot)}
+}
+
+export function registerDocumentationCommands(registry:AtlasCommandRegistry,open:(topicId?:DocumentationTopicId)=>void){
+  const unregister=[registry.register({id:'documentation.open',label:'Documentation: Open guide',keywords:['help','manual','offline guide'],run:()=>open()})];
+  for(const topic of atlasDocumentation)unregister.push(registry.register({id:`documentation.${topic.id}`,label:`Documentation: ${topic.title}`,keywords:[topic.category,topic.summary,...topic.relatedPanels],run:()=>open(topic.id)}));
+  return()=>{for(const remove of unregister)remove()};
 }

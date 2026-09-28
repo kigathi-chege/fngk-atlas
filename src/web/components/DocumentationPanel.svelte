@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import type { AtlasDocumentationAction, AtlasDocumentationTopic, DocumentationTopicId } from '../lib/documentation.js';
   import { atlasDocumentation, findDocumentationTopic, loadDocumentationTopic } from '../lib/documentation.js';
   import './DocumentationPanel.css';
@@ -13,7 +13,6 @@
     | { kind: 'code'; text: string };
   type InlinePart = { kind: 'text' | 'code'; text: string } | { kind: 'topic'; text: string; topicId: string };
 
-  const dispatch = createEventDispatcher<{ 'atlas:open-documentation-action': { topicId: DocumentationTopicId; action: AtlasDocumentationAction } }>();
   let search = '';
   let selectedId = 'workspace';
   let appliedTopic: string | undefined;
@@ -80,7 +79,7 @@
 
   function selectTopic(id: string) { selectedId = id; }
   function openAction(action: AtlasDocumentationAction) {
-    if (selectedTopic) dispatch('atlas:open-documentation-action', { topicId: selectedTopic.id, action });
+    if (selectedTopic) window.dispatchEvent(new CustomEvent('atlas:open-documentation-action', { detail: { topicId: selectedTopic.id, action } }));
   }
 
   onMount(() => { mounted = true; });
