@@ -26,6 +26,7 @@
 .atlas-light .workspace-actions button { background:var(--atlas-surface-1); }
 @container (max-width:480px) { .atlas-shell .workspace-actions { grid-template-columns:1fr; } }
 .dock-panel-host { container-type:inline-size; }
+.atlas-shell .documentation-panel { background:var(--atlas-surface-1);color:var(--atlas-text); }
 .command-palette button.command-selected { background:var(--atlas-surface-2); outline:1px solid var(--atlas-cyan);outline-offset:-1px; }
 .command-palette button:disabled { opacity:.4; }
 .palette-empty { padding:16px;color:var(--atlas-muted); }
