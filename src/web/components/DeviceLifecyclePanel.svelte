@@ -2,7 +2,7 @@
   import {onMount} from 'svelte';
   import {api} from '../lib/api.js';
   import type {WorkbenchState} from '../lib/workbench-state.js';
-  import type {DeviceReadiness} from '../../lifecycle/service.js';
+  import type {DeviceReadiness} from '../../lifecycle/service.js';import DocumentationHelp from './DocumentationHelp.svelte';
   export let state:WorkbenchState;
   let contextId='',profile='',loading=false,error='',value:DeviceReadiness|undefined;
   let sequence=0;
@@ -17,6 +17,7 @@
   }
   onMount(()=>{const unsubscribe=state.subscribe(snapshot=>{const next=snapshot.connection.profile??'';if(snapshot.contextId!==contextId||next!==profile){contextId=snapshot.contextId;profile=next;void refresh()}});return()=>{sequence++;unsubscribe()}});
 </script>
+<DocumentationHelp topicId="recovery" label="Recovery documentation"/>
 <section class="device-lifecycle-panel" aria-label="Device lifecycle">
   <header><small>DEVICE MANAGEMENT</small><h2>{contextId.startsWith('device:')?'Connection & recovery':'Select a Device'}</h2><p class="identity">{contextId}</p></header>
   {#if contextId.startsWith('device:')}

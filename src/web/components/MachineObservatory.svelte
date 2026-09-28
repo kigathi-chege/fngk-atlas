@@ -2,6 +2,7 @@
   import ObservatoryAttention from './ObservatoryAttention.svelte';
   import ObservatoryFlow from './ObservatoryFlow.svelte';
   import ObservatoryRegion from './ObservatoryRegion.svelte';
+  import DocumentationHelp from './DocumentationHelp.svelte';
   export let projection: any;
   export let onenter: (id: string) => void = () => {};
   export let oninspect: (item: any) => void = () => {};
@@ -11,7 +12,7 @@
 
 {#if model}
   <main class:offline={!model.identity.online} class={`machine-observatory health-${model.health}`} aria-label="Machine Observatory">
-    <header class="observatory-identity">
+    <header class="observatory-identity"><DocumentationHelp topicId="observability" label="Observability documentation"/>
       <div>
         <small>{model.identity.online ? 'LIVE DEVICE' : 'LAST OBSERVED DEVICE'}</small>
         <h2>{model.identity.label}</h2>

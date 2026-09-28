@@ -1,5 +1,5 @@
 <script lang="ts">
-  import {onMount} from 'svelte';import {api,atlasWebSocket} from '../lib/api.js';import type {WorkbenchState} from '../lib/workbench-state.js';
+  import {onMount} from 'svelte';import {api,atlasWebSocket} from '../lib/api.js';import type {WorkbenchState} from '../lib/workbench-state.js';import DocumentationHelp from './DocumentationHelp.svelte';
   import Play from '@lucide/svelte/icons/play';import Square from '@lucide/svelte/icons/square';import ExternalLink from '@lucide/svelte/icons/external-link';import Stethoscope from '@lucide/svelte/icons/stethoscope';import RotateCw from '@lucide/svelte/icons/rotate-cw';import CirclePause from '@lucide/svelte/icons/circle-pause';import FolderOpen from '@lucide/svelte/icons/folder-open';
   export let params:Record<string,unknown>;export let state:WorkbenchState;
   let contextId=String(params.contextId??state.snapshot().contextId),repositoryPath=String(params.repositoryPath??'/workspace'),command=String(params.command??'npm run dev -- --host 0.0.0.0 --port 8000'),port=Number(params.port??8000),sessions:any[]=[];let current:any,status='';let confirmStart=false,diagnostics:any,stream:WebSocket|undefined;
@@ -12,6 +12,7 @@
   function browse(){window.dispatchEvent(new CustomEvent('atlas:pick-directory',{detail:{contextId,path:repositoryPath,target:'live-project'}}))}
   onMount(()=>{const picked=(event:Event)=>{const detail=(event as CustomEvent<{contextId:string;path:string;target?:string}>).detail;if(detail?.contextId===contextId&&detail.target==='live-project')repositoryPath=detail.path};window.addEventListener('atlas:directory-picked',picked);void load().then(()=>{if(current)watch(current)});return()=>{stream?.close();window.removeEventListener('atlas:directory-picked',picked)}});
 </script>
+<DocumentationHelp topicId="live-projects" label="Live project documentation"/>
 <section class="panel live-project-panel">
   <header><strong>Live project</strong><span>{current?.status??'idle'} · {contextId}</span><button title="Refresh sessions" onclick={load}><RotateCw size={13}/></button></header>
   {#if current?.url&&['running','starting'].includes(current.status)}

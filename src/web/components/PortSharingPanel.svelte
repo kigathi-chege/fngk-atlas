@@ -1,7 +1,7 @@
 <script lang="ts">
   import {onMount} from 'svelte';
   import {api} from '../lib/api.js';
-  import type {WorkbenchState} from '../lib/workbench-state.js';
+  import type {WorkbenchState} from '../lib/workbench-state.js';import DocumentationHelp from './DocumentationHelp.svelte';
   import RefreshCw from '@lucide/svelte/icons/refresh-cw';import Globe2 from '@lucide/svelte/icons/globe-2';import Square from '@lucide/svelte/icons/square';import ExternalLink from '@lucide/svelte/icons/external-link';
   export let params:Record<string,unknown>;export let state:WorkbenchState;
   let contextId=String(params.contextId??state.snapshot().contextId),candidates:any[]=[],published:any[]=[],status='',busy=false,confirm:any;
@@ -14,6 +14,7 @@
   async function stop(item:any){busy=true;try{const value=await api<any>(`/api/ports/${encodeURIComponent(item.candidateId)}/stop`,{method:'POST',body:JSON.stringify({confirm:true})});published=published.map(entry=>entry.id===value.id?value:entry);candidates=[...candidates];status='Public route stopped'}catch(error){status=(error as Error).message}finally{busy=false}}
   onMount(load);
 </script>
+<DocumentationHelp topicId="live-projects" label="Port sharing documentation"/>
 <section class="panel port-sharing-panel">
   <header><div><strong>HTTP ports</strong><span>{contextId}</span></div><button title="Scan listening HTTP ports" disabled={busy} onclick={scan}><RefreshCw size={13}/></button></header>
   <div class="port-list">

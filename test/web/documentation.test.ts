@@ -45,4 +45,14 @@ describe('Atlas documentation registry', () => {
     expect(workbench).toContain("window.addEventListener('atlas:open-documentation-action',openDocumentationAction)");
     expect(workbench).toContain("id='atlas.documentation'");
   });
+
+  it('provides one shared, registry-backed contextual help control on every supported surface', async () => {
+    const root = resolve(import.meta.dirname, '../..');
+    const expected: Record<string, string> = { TerminalPanel: 'terminals', FilesystemTree: 'files', DatabasePanel: 'databases', LiveProjectPanel: 'live-projects', DeploymentPanel: 'deployments', PortSharingPanel: 'live-projects', DeviceLifecyclePanel: 'recovery', LogsPanel: 'observability', MachineObservatory: 'observability' };
+    for (const [component, topicId] of Object.entries(expected)) {
+      const source = await readFile(resolve(root, `src/web/components/${component}.svelte`), 'utf8');
+      expect(source).toContain('DocumentationHelp');
+      expect(source).toContain(`topicId="${topicId}"`);
+    }
+  });
 });
