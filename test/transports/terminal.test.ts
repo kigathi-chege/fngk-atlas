@@ -33,6 +33,14 @@ describe('terminal-backed effective access', () => {
     terminal.detach('done'); await once(terminal, 'close');
   });
 
+  it('closes a terminal transport through a detach handshake', async () => {
+    const terminal = new FngkProcessClient({ binary: fixture }).openTerminal('device-1', { newSession: true });
+    await once(terminal, 'ready');
+    expect(terminal.close('device-session-idle')).toBe(true);
+    await once(terminal, 'close');
+    expect(terminal.closed).toBe(true);
+  });
+
   it('uses read-only inline probes and provides terminal fallback outside adapter roots', async () => {
     const commands: string[] = [];
     const executor: CommandExecutor = { execute: async command => {

@@ -51,6 +51,8 @@ import { BootstrapService } from "../onboarding/service.js";
 import { AuthFlow } from "../onboarding/auth-flow.js";
 import { createLocalFngkLoginLauncher, FngkBrowserAuthorizationRuntime } from "../onboarding/fngk-auth.js";
 import { DeviceLifecycleService } from "../lifecycle/service.js";
+import { DeviceSessionManager } from "../device-sessions/manager.js";
+import type { DeviceScope } from "../device-sessions/types.js";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -171,6 +173,14 @@ export async function createApp(
   const contexts = new EffectiveContextService(fngk, {
     profile:profileScope.current,
     localRoot: options.localRoot,
+  });
+  const deviceSessions = new DeviceSessionManager({
+    createSession: (scope, signal) =>
+      fngk.openTerminal(`device:${scope.deviceId}`, {
+        newSession: true,
+        profile: scope.profile,
+        signal,
+      }),
   });
   const retryableFileFailure=(error:unknown)=>{const value=error as {code?:string;causes?:Array<{code?:string}>};return value.code==='route_unavailable'&&value.causes?.some(cause=>['terminal_closed','timeout','process_error','process_failed','invalid_json','unsupported_protocol'].includes(String(cause.code)))===true};
   const readThroughFiles=async<T>(contextId:string,operation:(service:Awaited<ReturnType<EffectiveContextService['files']>>)=>Promise<T>)=>{try{return await operation(await contexts.files(contextId))}catch(error){if(contextId==='local'||!retryableFileFailure(error))throw error;contexts.release(contextId);return await operation(await contexts.files(contextId))}};
@@ -421,6 +431,7 @@ export async function createApp(
   });
   await app.register(websocket);
   app.addHook("onClose", async () => {
+    await deviceSessions.close();
     await liveProjects.close();
     await headHandoffs.close();
     portSharing.close();
@@ -443,6 +454,31 @@ export async function createApp(
       );
     return payload;
   });
+
+  const scopeError = (code: string, message: string) => Object.assign(new Error(message), { code });
+  const scopeField = (value: unknown) => typeof value === 'string' && value ? value : undefined;
+  const resolveDeviceScope = async (input: Record<string, unknown>, request: { raw: NodeJS.EventEmitter }, reply?: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }): Promise<DeviceScope> => {
+    const requestedProfile = scopeField(input.profile), selectedProfile = profileScope.current();
+    if (requestedProfile && selectedProfile && requestedProfile !== selectedProfile) throw scopeError('device_scope_mismatch', 'The requested profile does not match this request scope.');
+    const namespace = await fngk.namespace(requestedProfile ?? selectedProfile, requestSignal(request, reply));
+    const deviceId = scopeField(input.deviceId);
+    if (!deviceId) throw scopeError('context_not_found', 'A Device identifier is required.');
+    const device = namespace.devices.find(value => value.id === deviceId);
+    if (!device) throw scopeError('context_not_found', 'The Device is not available in the selected profile.');
+    const authoritativeContext = (field: 'teamId' | 'projectId') => {
+      const values = new Set<string>();
+      const direct = scopeField(device[field]); if (direct) values.add(direct);
+      for (const resource of namespace.resources ?? []) if (resource.deviceId === deviceId) {
+        const value = scopeField((resource as unknown as Record<string, unknown>)[field]); if (value) values.add(value);
+      }
+      if (values.size > 1) throw scopeError('device_scope_mismatch', `The Device has ambiguous ${field} access.`);
+      const resolved = [...values][0], requested = scopeField(input[field]);
+      if (requested && requested !== resolved) throw scopeError('device_scope_mismatch', `The requested ${field} is not authorized for this Device.`);
+      return resolved;
+    };
+    const teamId = authoritativeContext('teamId'), projectId = authoritativeContext('projectId');
+    return { profile: namespace.profile.name, ...(teamId ? { teamId } : {}), ...(projectId ? { projectId } : {}), deviceId };
+  };
 
   app.get("/api/health", async () => ({
     ok: true,
@@ -537,6 +573,43 @@ export async function createApp(
   app.get("/api/contexts/terminals", async () => ({
     items: contexts.activeTerminals(),
   }));
+  app.get('/api/device-sessions', async (request, reply) => {
+    try {
+      const requested = scopeField((request.query as { profile?: unknown }).profile) ?? profileScope.current();
+      const namespace = await fngk.namespace(requested, requestSignal(request, reply));
+      return { items: deviceSessions.snapshot().filter(session => session.scope.profile === namespace.profile.name) };
+    } catch (error) {
+      const result = processError(error);
+      return reply.code(result.statusCode).send(result.body);
+    }
+  });
+  app.post('/api/device-sessions/reconnect', async (request, reply) => {
+    try {
+      const scope = await resolveDeviceScope((request.body ?? {}) as Record<string, unknown>, request, reply);
+      return { session: await deviceSessions.reconnect(scope) };
+    } catch (error) {
+      const result = processError(error);
+      return reply.code(result.statusCode).send(result.body);
+    }
+  });
+  app.post('/api/device-sessions/revoke', async (request, reply) => {
+    try {
+      const scope = await resolveDeviceScope((request.body ?? {}) as Record<string, unknown>, request, reply);
+      return { revoked: await deviceSessions.revoke(scope, 'operator_revoked') };
+    } catch (error) {
+      const result = processError(error);
+      return reply.code(result.statusCode).send(result.body);
+    }
+  });
+  app.post('/api/device-sessions/cache/clear', async (request, reply) => {
+    try {
+      const scope = await resolveDeviceScope((request.body ?? {}) as Record<string, unknown>, request, reply);
+      return { session: deviceSessions.clearCache(scope) };
+    } catch (error) {
+      const result = processError(error);
+      return reply.code(result.statusCode).send(result.body);
+    }
+  });
   app.get("/api/fngk/sessions", async (request, reply) => {
     const query = request.query as { profile?: string; deviceId?: string },
       profile = String(query.profile ?? "") || undefined;

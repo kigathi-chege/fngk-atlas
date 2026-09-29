@@ -64,6 +64,16 @@ export class TerminalSession extends EventEmitter {
     return this.process.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
+  get closed(): boolean { return this.#closed; }
+
+  /** Close the local transport without asking a shared Device Session to replay work. */
+  close(requestId = 'atlas-terminal-close'): boolean {
+    if (this.#closed) return false;
+    const detached = this.detach(requestId);
+    if (!detached) this.process.kill('SIGTERM');
+    return detached;
+  }
+
   sendInput(body: Uint8Array, requestId?: string): boolean {
     return this.send({ type: 'input', requestId, bodyBase64: Buffer.from(body).toString('base64') });
   }
