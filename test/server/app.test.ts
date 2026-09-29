@@ -441,12 +441,13 @@ describe("Atlas FNGK-native server", () => {
     const address = await app.listen({ host: "127.0.0.1", port: 0 });
     const socket = new WebSocket(
       address.replace(/^http/, "ws") +
-        "/api/fngk/terminals?target=kigathi&new=1",
+        "/api/fngk/terminals?target=device%3Adevice-1&new=1",
     );
     const messages: any[] = [];
     socket.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
     while (!messages.some((message) => message.type === "ready"))
       await once(socket, "message");
+    expect(messages).toContainEqual(expect.objectContaining({ type: 'ready', recordingMode: 'leased', streamId: expect.any(String) }));
     socket.send(
       JSON.stringify({
         type: "command",

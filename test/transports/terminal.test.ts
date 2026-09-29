@@ -1,4 +1,5 @@
 import { once } from 'node:events';
+import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FngkProcessClient } from '../../src/fngk/process-client.js';
@@ -9,6 +10,12 @@ import { FileService } from '../../src/files/file-service.js';
 const fixture = path.resolve('test/fixtures/fngk.mjs');
 
 describe('terminal-backed effective access', () => {
+  it('does not send a command after its lease-owned request was already aborted', async () => {
+    const controller = new AbortController(); controller.abort();
+    class Session extends EventEmitter { sendCommand() { throw new Error('a cancelled request must not reach the terminal'); } interrupt() {} }
+    await expect(new FngkTerminalCommandExecutor(new Session() as any).execute('printf payload', { signal: controller.signal })).rejects.toMatchObject({ code: 'cancelled' });
+  });
+
   it('extracts only framed output from a normal FNGK terminal command', async () => {
     const terminal = new FngkProcessClient({ binary: fixture }).openTerminal('device-1', { newSession: true });
     await once(terminal, 'ready');

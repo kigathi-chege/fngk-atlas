@@ -53,6 +53,9 @@ import { createLocalFngkLoginLauncher, FngkBrowserAuthorizationRuntime } from ".
 import { DeviceLifecycleService } from "../lifecycle/service.js";
 import { DeviceSessionManager } from "../device-sessions/manager.js";
 import type { DeviceScope, DeviceSessionSnapshot } from "../device-sessions/types.js";
+import { FilesystemCache } from "../device-sessions/filesystem-cache.js";
+import { FileService } from "../files/file-service.js";
+import { TerminalFileTransport } from "../transports/terminal-file.js";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -181,6 +184,15 @@ export async function createApp(
         profile: scope.profile,
         signal,
       }),
+  });
+  const filesystemCache = new FilesystemCache({
+    sessions: deviceSessions,
+    service: (scope, lease) => new FileService([new TerminalFileTransport({
+      id: `terminal:${scope.deviceId}`,
+      contextId: `device:${scope.deviceId}`,
+      deviceId: scope.deviceId,
+      executor: lease.commandExecutor(scope),
+    })]),
   });
   const retryableFileFailure=(error:unknown)=>{const value=error as {code?:string;causes?:Array<{code?:string}>};return value.code==='route_unavailable'&&value.causes?.some(cause=>['terminal_closed','timeout','process_error','process_failed','invalid_json','unsupported_protocol'].includes(String(cause.code)))===true};
   const readThroughFiles=async<T>(contextId:string,operation:(service:Awaited<ReturnType<EffectiveContextService['files']>>)=>Promise<T>)=>{try{return await operation(await contexts.files(contextId))}catch(error){if(contextId==='local'||!retryableFileFailure(error))throw error;contexts.release(contextId);return await operation(await contexts.files(contextId))}};
@@ -482,6 +494,10 @@ export async function createApp(
     };
     const teamId = authoritativeContext('teamId'), projectId = authoritativeContext('projectId');
     return { profile: namespace.profile.name, ...(teamId ? { teamId } : {}), ...(projectId ? { projectId } : {}), deviceId };
+  };
+  const scopeForContext = async (contextId: string, profile: string | undefined, request: { raw: NodeJS.EventEmitter }, reply?: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }) => {
+    if (!contextId.startsWith('device:')) throw scopeError('context_not_found', 'A Device context is required.');
+    return await resolveDeviceScope({ profile, deviceId: contextId.slice('device:'.length) }, request, reply);
   };
 
   app.get("/api/health", async () => ({
@@ -1487,11 +1503,14 @@ export async function createApp(
       limit?: string;
     };
     try {
-      const contextId=query.contextId??'local',page = await readThroughFiles(contextId,service=>service.list(
-        { contextId: query.contextId ?? "local", path: query.path ?? "/" },
-        { cursor: query.cursor, limit: Number(query.limit) || 100 },
-      ));
-      return { ...page, route: routeEvidence(page.route) };
+      const contextId=query.contextId??'local';
+      if (contextId === 'local') {
+        const page = await readThroughFiles(contextId,service=>service.list({ contextId, path: query.path ?? "/" }, { cursor: query.cursor, limit: Number(query.limit) || 100, signal: requestSignal(request, reply) }));
+        return { ...page, route: routeEvidence(page.route) };
+      }
+      const scope = await scopeForContext(contextId, profileScope.current(), request, reply);
+      const page = await filesystemCache.list(scope, query.path ?? '/', { cursor: query.cursor, limit: Number(query.limit) || 100, signal: requestSignal(request, reply) });
+      return { ...page, route: routeEvidence(page.route), diagnostics: filesystemCache.diagnostics(scope) };
     } catch (error) {
       const result = processError(error);
       return reply.code(result.statusCode).send(result.body);
@@ -1501,7 +1520,10 @@ export async function createApp(
     const query = request.query as { contextId?: string; path?: string };
     if (!query.path) return reply.code(400).send({ error: "path_required" });
     try {
-      const contextId=query.contextId??'local',value = await readThroughFiles(contextId,service=>service.read({ contextId, path: query.path! }));
+      const contextId=query.contextId??'local';
+      const value = contextId === 'local'
+        ? await readThroughFiles(contextId,service=>service.read({ contextId, path: query.path! }, { signal: requestSignal(request, reply) }))
+        : await filesystemCache.read(await scopeForContext(contextId, profileScope.current(), request, reply), query.path!, { signal: requestSignal(request, reply) });
       return {
         ...value,
         contentBase64: value.content?.toString("base64"),
@@ -2397,63 +2419,36 @@ export async function createApp(
       profile?: string;
     };
     const target = String(query.target ?? "").trim();
-    if (!target) {
-      socket.send(
-        JSON.stringify({
-          type: "error",
-          code: "target_required",
-          message: "A Device or Connection target is required.",
-        }),
-      );
+    let closed = false;
+    socket.once('close', () => { closed = true; });
+    void (async () => {
+      if (!target.startsWith('device:')) throw Object.assign(new Error('A Device target is required.'), { code: 'target_required' });
+      const scope = await scopeForContext(target, query.profile, request);
+      const lease = await deviceSessions.acquire(scope);
+      if (closed) { lease.release(); return; }
+      const stream = lease.subscribe(event => {
+        if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
+        if (event.type === 'detached' && socket.readyState === socket.OPEN) socket.close(1000);
+      }, scope);
+      const snapshot = deviceSessions.snapshot(scope);
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'ready', sessionId: snapshot?.sessionId, streamId: stream.id, target, recordingMode: 'leased' }));
+      socket.on("message", (raw: RawData) => {
+        void (async () => {
+          try {
+            const message = JSON.parse(raw.toString()) as TerminalInput;
+            if (!message || !terminalInputs.has(message.type)) throw new Error("unsupported terminal message");
+            await lease.run(async ({ session }) => {
+              if (!session.send(message)) throw Object.assign(new Error('Terminal session is closed.'), { code: 'terminal_closed' });
+            }, { scope });
+          } catch (error) {
+            if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'error', code: (error as { code?: string }).code ?? 'invalid_input', message: (error as Error).message }));
+          }
+        })();
+      });
+      socket.once("close", () => { stream.release(); lease.release(); });
+    })().catch(error => {
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'error', code: (error as { code?: string }).code ?? 'terminal_unavailable', message: (error as Error).message }));
       socket.close(1008);
-      return;
-    }
-    const session = fngk.openTerminal(target, {
-      newSession: query.new === "1",
-      sessionId: query.session,
-      profile: query.profile,
-    });
-    session.on("event", (event) => {
-      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
-      if (event.type === "detached" && socket.readyState === socket.OPEN)
-        socket.close(1000);
-    });
-    session.on("error", (error) => {
-      if (socket.readyState === socket.OPEN)
-        socket.send(
-          JSON.stringify({
-            type: "error",
-            code: (error as { code?: string }).code ?? "terminal_error",
-            message: (error as Error).message,
-          }),
-        );
-    });
-    session.on("close", () => {
-      if (socket.readyState === socket.OPEN) socket.close(1000);
-    });
-    socket.on("message", (raw: RawData) => {
-      try {
-        const message = JSON.parse(raw.toString()) as TerminalInput;
-        if (!message || !terminalInputs.has(message.type))
-          throw new Error("unsupported terminal message");
-        if (!session.send(message))
-          throw new Error("terminal session is closed");
-      } catch (error) {
-        socket.send(
-          JSON.stringify({
-            type: "error",
-            code: "invalid_input",
-            message: (error as Error).message,
-          }),
-        );
-      }
-    });
-    socket.once("close", () => {
-      if (session.process.exitCode === null) {
-        session.detach("browser-disconnect");
-        const timer = setTimeout(() => session.process.kill("SIGTERM"), 1_000);
-        timer.unref();
-      }
     });
   });
 

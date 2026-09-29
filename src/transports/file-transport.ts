@@ -6,9 +6,9 @@ export interface FileSearchMatch { path: string; type: 'file' | 'directory'; lin
 export interface FileSearchOptions { mode?: 'name' | 'content' | 'all'; limit?: number; maxFileBytes?: number; maxEntries?: number; maxDepth?: number; signal?: AbortSignal }
 export interface FileTrashResult { restorePath?: string }
 export interface FileTransport extends AccessRoute {
-  list(path: string): Promise<TransportEntry[]>;
-  stat(path: string): Promise<FileStat>;
-  read(path: string): Promise<Buffer>;
+  list(path: string, options?: { signal?: AbortSignal }): Promise<TransportEntry[]>;
+  stat(path: string, options?: { signal?: AbortSignal }): Promise<FileStat>;
+  read(path: string, options?: { signal?: AbortSignal }): Promise<Buffer>;
   atomicWrite(path: string, content: Buffer, mode?: number): Promise<void>;
   search?(path: string, query: string, options?: FileSearchOptions): Promise<FileSearchMatch[]>;
   createFile?(path: string, content?: Buffer): Promise<void>;
