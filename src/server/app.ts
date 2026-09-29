@@ -52,7 +52,7 @@ import { AuthFlow } from "../onboarding/auth-flow.js";
 import { createLocalFngkLoginLauncher, FngkBrowserAuthorizationRuntime } from "../onboarding/fngk-auth.js";
 import { DeviceLifecycleService } from "../lifecycle/service.js";
 import { DeviceSessionManager } from "../device-sessions/manager.js";
-import type { DeviceScope } from "../device-sessions/types.js";
+import type { DeviceScope, DeviceSessionSnapshot } from "../device-sessions/types.js";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -457,6 +457,14 @@ export async function createApp(
 
   const scopeError = (code: string, message: string) => Object.assign(new Error(message), { code });
   const scopeField = (value: unknown) => typeof value === 'string' && value ? value : undefined;
+  const namespaceContext = (namespace: any, device: Record<string, unknown>, deviceId: string, field: 'teamId' | 'projectId'): string | undefined | null => {
+    const values = new Set<string>();
+    const direct = scopeField(device[field]); if (direct) values.add(direct);
+    for (const resource of namespace.resources ?? []) if (resource.deviceId === deviceId) {
+      const value = scopeField((resource as Record<string, unknown>)[field]); if (value) values.add(value);
+    }
+    return values.size > 1 ? null : [...values][0];
+  };
   const resolveDeviceScope = async (input: Record<string, unknown>, request: { raw: NodeJS.EventEmitter }, reply?: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }): Promise<DeviceScope> => {
     const requestedProfile = scopeField(input.profile), selectedProfile = profileScope.current();
     if (requestedProfile && selectedProfile && requestedProfile !== selectedProfile) throw scopeError('device_scope_mismatch', 'The requested profile does not match this request scope.');
@@ -466,13 +474,9 @@ export async function createApp(
     const device = namespace.devices.find(value => value.id === deviceId);
     if (!device) throw scopeError('context_not_found', 'The Device is not available in the selected profile.');
     const authoritativeContext = (field: 'teamId' | 'projectId') => {
-      const values = new Set<string>();
-      const direct = scopeField(device[field]); if (direct) values.add(direct);
-      for (const resource of namespace.resources ?? []) if (resource.deviceId === deviceId) {
-        const value = scopeField((resource as unknown as Record<string, unknown>)[field]); if (value) values.add(value);
-      }
-      if (values.size > 1) throw scopeError('device_scope_mismatch', `The Device has ambiguous ${field} access.`);
-      const resolved = [...values][0], requested = scopeField(input[field]);
+      const resolved = namespaceContext(namespace, device, deviceId, field);
+      if (resolved === null) throw scopeError('device_scope_mismatch', `The Device has ambiguous ${field} access.`);
+      const requested = scopeField(input[field]);
       if (requested && requested !== resolved) throw scopeError('device_scope_mismatch', `The requested ${field} is not authorized for this Device.`);
       return resolved;
     };
@@ -575,9 +579,15 @@ export async function createApp(
   }));
   app.get('/api/device-sessions', async (request, reply) => {
     try {
-      const requested = scopeField((request.query as { profile?: unknown }).profile) ?? profileScope.current();
+      const selected = profileScope.current(), requested = scopeField((request.query as { profile?: unknown }).profile) ?? selected;
       const namespace = await fngk.namespace(requested, requestSignal(request, reply));
-      return { items: deviceSessions.snapshot().filter(session => session.scope.profile === namespace.profile.name) };
+      const authorized = (session: DeviceSessionSnapshot) => {
+        if (session.scope.profile !== namespace.profile.name || (selected && session.scope.profile !== selected) || (requested && session.scope.profile !== requested)) return false;
+        const device = namespace.devices.find((value: Record<string, unknown>) => value.id === session.scope.deviceId);
+        if (!device) return false;
+        return session.scope.teamId === namespaceContext(namespace, device, session.scope.deviceId, 'teamId') && session.scope.projectId === namespaceContext(namespace, device, session.scope.deviceId, 'projectId');
+      };
+      return { items: deviceSessions.snapshot().filter(authorized) };
     } catch (error) {
       const result = processError(error);
       return reply.code(result.statusCode).send(result.body);

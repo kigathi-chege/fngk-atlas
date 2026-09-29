@@ -116,6 +116,10 @@ export class DeviceSessionManager extends EventEmitter {
     }
     if (entry.idleTimer) { clearTimeout(entry.idleTimer); entry.idleTimer = undefined; }
     if (entry.state !== 'ready') {
+      const reconnecting = entry.reconnecting;
+      if (reconnecting) await reconnecting;
+    }
+    if (entry.state !== 'ready') {
       entry.connecting ??= this.#establish(entry, 'connecting').finally(() => { entry!.connecting = undefined; });
       await entry.connecting;
     }
@@ -268,6 +272,7 @@ export class DeviceSessionManager extends EventEmitter {
   async #recover(entry: Entry, reason: string): Promise<void> {
     if (entry.state === 'revoked' || entry.state === 'closed' || entry.reconnecting) return await entry.reconnecting;
     if (entry.idleTimer) { clearTimeout(entry.idleTimer); entry.idleTimer = undefined; }
+    for (const cancellation of entry.cancellations.values()) cancellation.abort();
     this.#closeTerminal(entry, reason);
     entry.reconnecting = (async () => {
       let error: unknown;
