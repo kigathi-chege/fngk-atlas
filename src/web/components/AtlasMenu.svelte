@@ -16,6 +16,7 @@
     registry.register({id:'view.files',label:'View: Open Filesystem',keywords:['explorer folders'],run:()=>{window.dispatchEvent(new CustomEvent('atlas:open-root',{detail:{contextId:state.snapshot().contextId,path:'/'}}))}}),
     registry.register({id:'view.recovery',label:'FNGK: Connection setup and recovery',run:()=>dispatch('atlas:recover')}),
     registry.register({id:'view.lifecycle',label:'FNGK: Device management',run:()=>dispatch('atlas:open-device-lifecycle')}),
+    registry.register({id:'atlas:open-device-sessions',label:'FNGK: Device Sessions',keywords:['connections','persistent','leases'],run:()=>dispatch('atlas:open-device-sessions')}),
     registry.register({id:'view.theme',label:'View: Toggle light / dark theme',run:()=>state.setTheme(state.snapshot().theme==='dark'?'light':'dark')}),
     registry.register({id:'terminal.newPane',label:'Terminal: New pane',run:()=>{window.dispatchEvent(new CustomEvent('atlas:open-terminal',{detail:{create:true}}))}}),
     registry.register({id:'terminal.open',label:'Terminal: Open',keywords:['shell session'],run:()=>dispatch('atlas:open-terminal')}),
