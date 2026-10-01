@@ -1,0 +1,7 @@
+import { randomUUID } from 'node:crypto';
+import type { DeviceScope } from '../device-sessions/types.js';
+
+export type GrantKind='conversation'|'durable'|'full_access';
+export type Grant={id:string;scope:DeviceScope;toolIds:string[];kind:GrantKind;actor:string;createdAt:string;expiresAt:string|null;revokedAt:string|null;revokedBy:string|null};
+const key=(scope:DeviceScope)=>JSON.stringify([scope.profile,scope.teamId??null,scope.projectId??null,scope.deviceId]);
+export class GrantStore{#grants=new Map<string,Grant>();create(input:{scope:DeviceScope;toolIds:string[];kind:GrantKind;actor:string;expiresAt?:string|null}){const grant:Grant={id:randomUUID(),scope:structuredClone(input.scope),toolIds:[...new Set(input.toolIds)],kind:input.kind,actor:input.actor,createdAt:new Date().toISOString(),expiresAt:input.expiresAt??(input.kind==='full_access'?new Date(Date.now()+60*60*1000).toISOString():null),revokedAt:null,revokedBy:null};this.#grants.set(grant.id,grant);return structuredClone(grant)}active(scope:DeviceScope){const now=Date.now(),wanted=key(scope);return[...this.#grants.values()].filter(g=>key(g.scope)===wanted&&!g.revokedAt&&(!g.expiresAt||Date.parse(g.expiresAt)>now)).map(value=>structuredClone(value))}revoke(id:string,actor:string){const grant=this.#grants.get(id);if(!grant)return false;grant.revokedAt??=new Date().toISOString();grant.revokedBy??=actor;return true}list(){return[...this.#grants.values()].map(value=>structuredClone(value))}}

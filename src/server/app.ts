@@ -58,6 +58,7 @@ import { FileService } from "../files/file-service.js";
 import { TerminalFileTransport } from "../transports/terminal-file.js";
 import { AtlasToolRegistry } from '../agent-tools/registry.js';
 import { AtlasToolExecutor } from '../agent-tools/executor.js';
+import { GrantStore } from '../agent-tools/grants.js';
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -510,6 +511,7 @@ export async function createApp(
     finally { if (mutation) filesystemCache.invalidate(scope); lease.release(); }
   };
   const agentTools = new AtlasToolRegistry();
+  const toolGrants = new GrantStore();
   const guardedToolExecutor = (request: { raw: NodeJS.EventEmitter }, reply: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }) => new AtlasToolExecutor({
     registry: agentTools,
     resolveScope: async (candidate, signal) => {
@@ -520,7 +522,7 @@ export async function createApp(
     acquireFiles: async scope => {
       const lease = await deviceSessions.acquire(scope);
       return { service: scopedFileService(scope, lease), release: () => lease.release() };
-    }
+    }, grants: toolGrants
   });
 
   app.get("/api/health", async () => ({
@@ -529,6 +531,9 @@ export async function createApp(
     activeIndex: activeIndex?.summary ?? null,
   }));
   app.get('/api/agent-tools', async () => ({ tools: agentTools.list() }));
+  app.get('/api/agent-tools/grants', async () => ({ grants: toolGrants.list() }));
+  app.post('/api/agent-tools/grants', async (request, reply) => { const body = (request.body ?? {}) as any; try { if (!body.scope || !Array.isArray(body.toolIds) || !body.actor || !['conversation','durable','full_access'].includes(body.kind)) throw scopeError('tool_input_invalid','A valid scope, actor, grant kind, and tool list are required.'); const scope = await resolveDeviceScope({ ...body.scope }, request, reply); return reply.code(201).send({ grant: toolGrants.create({ scope, toolIds: body.toolIds.map(String).slice(0,32), kind: body.kind, actor: String(body.actor).slice(0,256), expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : undefined }) }); } catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); } });
+  app.post('/api/agent-tools/grants/:id/revoke', async (request) => ({ revoked: toolGrants.revoke(decodeURIComponent(String((request.params as any).id ?? '')), String(((request.body ?? {}) as any).actor ?? 'operator').slice(0,256)) }));
   app.get('/api/agent-tools/:id', async (request, reply) => {
     const descriptor = agentTools.describe(decodeURIComponent(String((request.params as { id?: string }).id ?? '')));
     return descriptor ? descriptor : reply.code(404).send({ error: 'tool_not_found' });

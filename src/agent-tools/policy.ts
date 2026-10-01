@@ -1,0 +1,4 @@
+import type {DeviceScope} from '../device-sessions/types.js';import type {Grant} from './grants.js';
+const key=(scope:DeviceScope)=>JSON.stringify([scope.profile,scope.teamId??null,scope.projectId??null,scope.deviceId]);
+export type PolicyDecision={kind:'deny'|'ask'|'allow';reason:string;grantId?:string};
+export function evaluateToolPolicy(input:{toolId:string;scope:DeviceScope;backendAuthorized:boolean;grants:Grant[]}):PolicyDecision{if(!input.backendAuthorized)return{kind:'deny',reason:'backend_authorization_denied'};const now=Date.now(),match=input.grants.find(g=>key(g.scope)===key(input.scope)&&!g.revokedAt&&(!g.expiresAt||Date.parse(g.expiresAt)>now)&&(g.toolIds.includes('*')||g.toolIds.includes(input.toolId)));return match?{kind:'allow',reason:match.kind,grantId:match.id}:{kind:'ask',reason:'approval_required'}}
