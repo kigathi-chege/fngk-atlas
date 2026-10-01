@@ -72,6 +72,30 @@ describe('FilesystemCache', () => {
     await sessions.close();
   });
 
+  it('keeps a shared transport request alive until every waiter cancels', async () => {
+    let requests = 0, transportAborts = 0, complete!: (items: any[]) => void;
+    let started!: () => void;
+    const begun = new Promise<void>(resolve => { started = resolve; });
+    const { cache, sessions } = cacheWith([() => route('device-a', options => new Promise((resolve, reject) => {
+      requests += 1;
+      complete = resolve;
+      started();
+      options?.signal?.addEventListener('abort', () => { transportAborts += 1; reject(Object.assign(new Error('cancelled'), { code: 'cancelled' })); }, { once: true });
+    }))]);
+    const first = new AbortController(), second = new AbortController();
+    const one = cache.list(scope, '/shared', { signal: first.signal });
+    await begun;
+    const two = cache.list(scope, '/shared', { signal: second.signal });
+    first.abort();
+    await expect(one).rejects.toMatchObject({ code: 'cancelled' });
+    expect(transportAborts).toBe(0);
+    complete([{ name: 'still-here', path: '/shared/still-here', type: 'file', bytes: 1, modifiedAt: '2026-09-29T00:00:00.000Z', mode: 0o644 }]);
+    expect((await two).items[0]?.name).toBe('still-here');
+    expect(requests).toBe(1);
+    expect(transportAborts).toBe(0);
+    await sessions.close();
+  });
+
   it('never serves a directory entry across profiles or devices', async () => {
     const requests: string[] = [];
     const { cache, sessions } = cacheWith([value => route(value.deviceId, async () => {

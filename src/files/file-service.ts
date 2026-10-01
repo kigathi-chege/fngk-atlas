@@ -54,6 +54,16 @@ export class FileService {
     throw this.#unavailable('read', errors);
   }
 
+  async stat(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, options: { signal?: AbortSignal } = {}) {
+    target = this.#target(target);
+    const errors: unknown[] = [];
+    for (const route of this.#routes(target, 'stat')) try {
+      const value = await route.stat(target.path, { signal: options.signal });
+      return { path: target.path, size: Number(value.size), mode: Number(value.mode), route };
+    } catch (error) { errors.push(error); }
+    throw this.#unavailable('stat', errors);
+  }
+
   async write(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, content: Buffer, expectedFingerprint: string) {
     target = this.#target(target);
     const errors: unknown[] = [];

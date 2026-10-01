@@ -17,7 +17,7 @@
     registry.register({id:'view.recovery',label:'FNGK: Connection setup and recovery',run:()=>dispatch('atlas:recover')}),
     registry.register({id:'view.lifecycle',label:'FNGK: Device management',run:()=>dispatch('atlas:open-device-lifecycle')}),
     registry.register({id:'view.theme',label:'View: Toggle light / dark theme',run:()=>state.setTheme(state.snapshot().theme==='dark'?'light':'dark')}),
-    registry.register({id:'terminal.newPane',label:'Terminal: New pane and session',run:()=>{window.dispatchEvent(new CustomEvent('atlas:open-terminal',{detail:{create:true}}))}}),
+    registry.register({id:'terminal.newPane',label:'Terminal: New pane',run:()=>{window.dispatchEvent(new CustomEvent('atlas:open-terminal',{detail:{create:true}}))}}),
     registry.register({id:'terminal.open',label:'Terminal: Open',keywords:['shell session'],run:()=>dispatch('atlas:open-terminal')}),
     registerDocumentationCommands(registry,topicId=>window.dispatchEvent(new CustomEvent('atlas:open-documentation',{detail:{topicId}}))),
     ...contextActions.map(action=>registry.register({id:`context.${action.id}`,label:`Context: ${action.label}`,keywords:[action.group,action.placement],enabled:()=>action.available(state.snapshot()),run:()=>action.run(state.snapshot())})),

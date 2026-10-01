@@ -51,7 +51,7 @@ import { BootstrapService } from "../onboarding/service.js";
 import { AuthFlow } from "../onboarding/auth-flow.js";
 import { createLocalFngkLoginLauncher, FngkBrowserAuthorizationRuntime } from "../onboarding/fngk-auth.js";
 import { DeviceLifecycleService } from "../lifecycle/service.js";
-import { DeviceSessionManager } from "../device-sessions/manager.js";
+import { DeviceSessionManager, type DeviceSessionLease } from "../device-sessions/manager.js";
 import type { DeviceScope, DeviceSessionSnapshot } from "../device-sessions/types.js";
 import { FilesystemCache } from "../device-sessions/filesystem-cache.js";
 import { FileService } from "../files/file-service.js";
@@ -185,14 +185,15 @@ export async function createApp(
         signal,
       }),
   });
+  const scopedFileService = (scope: DeviceScope, lease: DeviceSessionLease) => new FileService([new TerminalFileTransport({
+    id: `terminal:${scope.deviceId}`,
+    contextId: `device:${scope.deviceId}`,
+    deviceId: scope.deviceId,
+    executor: lease.commandExecutor(scope),
+  })]);
   const filesystemCache = new FilesystemCache({
     sessions: deviceSessions,
-    service: (scope, lease) => new FileService([new TerminalFileTransport({
-      id: `terminal:${scope.deviceId}`,
-      contextId: `device:${scope.deviceId}`,
-      deviceId: scope.deviceId,
-      executor: lease.commandExecutor(scope),
-    })]),
+    service: scopedFileService,
   });
   const retryableFileFailure=(error:unknown)=>{const value=error as {code?:string;causes?:Array<{code?:string}>};return value.code==='route_unavailable'&&value.causes?.some(cause=>['terminal_closed','timeout','process_error','process_failed','invalid_json','unsupported_protocol'].includes(String(cause.code)))===true};
   const readThroughFiles=async<T>(contextId:string,operation:(service:Awaited<ReturnType<EffectiveContextService['files']>>)=>Promise<T>)=>{try{return await operation(await contexts.files(contextId))}catch(error){if(contextId==='local'||!retryableFileFailure(error))throw error;contexts.release(contextId);return await operation(await contexts.files(contextId))}};
@@ -495,9 +496,16 @@ export async function createApp(
     const teamId = authoritativeContext('teamId'), projectId = authoritativeContext('projectId');
     return { profile: namespace.profile.name, ...(teamId ? { teamId } : {}), ...(projectId ? { projectId } : {}), deviceId };
   };
-  const scopeForContext = async (contextId: string, profile: string | undefined, request: { raw: NodeJS.EventEmitter }, reply?: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }) => {
+  const scopeForContext = async (contextId: string, profile: string | undefined, request: { raw: NodeJS.EventEmitter }, reply?: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }, claims: Record<string, unknown> = {}) => {
     if (!contextId.startsWith('device:')) throw scopeError('context_not_found', 'A Device context is required.');
-    return await resolveDeviceScope({ profile, deviceId: contextId.slice('device:'.length) }, request, reply);
+    return await resolveDeviceScope({ ...claims, profile: claims.profile ?? profile, deviceId: contextId.slice('device:'.length) }, request, reply);
+  };
+  const withScopedFiles = async <T>(contextId: string, claims: Record<string, unknown>, request: { raw: NodeJS.EventEmitter }, reply: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }, operation: (service: FileService) => Promise<T>, mutation = false): Promise<T> => {
+    if (contextId === 'local') return await operation(await contexts.files(contextId));
+    const scope = await scopeForContext(contextId, profileScope.current(), request, reply, claims);
+    const lease = await deviceSessions.acquire(scope);
+    try { return await operation(scopedFileService(scope, lease)); }
+    finally { if (mutation) filesystemCache.invalidate(scope); lease.release(); }
   };
 
   app.get("/api/health", async () => ({
@@ -1508,7 +1516,7 @@ export async function createApp(
         const page = await readThroughFiles(contextId,service=>service.list({ contextId, path: query.path ?? "/" }, { cursor: query.cursor, limit: Number(query.limit) || 100, signal: requestSignal(request, reply) }));
         return { ...page, route: routeEvidence(page.route) };
       }
-      const scope = await scopeForContext(contextId, profileScope.current(), request, reply);
+      const scope = await scopeForContext(contextId, profileScope.current(), request, reply, query);
       const page = await filesystemCache.list(scope, query.path ?? '/', { cursor: query.cursor, limit: Number(query.limit) || 100, signal: requestSignal(request, reply) });
       return { ...page, route: routeEvidence(page.route), diagnostics: filesystemCache.diagnostics(scope) };
     } catch (error) {
@@ -1523,7 +1531,7 @@ export async function createApp(
       const contextId=query.contextId??'local';
       const value = contextId === 'local'
         ? await readThroughFiles(contextId,service=>service.read({ contextId, path: query.path! }, { signal: requestSignal(request, reply) }))
-        : await filesystemCache.read(await scopeForContext(contextId, profileScope.current(), request, reply), query.path!, { signal: requestSignal(request, reply) });
+        : await filesystemCache.read(await scopeForContext(contextId, profileScope.current(), request, reply, query), query.path!, { signal: requestSignal(request, reply) });
       return {
         ...value,
         contentBase64: value.content?.toString("base64"),
@@ -1549,14 +1557,13 @@ export async function createApp(
     )
       return reply.code(400).send({ error: "invalid_write" });
     try {
+      const filePath = body.path, contentBase64 = body.contentBase64, expectedFingerprint = body.expectedFingerprint;
       const contextId = body.contextId ?? "local",
-        value = await (
-          await contexts.files(contextId)
-        ).write(
-          { contextId, path: body.path },
-          Buffer.from(body.contentBase64, "base64"),
-          body.expectedFingerprint,
-        );
+        value = await withScopedFiles(contextId, body, request, reply, service => service.write(
+          { contextId, path: filePath },
+          Buffer.from(contentBase64, "base64"),
+          expectedFingerprint,
+        ), true);
       return {
         ...value,
         route: routeEvidence(value.route),
@@ -1589,13 +1596,12 @@ export async function createApp(
     )
       return reply.code(400).send({ error: "invalid_create" });
     try {
+      const filePath = body.path, contentBase64 = body.contentBase64;
       const contextId = body.contextId ?? "local",
-        value = await (
-          await contexts.files(contextId)
-        ).createFile(
-          { contextId, path: body.path },
-          Buffer.from(body.contentBase64, "base64"),
-        );
+        value = await withScopedFiles(contextId, body, request, reply, service => service.createFile(
+          { contextId, path: filePath },
+          Buffer.from(contentBase64, "base64"),
+        ), true);
       return reply
         .code(201)
         .send({
@@ -1621,21 +1627,11 @@ export async function createApp(
     const query = request.query as { contextId?: string; path?: string };
     if (!query.path) return reply.code(400).send({ error: "path_required" });
     try {
-      const service = await contexts.files(query.contextId ?? "local"),
-        route = service.resolver.resolve(
-          { contextId: query.contextId ?? "local", path: query.path },
-          "stat",
-        )[0] as any;
-      if (!route)
-        throw Object.assign(new Error("No route can stat this path."), {
-          code: "route_unavailable",
-        });
-      const value = await route.stat(query.path);
+      const contextId = query.contextId ?? 'local';
+      const value = await withScopedFiles(contextId, query, request, reply, service => service.stat({ contextId, path: query.path! }, { signal: requestSignal(request, reply) }));
       return {
-        path: query.path,
-        size: Number(value.size),
-        mode: Number(value.mode),
-        route: routeEvidence(route),
+        ...value,
+        route: routeEvidence(value.route),
       };
     } catch (error) {
       const result = processError(error);
@@ -1655,7 +1651,7 @@ export async function createApp(
     if (!query.query?.trim()) return { matches: [], route: null };
     const contextId = query.contextId ?? "local";
     try {
-      const value = await readThroughFiles(contextId,service=>service.search({ contextId, path: query.path ?? "/" }, query.query!, {
+      const value = await withScopedFiles(contextId, query, request, reply, service=>service.search({ contextId, path: query.path ?? "/" }, query.query!, {
         mode: query.mode ?? "all",
         limit: Number(query.limit) || 200,
         maxEntries: Number(query.maxEntries) || 5_000,
@@ -1688,15 +1684,14 @@ export async function createApp(
       return reply.code(400).send({ error: "invalid_create" });
     try {
       const contextId = body.contextId ?? "local",
-        service = await contexts.files(contextId),
         target = { contextId, path: body.path },
-        value =
+        value = await withScopedFiles(contextId, body, request, reply, service =>
           body.type === "directory"
-            ? await service.createDirectory(target)
-            : await service.createFile(
+            ? service.createDirectory(target)
+            : service.createFile(
                 target,
                 Buffer.from(body.contentBase64 ?? "", "base64"),
-              );
+              ), true);
       return reply
         .code(201)
         .send({
@@ -1723,10 +1718,9 @@ export async function createApp(
     if (!body.path || !body.destination)
       return reply.code(400).send({ error: "invalid_move" });
     try {
+      const filePath = body.path, destination = body.destination;
       const contextId = body.contextId ?? "local",
-        value = await (
-          await contexts.files(contextId)
-        ).move({ contextId, path: body.path }, body.destination);
+        value = await withScopedFiles(contextId, body, request, reply, service => service.move({ contextId, path: filePath }, destination), true);
       return {
         ...value,
         route: routeEvidence(value.route),
@@ -1751,12 +1745,12 @@ export async function createApp(
     if (body.permanent && body.confirm !== true)
       return reply.code(409).send({ error: "confirmation_required" });
     try {
+      const filePath = body.path;
       const contextId = body.contextId ?? "local",
-        service = await contexts.files(contextId),
-        target = { contextId, path: body.path },
-        value = body.permanent
-          ? await service.remove(target)
-          : await service.trash(target);
+        target = { contextId, path: filePath },
+        value = await withScopedFiles(contextId, body, request, reply, service => body.permanent
+          ? service.remove(target)
+          : service.trash(target), true);
       return {
         ...value,
         permanent: Boolean(body.permanent),
@@ -1780,10 +1774,9 @@ export async function createApp(
     const body = request.body as { contextId?: string; path?: string };
     if (!body.path) return reply.code(400).send({ error: "path_required" });
     try {
+      const filePath = body.path;
       const contextId = body.contextId ?? "local",
-        value = await (
-          await contexts.files(contextId)
-        ).restore({ contextId, path: body.path });
+        value = await withScopedFiles(contextId, body, request, reply, service => service.restore({ contextId, path: filePath }), true);
       return {
         ...value,
         route: routeEvidence(value.route),
@@ -2422,6 +2415,7 @@ export async function createApp(
     let closed = false;
     socket.once('close', () => { closed = true; });
     void (async () => {
+      if (query.new !== undefined || query.session !== undefined) throw Object.assign(new Error('Terminal session selection is unavailable for leased Device streams.'), { code: 'unsupported_terminal_selection' });
       if (!target.startsWith('device:')) throw Object.assign(new Error('A Device target is required.'), { code: 'target_required' });
       const scope = await scopeForContext(target, query.profile, request);
       const lease = await deviceSessions.acquire(scope);

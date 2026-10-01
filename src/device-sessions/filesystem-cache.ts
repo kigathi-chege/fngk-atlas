@@ -8,6 +8,7 @@ type ListOptions = { cursor?: string | null; limit?: number; knownRevision?: str
 type ReadOptions = { knownRevision?: string; signal?: AbortSignal };
 type CachedPage = FilePage & { revision: string; sessionId?: string; handshakeCount: number; cacheHit: boolean };
 type CachedRead = Awaited<ReturnType<FileService['read']>> & { revision: string; sessionId?: string; handshakeCount: number; cacheHit: boolean };
+type PendingPage = { promise: Promise<CachedPage>; controller: AbortController; waiters: number; settled: boolean };
 
 export interface FilesystemCacheDiagnostics { sessionId?: string; handshakeCount: number; requests: number; cacheHits: number; cacheMisses: number; latencyMs: number }
 export interface FilesystemCacheOptions {
@@ -28,7 +29,7 @@ const revisionFor = (value: unknown) => createHash('sha256').update(JSON.stringi
 export class FilesystemCache {
   #pages = new Map<string, CachedPage>();
   #pageScopes = new Map<string, string>();
-  #pending = new Map<string, Promise<CachedPage>>();
+  #pending = new Map<string, PendingPage>();
   #diagnostics = new Map<string, FilesystemCacheDiagnostics>();
   #epochs = new Map<string, number>();
 
@@ -45,11 +46,18 @@ export class FilesystemCache {
       this.#metric(scope, existing, true, 0);
       return { ...existing, cacheHit: true };
     }
-    const pending = this.#pending.get(key);
-    if (pending) return await this.#withAbort(pending, options.signal);
-    const request = this.#list(scope, logicalPath, options).finally(() => this.#pending.delete(key));
-    this.#pending.set(key, request);
-    return await this.#withAbort(request, options.signal);
+    let pending = this.#pending.get(key);
+    if (!pending) {
+      const controller = new AbortController();
+      const entry = { controller, waiters: 0, settled: false } as PendingPage;
+      entry.promise = this.#list(scope, logicalPath, { ...options, signal: controller.signal }).finally(() => {
+        entry.settled = true;
+        if (this.#pending.get(key) === entry) this.#pending.delete(key);
+      });
+      pending = entry;
+      this.#pending.set(key, pending);
+    }
+    return await this.#withAbort(key, pending, options.signal);
   }
 
   async read(scope: DeviceScope, logicalPath: string, options: ReadOptions = {}): Promise<CachedRead> {
@@ -82,7 +90,7 @@ export class FilesystemCache {
       const snapshot = this.options.sessions.snapshot(lease.scope);
       const result: CachedPage = { ...page, revision: revisionFor({ path: logicalPath, cursor: options.cursor ?? null, items: page.items.map(item => [item.name, item.type, item.bytes, item.modifiedAt, item.mode]) }), sessionId: snapshot?.sessionId, handshakeCount: snapshot?.handshakeCount ?? 0, cacheHit: false };
       const key = pageKey(scope, logicalPath, options);
-      if ((this.#epochs.get(scopedKey) ?? 0) === epoch) { this.#pages.set(key, result); this.#pageScopes.set(key, scopedKey); }
+      if (!options.signal?.aborted && (this.#epochs.get(scopedKey) ?? 0) === epoch) { this.#pages.set(key, result); this.#pageScopes.set(key, scopedKey); }
       this.#metric(lease.scope, result, false, performance.now() - started);
       return result;
     } finally { lease.release(); }
@@ -92,13 +100,24 @@ export class FilesystemCache {
     const key = scopeKey(scope), prior = this.#diagnostics.get(key) ?? { handshakeCount: 0, requests: 0, cacheHits: 0, cacheMisses: 0, latencyMs: 0 };
     this.#diagnostics.set(key, { sessionId: value.sessionId, handshakeCount: value.handshakeCount, requests: prior.requests + (hit ? 0 : 1), cacheHits: prior.cacheHits + Number(hit), cacheMisses: prior.cacheMisses + Number(!hit), latencyMs: hit ? prior.latencyMs : latencyMs });
   }
-  async #withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-    if (!signal) return await promise;
-    if (signal.aborted) throw abortError();
+  async #withAbort<T>(key: string, entry: { promise: Promise<T>; controller: AbortController; waiters: number; settled: boolean }, signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) throw abortError();
+    entry.waiters += 1;
+    let departed = false;
+    const depart = () => {
+      if (departed) return;
+      departed = true;
+      entry.waiters -= 1;
+      if (entry.waiters === 0 && !entry.settled) {
+        if (this.#pending.get(key) === entry) this.#pending.delete(key);
+        entry.controller.abort();
+      }
+    };
     return await new Promise<T>((resolve, reject) => {
-      const cancel = () => reject(abortError());
-      signal.addEventListener('abort', cancel, { once: true });
-      promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', cancel));
+      const finish = () => { signal?.removeEventListener('abort', cancel); depart(); };
+      const cancel = () => { finish(); reject(abortError()); };
+      signal?.addEventListener('abort', cancel, { once: true });
+      entry.promise.then(value => { if (!departed) { finish(); resolve(value); } }, error => { if (!departed) { finish(); reject(error); } });
     });
   }
 }
