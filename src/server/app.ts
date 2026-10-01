@@ -56,6 +56,8 @@ import type { DeviceScope, DeviceSessionSnapshot } from "../device-sessions/type
 import { FilesystemCache } from "../device-sessions/filesystem-cache.js";
 import { FileService } from "../files/file-service.js";
 import { TerminalFileTransport } from "../transports/terminal-file.js";
+import { AtlasToolRegistry } from '../agent-tools/registry.js';
+import { AtlasToolExecutor } from '../agent-tools/executor.js';
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -507,12 +509,37 @@ export async function createApp(
     try { return await operation(scopedFileService(scope, lease)); }
     finally { if (mutation) filesystemCache.invalidate(scope); lease.release(); }
   };
+  const agentTools = new AtlasToolRegistry();
+  const guardedToolExecutor = (request: { raw: NodeJS.EventEmitter }, reply: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }) => new AtlasToolExecutor({
+    registry: agentTools,
+    resolveScope: async (candidate, signal) => {
+      const resolved = await resolveDeviceScope({ ...candidate }, request, reply);
+      if (signal?.aborted) throw scopeError('cancelled', 'The tool request was cancelled.');
+      return resolved;
+    },
+    acquireFiles: async scope => {
+      const lease = await deviceSessions.acquire(scope);
+      return { service: scopedFileService(scope, lease), release: () => lease.release() };
+    }
+  });
 
   app.get("/api/health", async () => ({
     ok: true,
     version: "0.2.0",
     activeIndex: activeIndex?.summary ?? null,
   }));
+  app.get('/api/agent-tools', async () => ({ tools: agentTools.list() }));
+  app.get('/api/agent-tools/:id', async (request, reply) => {
+    const descriptor = agentTools.describe(decodeURIComponent(String((request.params as { id?: string }).id ?? '')));
+    return descriptor ? descriptor : reply.code(404).send({ error: 'tool_not_found' });
+  });
+  app.post('/api/agent-tools/:id/execute', async (request, reply) => {
+    const body = (request.body ?? {}) as { input?: Record<string, unknown>; scope?: DeviceScope };
+    try {
+      if (!body.scope || !body.input) throw scopeError('tool_input_invalid', 'Tool input and Device scope are required.');
+      return await guardedToolExecutor(request, reply).execute({ toolId: decodeURIComponent(String((request.params as { id?: string }).id ?? '')), input: body.input, scope: body.scope, signal: requestSignal(request, reply) });
+    } catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
+  });
   app.get("/api/onboarding/status", async (request, reply) => {
     try { return await bootstrap.check(profileScope.current(), requestSignal(request)); }
     catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
