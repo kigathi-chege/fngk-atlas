@@ -1,0 +1,35 @@
+{
+  "protocolVersion": "atlas.interpreter.v1",
+  "ontologyVersion": "atlas.world.v1",
+  "id": "example.postgresql",
+  "version": "1.0.0",
+  "publisher": "example",
+  "displayName": "PostgreSQL semantics",
+  "description": "Recognizes PostgreSQL runtime evidence and explains its relational-storage capability.",
+  "license": "MIT",
+  "inputs": ["process", "database"],
+  "outputKinds": ["workload", "capability"],
+  "outputPredicates": ["provides-capability"],
+  "budgets": {"maxInput": 1000, "maxEntities": 500, "maxAssertions": 1000, "timeoutMs": 1000},
+  "rules": [
+    {
+      "id": "postgres-runtime",
+      "when": {"any": [{"field": "label", "op": "matches", "value": "postgres(?:ql)?"}, {"field": "attributes.engine", "op": "eq", "value": "postgres"}]},
+      "emit": {"kind": "workload", "capability": "relational-storage", "classification": "derived", "confidence": 0.98, "explanation": "PostgreSQL process or protocol identity provides relational storage."}
+    }
+  ],
+  "views": [
+    {
+      "id": "example.postgresql.workload",
+      "title": "PostgreSQL workload",
+      "appliesTo": ["workload"],
+      "priority": 20,
+      "sections": [
+        {"kind": "properties", "title": "Runtime identity", "fields": ["command", "engine", "version"]},
+        {"kind": "relationships", "title": "Capabilities", "predicate": "provides-capability"},
+        {"kind": "evidence", "title": "Recognition evidence"},
+        {"kind": "timeline", "title": "Recent changes"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+import {createHash} from 'node:crypto';import {readFile,stat} from 'node:fs/promises';import path from 'node:path';import {execFile} from 'node:child_process';import {promisify} from 'node:util';
+const execFileAsync=promisify(execFile);
+export interface HeadArtifact{root:string;archivePath:string;archiveName:string;platform:string;architecture:string;size:number;checksum:string;commit:string;version:string}
+interface HeadManifest{protocolVersion?:string;commit?:string;artifacts?:Array<{name?:string;checksum?:string;size?:number}>}
+function safe(value:string){return /^[a-z0-9._-]+$/i.test(value)&&!value.includes('..')}
+export async function inspectHeadArtifacts(root:string,platform:string=process.platform,architecture:string=process.arch,signalRoot=process.env.SIGNAL_SOURCE??path.resolve(root,'../../signal')):Promise<HeadArtifact>{
+  const os=platform==='darwin'?'darwin':platform==='linux'?'linux':'',arch=architecture==='x64'?'amd64':architecture==='arm64'?'arm64':'';if(!os||!arch)throw Object.assign(new Error(`Unsupported target ${platform}/${architecture}.`),{code:'artifact_architecture_unsupported'});
+  const archiveName=`fngk_${os}_${arch}.tar.gz`;if(!safe(archiveName))throw Object.assign(new Error('Unsafe artifact name.'),{code:'artifact_invalid'});const archivePath=path.join(root,archiveName),realRoot=path.resolve(root);if(!path.resolve(archivePath).startsWith(`${realRoot}${path.sep}`))throw Object.assign(new Error('Artifact escaped its root.'),{code:'artifact_path_escape'});
+  let manifest:HeadManifest;try{manifest=JSON.parse(await readFile(path.join(root,'manifest.json'),'utf8'))}catch{throw Object.assign(new Error('Exact-head manifest is missing or invalid. Rebuild FNGK artifacts.'),{code:'artifact_manifest_invalid'})}
+  if(manifest.protocolVersion!=='atlas.fngk-head.v1'||!/^[a-f0-9]{40}$/i.test(String(manifest.commit??'')))throw Object.assign(new Error('Exact-head manifest has an unsupported protocol or commit.'),{code:'artifact_manifest_invalid'});
+  const [bytes,checksums,info,version,currentCommit]=await Promise.all([readFile(archivePath),readFile(path.join(root,'SHA256SUMS'),'utf8'),stat(archivePath),readFile(path.join(root,'version.txt'),'utf8').catch(()=>Buffer.from('unknown')),execFileAsync('git',['-c',`safe.directory=${signalRoot}`,'-C',signalRoot,'rev-parse','HEAD']).then(value=>value.stdout.trim()).catch(()=>'unknown')]);
+  if(currentCommit!==manifest.commit)throw Object.assign(new Error(`FNGK artifacts were built from ${manifest.commit}; rebuild them from current Signal head ${currentCommit}.`),{code:'artifact_commit_mismatch'});
+  const expected=checksums.split(/\r?\n/).map(line=>line.trim().split(/\s+/)).find(parts=>parts.at(-1)===archiveName)?.[0],checksum=createHash('sha256').update(bytes).digest('hex'),entry=manifest.artifacts?.find(value=>value.name===archiveName);
+  if(!expected||expected!==checksum||entry?.checksum!==checksum||entry?.size!==info.size)throw Object.assign(new Error('FNGK archive checksum or size does not match its manifests.'),{code:'artifact_checksum_mismatch'});
+  return{root:realRoot,archivePath,archiveName,platform:os,architecture:arch,size:info.size,checksum,commit:manifest.commit,version:String(version).trim().slice(0,100)};
+}

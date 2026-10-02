@@ -1,0 +1,2 @@
+<script lang="ts">import {onMount} from 'svelte';import type {WorkbenchState} from '../lib/workbench-state.js';export let state:WorkbenchState;let lines:string[]=[];onMount(()=>state.subscribe(value=>lines=value.activity));</script>
+<section class="panel output-panel"><header><strong>Activity</strong><span>{lines.length} events</span></header><pre>{lines.length?lines.join('\n'):'Atlas is ready.'}</pre></section>

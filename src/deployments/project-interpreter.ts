@@ -1,0 +1,8 @@
+export interface ProjectInterpretation {runtime:'node';framework:'next'|'sveltekit'|'nuxt'|'nest'|'express'|'vite'|'node';confidence:number;name:string;installCommand:string;buildCommand?:string;startCommand?:string;evidence:Array<{path:string;kind:string;value:string}>}
+
+const frameworks=[['next','next'],['sveltekit','@sveltejs/kit'],['nuxt','nuxt'],['nest','@nestjs/core'],['express','express'],['vite','vite']] as const;
+
+export function interpretNodeProject(packageJson:unknown,files:string[]=[]):ProjectInterpretation{
+  const value=packageJson&&typeof packageJson==='object'?packageJson as Record<string,any>:{},dependencies={...(value.dependencies??{}),...(value.devDependencies??{})},match=frameworks.find(([,dependency])=>typeof dependencies[dependency]==='string'),framework=match?.[0]??'node',dependency=match?.[1],scripts=value.scripts&&typeof value.scripts==='object'?value.scripts as Record<string,unknown>:{},manager=files.includes('pnpm-lock.yaml')?'pnpm':files.includes('yarn.lock')?'yarn':files.includes('bun.lockb')||files.includes('bun.lock')?'bun':'npm';
+  return{runtime:'node',framework,confidence:match?.[0]?0.98:0.75,name:typeof value.name==='string'&&value.name?value.name:'Node project',installCommand:manager==='npm'?'npm ci':`${manager} install --frozen-lockfile`,...(typeof scripts.build==='string'?{buildCommand:`${manager} run build`}:{}),...(typeof scripts.start==='string'?{startCommand:`${manager} run start`}:{}),evidence:[{path:'package.json',kind:dependency?'dependency':'manifest',value:dependency?`${dependency}@${dependencies[dependency]}`:'node package'}]};
+}
