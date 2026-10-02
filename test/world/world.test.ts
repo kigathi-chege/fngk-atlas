@@ -183,6 +183,7 @@ describe("semantic Device atlas", () => {
   it("migrates the semantic world to v2 while preserving observations", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "atlas-world-v1-"));
     const file = path.join(directory, "atlas.db");
+    const observedAt = new Date().toISOString();
     cleanups.push(async () => {
       await rm(directory, { recursive: true, force: true });
     });
@@ -191,9 +192,9 @@ describe("semantic Device atlas", () => {
       CREATE TABLE atlas_world_observations(id TEXT PRIMARY KEY,context_id TEXT NOT NULL,kind TEXT NOT NULL,source TEXT NOT NULL,source_id TEXT NOT NULL,observed_at TEXT NOT NULL,scan_id TEXT,route_json TEXT NOT NULL,facts_json TEXT NOT NULL,sensitivity TEXT NOT NULL);
       CREATE TABLE atlas_world_entities(id TEXT PRIMARY KEY,context_id TEXT NOT NULL,kind TEXT NOT NULL,namespace TEXT NOT NULL,label TEXT NOT NULL,aliases_json TEXT NOT NULL,parent_id TEXT,workload_id TEXT,attributes_json TEXT NOT NULL,first_observed_at TEXT NOT NULL,last_observed_at TEXT NOT NULL,stale INTEGER NOT NULL DEFAULT 0,content_hash TEXT NOT NULL);
       CREATE TABLE atlas_world_interpreters(id TEXT PRIMARY KEY,version TEXT NOT NULL,publisher TEXT NOT NULL,manifest_json TEXT NOT NULL,trusted INTEGER NOT NULL,source TEXT NOT NULL,status TEXT NOT NULL,error TEXT,updated_at TEXT NOT NULL);
-      INSERT INTO atlas_world_observations VALUES('observation:one','local','process','runtime','process:1','2026-09-20T00:00:00.000Z',NULL,'{}','{"pid":1}','safe-metadata');
-      INSERT INTO atlas_world_entities VALUES('derived:one','local','process','legacy.derived','node','[]',NULL,NULL,'{}','2026-09-20T00:00:00.000Z','2026-09-20T00:00:00.000Z',0,'legacy');
-      INSERT INTO atlas_world_interpreters VALUES('legacy.derived','1','atlas','{}',1,'builtin','healthy',NULL,'2026-09-20T00:00:00.000Z');
+      INSERT INTO atlas_world_observations VALUES('observation:one','local','process','runtime','process:1','${observedAt}',NULL,'{}','{"pid":1}','safe-metadata');
+      INSERT INTO atlas_world_entities VALUES('derived:one','local','process','legacy.derived','node','[]',NULL,NULL,'{}','${observedAt}','${observedAt}',0,'legacy');
+      INSERT INTO atlas_world_interpreters VALUES('legacy.derived','1','atlas','{}',1,'builtin','healthy',NULL,'${observedAt}');
     `);
     legacy.close();
 
