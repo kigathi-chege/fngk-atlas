@@ -44,6 +44,7 @@ describe('Atlas Agent Chat', () => {
     expect(panel).toContain('cancel');
     expect(panel).toContain('scope: scope()');
     expect(panel).toContain("decision === 'allow_once' ? 'once'");
+    expect(panel).toContain("kind === 'full_access' ? ['*']");
     expect(panel).toContain('transport.steer');
     expect(approval).toContain('allow_once');
     expect(approval).toContain('allow_full_access');
