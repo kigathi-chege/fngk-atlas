@@ -42,6 +42,7 @@ describe('Atlas Agent Chat', () => {
     expect(panel).toContain('atlas:open-documentation');
     expect(panel).toContain('removeReference');
     expect(panel).toContain('cancel');
+    expect(panel).toContain('scope: scope()');
     expect(approval).toContain('allow_once');
     expect(approval).toContain('allow_full_access');
     expect(approval).toContain('onRevoke');
