@@ -59,6 +59,7 @@ import { TerminalFileTransport } from "../transports/terminal-file.js";
 import { AtlasToolRegistry } from '../agent-tools/registry.js';
 import { AtlasToolExecutor } from '../agent-tools/executor.js';
 import { GrantStore } from '../agent-tools/grants.js';
+import { HttpCalculatorConversationGateway, type CalculatorConversationGateway } from '../intelligence/conversation-gateway.js';
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -85,6 +86,7 @@ interface CreateAppOptions {
   logger?: boolean;
   diagnosticRegistry?: DiagnosticRegistry;
   calculatorProvider?: CalculatorProvider;
+  calculatorConversationGateway?: CalculatorConversationGateway;
   deviceAdapters?: RegisteredDeviceAdapter[];
   worldRefreshMode?: 'inline'|'worker';
   capability?: string;
@@ -230,6 +232,7 @@ export async function createApp(
             process.env.ATLAS_CALCULATOR_TOKEN,
           )
         : undefined),
+    calculatorConversationGateway = options.calculatorConversationGateway ?? (process.env.ATLAS_CALCULATOR_URL ? new HttpCalculatorConversationGateway(process.env.ATLAS_CALCULATOR_URL, process.env.ATLAS_CALCULATOR_TOKEN) : undefined),
     intelligence = new AtlasIntelligenceService(
       worldStore,
       world,
@@ -531,6 +534,12 @@ export async function createApp(
     activeIndex: activeIndex?.summary ?? null,
   }));
   app.get('/api/agent-tools', async () => ({ tools: agentTools.list() }));
+  app.get('/api/agent-chat/status', async () => ({ configured: Boolean(calculatorConversationGateway), health: calculatorConversationGateway ? await calculatorConversationGateway.health() : { available: false, message: 'Calculator provider is not configured.' }, tools: agentTools.list() }));
+  app.post('/api/agent-chat/conversations', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { const value: any = await calculatorConversationGateway.create(request.body as any); return reply.code(201).send({ ...value, conversationId: value.conversationId ?? value.session?.id }); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
+  app.post('/api/agent-chat/conversations/:id/messages', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { return reply.code(202).send(await calculatorConversationGateway.message(decodeURIComponent(String((request.params as any).id)), request.body)); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
+  app.post('/api/agent-chat/conversations/:id/cancel', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { return reply.send(await calculatorConversationGateway.cancel(decodeURIComponent(String((request.params as any).id)))); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
+  app.post('/api/agent-chat/conversations/:id/steer', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { return reply.send(await calculatorConversationGateway.steer(decodeURIComponent(String((request.params as any).id)), request.body)); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
+  app.get('/api/agent-chat/conversations/:id/events', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { const upstream = await calculatorConversationGateway.events(decodeURIComponent(String((request.params as any).id)), String((request.query as any).cursor ?? '') || undefined); reply.hijack(); reply.raw.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' }); for await (const chunk of upstream.body as any) reply.raw.write(chunk); reply.raw.end(); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
   app.get('/api/agent-tools/grants', async () => ({ grants: toolGrants.list() }));
   app.post('/api/agent-tools/grants', async (request, reply) => { const body = (request.body ?? {}) as any; try { if (!body.scope || !Array.isArray(body.toolIds) || !body.actor || !['conversation','durable','full_access'].includes(body.kind)) throw scopeError('tool_input_invalid','A valid scope, actor, grant kind, and tool list are required.'); const scope = await resolveDeviceScope({ ...body.scope }, request, reply); return reply.code(201).send({ grant: toolGrants.create({ scope, toolIds: body.toolIds.map(String).slice(0,32), kind: body.kind, actor: String(body.actor).slice(0,256), expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : undefined }) }); } catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); } });
   app.post('/api/agent-tools/grants/:id/revoke', async (request) => ({ revoked: toolGrants.revoke(decodeURIComponent(String((request.params as any).id ?? '')), String(((request.body ?? {}) as any).actor ?? 'operator').slice(0,256)) }));
