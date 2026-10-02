@@ -454,6 +454,7 @@ export async function createApp(
     await liveProjects.close();
     await headHandoffs.close();
     portSharing.close();
+    toolGrants.close();
     contexts.close();
     await worldRefreshTail.catch(() => {});
     worldStore.close();
@@ -514,7 +515,7 @@ export async function createApp(
     finally { if (mutation) filesystemCache.invalidate(scope); lease.release(); }
   };
   const agentTools = new AtlasToolRegistry();
-  const toolGrants = new GrantStore();
+  const toolGrants = new GrantStore(databaseFile);
   const guardedToolExecutor = (request: { raw: NodeJS.EventEmitter }, reply: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }) => new AtlasToolExecutor({
     registry: agentTools,
     resolveScope: async (candidate, signal) => {
@@ -525,7 +526,38 @@ export async function createApp(
     acquireFiles: async scope => {
       const lease = await deviceSessions.acquire(scope);
       return { service: scopedFileService(scope, lease), release: () => lease.release() };
-    }, grants: toolGrants
+    },
+    acquireTerminal: async (scope, signal) => {
+      if (signal?.aborted) throw scopeError('cancelled', 'The tool request was cancelled.');
+      const lease = await deviceSessions.acquire(scope);
+      const session = deviceSessions.snapshot(scope);
+      if (!session) { lease.release(); throw scopeError('device_session_unavailable', 'The Device Session could not be opened.'); }
+      return { session, release: () => lease.release() };
+    },
+    inspectDeployments: async (scope, signal) => await fngk.deployments(scope.deviceId, { profile: scope.profile, signal }),
+    listPorts: async scope => portSharing.list(`device:${scope.deviceId}`),
+    inspectDevice: async (scope, signal) => {
+      const namespace = await fngk.namespace(scope.profile, signal);
+      const device = namespace.devices.find(value => value.id === scope.deviceId);
+      if (!device) throw scopeError('context_not_found', 'The Device is no longer available in this profile.');
+      return {
+        profile: namespace.profile.name,
+        device,
+        resources: (namespace.resources ?? []).filter(value => value.deviceId === scope.deviceId)
+      };
+    },
+    runTerminalCommand: async (scope, command, signal) => {
+      const lease = await deviceSessions.acquire(scope);
+      try {
+        const result = await lease.commandExecutor(scope).execute(command, { signal, timeoutMs: 30_000 });
+        return {
+          exitCode: result.exitCode,
+          stdout: redact(result.output.toString('utf8')).slice(0, 1_000_000),
+          stderr: ''
+        };
+      } finally { lease.release(); }
+    },
+    grants: toolGrants
   });
 
   app.get("/api/health", async () => ({
@@ -541,7 +573,7 @@ export async function createApp(
   app.post('/api/agent-chat/conversations/:id/steer', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { return reply.send(await calculatorConversationGateway.steer(decodeURIComponent(String((request.params as any).id)), request.body)); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
   app.get('/api/agent-chat/conversations/:id/events', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { const upstream = await calculatorConversationGateway.events(decodeURIComponent(String((request.params as any).id)), String((request.query as any).cursor ?? '') || undefined); reply.hijack(); reply.raw.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' }); for await (const chunk of upstream.body as any) reply.raw.write(chunk); reply.raw.end(); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
   app.get('/api/agent-tools/grants', async () => ({ grants: toolGrants.list() }));
-  app.post('/api/agent-tools/grants', async (request, reply) => { const body = (request.body ?? {}) as any; try { if (!body.scope || !Array.isArray(body.toolIds) || !body.actor || !['conversation','durable','full_access'].includes(body.kind)) throw scopeError('tool_input_invalid','A valid scope, actor, grant kind, and tool list are required.'); const scope = await resolveDeviceScope({ ...body.scope }, request, reply); return reply.code(201).send({ grant: toolGrants.create({ scope, toolIds: body.toolIds.map(String).slice(0,32), kind: body.kind, actor: String(body.actor).slice(0,256), expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : undefined }) }); } catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); } });
+  app.post('/api/agent-tools/grants', async (request, reply) => { const body = (request.body ?? {}) as any; try { if (!body.scope || !Array.isArray(body.toolIds) || !body.actor || !['once','conversation','durable','full_access'].includes(body.kind)) throw scopeError('tool_input_invalid','A valid scope, actor, grant kind, and tool list are required.'); const scope = await resolveDeviceScope({ ...body.scope }, request, reply); return reply.code(201).send({ grant: toolGrants.create({ scope, toolIds: body.toolIds.map(String).slice(0,32), kind: body.kind, actor: String(body.actor).slice(0,256), expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : undefined }) }); } catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); } });
   app.post('/api/agent-tools/grants/:id/revoke', async (request) => ({ revoked: toolGrants.revoke(decodeURIComponent(String((request.params as any).id ?? '')), String(((request.body ?? {}) as any).actor ?? 'operator').slice(0,256)) }));
   app.get('/api/agent-tools/:id', async (request, reply) => {
     const descriptor = agentTools.describe(decodeURIComponent(String((request.params as { id?: string }).id ?? '')));

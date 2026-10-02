@@ -24,13 +24,15 @@ Atlas reads `ATLAS_CALCULATOR_URL`, `ATLAS_CALCULATOR_TOKEN`, and optionally `AT
 
 Read-only tools are offered as scoped slash commands. Higher-risk actions require an approval card before execution. The card supports:
 
-- **Allow once** — permits the pending action only.
+- **Allow once** — reserves one execution of the exact scoped tool. Atlas consumes it atomically when that execution begins.
 - **Allow conversation** — permits the matching tools for the current conversation scope.
 - **Remember** — creates a durable scoped grant.
 - **Grant full access** — creates a full-access scoped grant with a one-hour expiry.
 - **Deny** or **Revoke** — block the pending action or remove matching conversation grants.
 
 Use **Revoke** in the approval card or Device Sessions to stop work immediately. A grant is scoped to the resolved FNGK device authorization; changing profile, team, project, or device does not carry it across.
+
+The approval card tells Calculator whether the action was approved or denied. On approval, Calculator may retry only the exact requested tool call; Atlas remains the enforcement point and will reject a call whose grant, scope, or one-time reservation no longer matches. Terminal commands run through the same persistent scoped Device Session as Atlas terminals and have a 30-second limit; their returned text is redacted and bounded before it reaches Calculator.
 
 ## Performance and privacy telemetry
 
