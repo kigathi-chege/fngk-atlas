@@ -40,7 +40,7 @@ export class AtlasToolExecutor {
         const result = descriptor.id === 'atlas.files.list'
           ? await lease.service.list(target, { cursor: typeof input.cursor === 'string' ? input.cursor : null, limit: typeof input.limit === 'number' ? input.limit : undefined, signal: request.signal })
           : await lease.service.read(target, { signal: request.signal });
-        return { toolId: descriptor.id, status: 'succeeded', result };
+        return succeeded(descriptor.id, result);
       } finally { lease.release(); }
     }
     if (descriptor.id === 'atlas.terminal.open') {
@@ -70,9 +70,29 @@ export class AtlasToolExecutor {
 }
 
 function succeeded(toolId: AtlasToolResult['toolId'], result: unknown): AtlasToolResult {
-  return { toolId, status: 'succeeded', result };
+  return { toolId, status: 'succeeded', result: agentSafe(result) };
 }
 
 function unavailable(toolId: string): Error {
   return Object.assign(new Error(`${toolId} is not available through the guarded executor.`), { code: 'tool_unavailable' });
+}
+
+const privateKey = /(?:secret|token|password|credential|authorization|cookie|executor|transport|route|content)/i;
+
+/** Convert service values to a bounded, JSON-safe agent payload; never expose transport internals. */
+function agentSafe(value: unknown, depth = 0): unknown {
+  if (depth > 8) return '[truncated]';
+  if (typeof value === 'string') return value.length > 1_000_000 ? `${value.slice(0, 1_000_000)}…[truncated]` : value
+    .replace(/(authorization\s*:\s*bearer\s+)[^\s]+/gi, '$1[redacted]')
+    .replace(/((?:ticket|credential|token|session|password)\s*[=:]\s*)[^\s&]+/gi, '$1[redacted]');
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) return `[binary ${value.byteLength} bytes omitted]`;
+  if (Array.isArray(value)) return value.slice(0, 500).map(item => agentSafe(item, depth + 1));
+  if (typeof value !== 'object') return String(value);
+  const record: Record<string, unknown> = {};
+  for (const [name, item] of Object.entries(value as Record<string, unknown>)) {
+    if (privateKey.test(name)) continue;
+    record[name] = agentSafe(item, depth + 1);
+  }
+  return record;
 }

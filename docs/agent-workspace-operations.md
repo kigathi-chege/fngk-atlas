@@ -24,7 +24,7 @@ Atlas reads `ATLAS_CALCULATOR_URL`, `ATLAS_CALCULATOR_TOKEN`, and optionally `AT
 
 Read-only tools are offered as scoped slash commands. Higher-risk actions require an approval card before execution. The card supports:
 
-- **Allow once** — reserves one execution of the exact scoped tool. Atlas consumes it atomically when that execution begins.
+- **Allow once** — reserves one execution of the exact scoped tool. Atlas consumes it atomically when that execution begins and discards it if Atlas restarts first.
 - **Allow conversation** — permits the matching tools for the current conversation scope.
 - **Remember** — creates a durable scoped grant.
 - **Grant full access** — creates a full-access scoped grant with a one-hour expiry.

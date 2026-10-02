@@ -7,13 +7,16 @@ const scope = { profile: 'local', teamId: 'team-1', projectId: 'project-1', devi
 
 describe('AtlasToolExecutor', () => {
   it('executes a scoped read-only filesystem action and returns a normalized tool result', async () => {
-    const list = vi.fn(async () => ({ items: [{ name: 'README.md', type: 'file' }], nextCursor: null }));
+    const list = vi.fn(async () => ({ items: [{ name: 'README.md', type: 'file' }], nextCursor: null, route: { executor: { token: 'must-not-leak' } } }));
     const executor = new AtlasToolExecutor({
       registry: new AtlasToolRegistry(),
       resolveScope: async () => scope,
       acquireFiles: async () => ({ service: { list }, release: vi.fn() })
     });
     await expect(executor.execute({ toolId: 'atlas.files.list', input: { path: '/' }, scope })).resolves.toMatchObject({ status: 'succeeded', toolId: 'atlas.files.list', result: { items: [{ name: 'README.md' }] } });
+    const result = await executor.execute({ toolId: 'atlas.files.list', input: { path: '/' }, scope });
+    expect(JSON.stringify(result)).not.toContain('must-not-leak');
+    expect((result.result as Record<string, unknown>).route).toBeUndefined();
     expect(list).toHaveBeenCalledWith({ contextId: 'device:device-1', path: '/' }, expect.any(Object));
   });
 

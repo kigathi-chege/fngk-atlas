@@ -25,7 +25,7 @@ const parse = (row: any): Grant => ({
   revokedBy: row.revoked_by
 });
 
-/** Persistent, scope-bound agent authorizations. Conversation grants are pruned on restart. */
+/** Persistent, scope-bound agent authorizations. Ephemeral grants are pruned on restart. */
 export class GrantStore {
   readonly db: DatabaseSync;
 
@@ -42,7 +42,7 @@ export class GrantStore {
       );
       CREATE INDEX IF NOT EXISTS atlas_agent_tool_grants_scope
         ON atlas_agent_tool_grants(scope_key, revoked_at, expires_at);
-      DELETE FROM atlas_agent_tool_grants WHERE kind='conversation';
+      DELETE FROM atlas_agent_tool_grants WHERE kind IN ('conversation','once');
     `);
     const columns = this.db.prepare('PRAGMA table_info(atlas_agent_tool_grants)').all().map((value: any) => value.name);
     if (!columns.includes('max_uses')) this.db.exec('ALTER TABLE atlas_agent_tool_grants ADD COLUMN max_uses INTEGER');
