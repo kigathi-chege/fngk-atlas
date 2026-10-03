@@ -26,6 +26,8 @@ describe('FilesystemTree navigation contract', () => {
     const source = await readFile(resolve(root, 'src/web/components/FilesystemTree.svelte'), 'utf8');
     expect(source).toContain('state.subscribe(value=>');
     expect(source).not.toContain("void load(root);return()=>");
+    expect(source).toContain('let initialLoad=true');
+    expect(source).toContain('if(initialLoad||value.contextId!==contextId)');
   });
 
   it('does not call an interrupted root request an empty directory', async () => {
