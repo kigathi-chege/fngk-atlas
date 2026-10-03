@@ -14,6 +14,7 @@
   <button title="Open Device lifecycle" aria-label="Open Device lifecycle" onclick={()=>window.dispatchEvent(new Event('atlas:open-device-lifecycle'))}><Settings2 size={17}/></button>
   <button title="Open Device Sessions" aria-label="Open Device Sessions" onclick={()=>window.dispatchEvent(new Event('atlas:open-device-sessions'))}><Network size={17}/></button>
   <button title="Open Agent Chat" aria-label="Open Agent Chat" onclick={()=>window.dispatchEvent(new Event('atlas:open-agent-chat'))}><Bot size={17}/></button>
+  <button title="Manage app connections" aria-label="Manage app connections" onclick={()=>window.dispatchEvent(new Event('atlas:open-app-connections'))}><Network size={17}/></button>
   <button title="Open documentation" aria-label="Open documentation" onclick={()=>window.dispatchEvent(new Event('atlas:open-documentation'))}><BookOpen size={17}/></button>
   <div class="rail-contexts" aria-label="FNGK contexts">{#each contexts as item}<button class:active={item.id===selected} class:offline={!item.online} data-context-id={item.id} data-context-kind={item.kind??'context'} title={label(item)} aria-label={label(item)} onclick={()=>choose(item.id)}><Monitor size={18}/><i class:online={item.online}></i></button>{/each}</div>
   {#if minimizedNavigator}<button aria-label="Restore Atlas" title="Restore explorer" onclick={restoreNavigator}><FolderOpen size={17}/></button>{/if}
