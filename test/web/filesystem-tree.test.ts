@@ -21,4 +21,17 @@ describe('FilesystemTree navigation contract', () => {
     expect(source).toContain('pendingPaths=new Set()');
     expect(source).toContain('<LoadingSpinner');
   });
+
+  it('only calls the initial filesystem load from the immediate state subscription', async () => {
+    const source = await readFile(resolve(root, 'src/web/components/FilesystemTree.svelte'), 'utf8');
+    expect(source).toContain('state.subscribe(value=>');
+    expect(source).not.toContain("void load(root);return()=>");
+  });
+
+  it('does not call an interrupted root request an empty directory', async () => {
+    const source = await readFile(resolve(root, 'src/web/components/FilesystemTree.svelte'), 'utf8');
+    expect(source).toContain('loadedPaths=new Set<string>()');
+    expect(source).toContain('loadedPaths.add(normalized)');
+    expect(source).toContain('loadedPaths.has(root)&&!visibleRows.length');
+  });
 });
