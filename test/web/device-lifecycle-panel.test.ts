@@ -10,5 +10,9 @@ describe('Device lifecycle panel wiring',()=>{
   expect(host).toContain("'device-lifecycle':()=>import('./DeviceLifecyclePanel.svelte')");
   expect(workbench).toContain("atlas:open-device-lifecycle");
   expect(workbench).toContain("component:'device-lifecycle'");
+  const panel=await readFile(resolve(root,'src/web/components/DeviceLifecyclePanel.svelte'),'utf8');
+  expect(panel).toContain('Device color');
+  expect(panel).toContain('/api/device-lifecycle/device');
+  expect(panel).toContain('confirmation!==contextId');
  });
 });

@@ -43,6 +43,14 @@ async function protectedHarness() {
 }
 
 describe("Atlas FNGK-native server", () => {
+  it('exposes safe capability-gated device lifecycle routes',async()=>{
+    const app=await harness();
+    const readiness=await app.inject({method:'GET',url:'/api/device-lifecycle?contextId=device:device-1'});
+    expect(readiness.json()).toMatchObject({capabilities:{disconnect:{available:true},retire:{available:false},delete:{available:false}}});
+    expect((await app.inject({method:'POST',url:'/api/device-lifecycle/disconnect',payload:{contextId:'device:device-1'}})).statusCode).toBe(409);
+    expect((await app.inject({method:'DELETE',url:'/api/device-lifecycle/device',payload:{contextId:'device:device-1',confirm:true}})).statusCode).toBe(409);
+    expect((await app.inject({method:'POST',url:'/api/device-lifecycle/retire',payload:{contextId:'device:device-1',confirm:true}})).statusCode).toBe(409);
+  });
   it("requires the desktop launch capability for API access", async () => {
     const app = await protectedHarness();
     expect((await app.inject({ method: "GET", url: "/api/onboarding/status" })).statusCode).toBe(401);

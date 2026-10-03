@@ -19,6 +19,7 @@ describe('DeviceLifecycleService', () => {
       state: 'inspection-unavailable',
       profile: { name: 'local' },
       profileSelection: 'automatic',
+      capabilities:{disconnect:{available:true},retire:{available:false},delete:{available:false}},
     });
   });
 

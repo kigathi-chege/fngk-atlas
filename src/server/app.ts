@@ -683,6 +683,21 @@ export async function createApp(
       return reply.code(result.statusCode).send(result.body);
     }
   });
+  const lifecycleAction=async(request:any,reply:any,action:'disconnect'|'retire'|'delete')=>{
+    const body=request.body as {contextId?:unknown;profile?:unknown;confirm?:unknown;confirmation?:unknown}|undefined,contextId=typeof body?.contextId==='string'?body.contextId:'';
+    if(!contextId.startsWith('device:'))return reply.code(400).send({error:'device_context_required',message:'A Device context is required.'});
+    if(body?.confirm!==true)return reply.code(409).send({error:'confirmation_required',message:'Confirm this Device lifecycle action before continuing.'});
+    if(action==='delete'&&String(body?.confirmation??'').trim()!==contextId)return reply.code(409).send({error:'device_confirmation_required',message:'Type the exact Device ID to confirm permanent deletion.'});
+    const readiness=await lifecycle.inspect(contextId,typeof body?.profile==='string'?body.profile:undefined),capability=readiness.capabilities[action];
+    if(!capability.available)return reply.code(409).send({error:'lifecycle_capability_unavailable',message:capability.reason,capabilities:readiness.capabilities});
+    // Only the documented local route release exists today. Retire/delete remain capability-gated above.
+    const released=contexts.release(contextId,false,readiness.profile?.name);
+    if(released)evidence.invalidateContext(contextId,'terminal_disconnected');
+    return {action,contextId,released,capabilities:readiness.capabilities};
+  };
+  app.post('/api/device-lifecycle/disconnect',async(request,reply)=>{try{return await lifecycleAction(request,reply,'disconnect')}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.post('/api/device-lifecycle/retire',async(request,reply)=>{try{return await lifecycleAction(request,reply,'retire')}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.delete('/api/device-lifecycle/device',async(request,reply)=>{try{return await lifecycleAction(request,reply,'delete')}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
   app.get("/api/fngk/namespace", async (request, reply) => {
     const profile =
       String((request.query as { profile?: string }).profile ?? "") ||
