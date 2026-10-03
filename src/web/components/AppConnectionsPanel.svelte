@@ -1,9 +1,10 @@
 <script lang="ts">
   import {onMount} from 'svelte';
   import {api} from '../lib/api.js';
+  import {openAuthorizationUrl} from '../lib/external-url.js';
   let origin='https://calculator.signol.org', configured=false, connection:any=null, message='';
   async function refresh(){try{const value=await api<any>('/api/app-connections/status');configured=value.configured;connection=value.connection}catch(error){message=(error as Error).message}}
-  async function connect(){message='Opening Calculator authorization…';try{const value=await api<any>('/api/app-connections/connect',{method:'POST',body:JSON.stringify({origin})});window.open(value.authorizationUrl,'_blank','noopener,noreferrer');message='Approve the connection in Calculator, then return here.';const timer=window.setInterval(async()=>{await refresh();if(configured){window.clearInterval(timer);message='Calculator connected.';window.dispatchEvent(new Event('atlas:open-agent-chat'))}},1200)}catch(error){message=(error as Error).message}}
+  async function connect(){message='Opening Calculator authorization…';try{const value=await api<any>('/api/app-connections/connect',{method:'POST',body:JSON.stringify({origin})});await openAuthorizationUrl(value.authorizationUrl);message='Approve the connection in Calculator, then return here.';const timer=window.setInterval(async()=>{await refresh();if(configured){window.clearInterval(timer);message='Calculator connected.';window.dispatchEvent(new Event('atlas:open-agent-chat'))}},1200)}catch(error){message=(error as Error).message}}
   async function disconnect(){await api('/api/app-connections',{method:'DELETE'});await refresh();message='Calculator disconnected from this Atlas installation.'}
   onMount(()=>{void refresh()});
 </script>
