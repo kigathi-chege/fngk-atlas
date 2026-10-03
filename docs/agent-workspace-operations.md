@@ -18,7 +18,7 @@ Open **Agent Chat** from the activity rail or the command palette. The panel sto
 
 If Calculator is unavailable, the chat panel reports the reason and leaves the rest of Atlas usable. Open or continue a terminal, filesystem, deployment, or Device Session panel while Calculator is repaired. When Calculator is back, select **Resume** in the chat panel; Atlas reconnects using the stored cursor, so display events may replay but no tool mutation is replayed.
 
-Atlas reads `ATLAS_CALCULATOR_URL`, `ATLAS_CALCULATOR_TOKEN`, and optionally `ATLAS_CALCULATOR_ENGINE` only in the server process. The renderer talks only to same-origin `/api/agent-chat/*` endpoints. Never place the Calculator token in browser storage, a workspace snapshot, or a client-side configuration file.
+Atlas reads `ATLAS_CALCULATOR_URL`, `ATLAS_CALCULATOR_TOKEN`, and optionally `ATLAS_CALCULATOR_ENGINE` only in the server process. `ATLAS_CALCULATOR_TOKEN` must be a scoped, expiring Calculator integration credential created at Calculator's `/integrations` page, never an administrator, engine, connector, or Signal token. The renderer talks only to same-origin `/api/agent-chat/*` endpoints. Never place the Calculator token in browser storage, a workspace snapshot, or a client-side configuration file.
 
 ## Tool approvals and grants
 
