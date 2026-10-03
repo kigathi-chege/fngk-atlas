@@ -9,11 +9,18 @@ export interface TerminalSpawnOptions {
   args: string[];
   env: NodeJS.ProcessEnv;
   signal?: AbortSignal;
+  owner?: TerminalOwner;
+  purpose?: TerminalPurpose;
 }
+
+export type TerminalOwner = 'atlas-user' | 'atlas-internal';
+export type TerminalPurpose = 'interactive' | 'device-session' | 'filesystem' | 'discovery' | 'deployment' | 'diagnostic';
 
 export class TerminalSession extends EventEmitter {
   readonly process: ChildProcessWithoutNullStreams;
   readonly args: readonly string[];
+  readonly owner: TerminalOwner;
+  readonly purpose: TerminalPurpose;
   sessionId?: string;
   #closed = false;
   #stderr = '';
@@ -21,6 +28,8 @@ export class TerminalSession extends EventEmitter {
   constructor(options: TerminalSpawnOptions) {
     super();
     this.args = Object.freeze([...options.args]);
+    this.owner = options.owner ?? 'atlas-internal';
+    this.purpose = options.purpose ?? 'diagnostic';
     this.on('error', () => {});
     this.process = spawn(options.binary, options.args, { env: options.env, stdio: ['pipe', 'pipe', 'pipe'], signal: options.signal });
     const lines = createInterface({ input: this.process.stdout });

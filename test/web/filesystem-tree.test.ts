@@ -10,4 +10,12 @@ describe('FilesystemTree navigation contract', () => {
     expect(source).toContain('navigationController?.abort()');
     expect(source).toContain('signal:navigationController.signal');
   });
+
+  it('tracks loading per directory and clears stale indicators after a context change', async () => {
+    const source = await readFile(resolve(root, 'src/web/components/FilesystemTree.svelte'), 'utf8');
+    expect(source).toContain('pendingPaths=new Set<string>()');
+    expect(source).toContain('pendingPaths.has(key(item.path))');
+    expect(source).toContain('pendingPaths=new Set()');
+    expect(source).toContain('<LoadingSpinner');
+  });
 });

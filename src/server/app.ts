@@ -189,8 +189,12 @@ export async function createApp(
         newSession: true,
         profile: scope.profile,
         signal,
+        owner:'atlas-internal',
+        purpose:'device-session',
       }),
   });
+  const atlasUserTerminals=new Map<string,{deviceId:string;profile?:string;owner:'atlas-user';purpose:'interactive'}>();
+  const isUserTerminal=(session:{id?:unknown})=>typeof session.id==='string'&&atlasUserTerminals.has(session.id);
   const scopedFileService = (scope: DeviceScope, lease: DeviceSessionLease) => new FileService([new TerminalFileTransport({
     id: `terminal:${scope.deviceId}`,
     contextId: `device:${scope.deviceId}`,
@@ -683,6 +687,21 @@ export async function createApp(
       return reply.code(result.statusCode).send(result.body);
     }
   });
+  const lifecycleAction=async(request:any,reply:any,action:'disconnect'|'retire'|'delete')=>{
+    const body=request.body as {contextId?:unknown;profile?:unknown;confirm?:unknown;confirmation?:unknown}|undefined,contextId=typeof body?.contextId==='string'?body.contextId:'';
+    if(!contextId.startsWith('device:'))return reply.code(400).send({error:'device_context_required',message:'A Device context is required.'});
+    if(body?.confirm!==true)return reply.code(409).send({error:'confirmation_required',message:'Confirm this Device lifecycle action before continuing.'});
+    if(action==='delete'&&String(body?.confirmation??'').trim()!==contextId)return reply.code(409).send({error:'device_confirmation_required',message:'Type the exact Device ID to confirm permanent deletion.'});
+    const readiness=await lifecycle.inspect(contextId,typeof body?.profile==='string'?body.profile:undefined),capability=readiness.capabilities[action];
+    if(!capability.available)return reply.code(409).send({error:'lifecycle_capability_unavailable',message:capability.reason,capabilities:readiness.capabilities});
+    // Only the documented local route release exists today. Retire/delete remain capability-gated above.
+    const released=contexts.release(contextId,false,readiness.profile?.name);
+    if(released)evidence.invalidateContext(contextId,'terminal_disconnected');
+    return {action,contextId,released,capabilities:readiness.capabilities};
+  };
+  app.post('/api/device-lifecycle/disconnect',async(request,reply)=>{try{return await lifecycleAction(request,reply,'disconnect')}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.post('/api/device-lifecycle/retire',async(request,reply)=>{try{return await lifecycleAction(request,reply,'retire')}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.delete('/api/device-lifecycle/device',async(request,reply)=>{try{return await lifecycleAction(request,reply,'delete')}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
   app.get("/api/fngk/namespace", async (request, reply) => {
     const profile =
       String((request.query as { profile?: string }).profile ?? "") ||
@@ -755,7 +774,7 @@ export async function createApp(
     try {
       const value = await fngk.namespace(profile, requestSignal(request));
       const terminals = (value.sessions ?? []).filter(
-          (session) => !query.deviceId || session.deviceId === query.deviceId,
+          (session) => isUserTerminal(session) && (!query.deviceId || session.deviceId === query.deviceId),
         ),
         managed = liveProjects
           .list()
@@ -822,6 +841,7 @@ export async function createApp(
       return reply.code(400).send({ error: "invalid_action" });
     if (["stop", "archive"].includes(body.action) && body.confirm !== true)
       return reply.code(409).send({ error: "confirmation_required" });
+    if(!isUserTerminal({id}))return reply.code(404).send({error:'atlas_user_terminal_not_found',message:'Atlas only manages interactive terminals it created. Internal Device Sessions are managed from Device Sessions.'});
     try {
       return await fngk.sessionAction(id, body.action, {
         profile: body.profile,
@@ -2520,31 +2540,25 @@ export async function createApp(
     let closed = false;
     socket.once('close', () => { closed = true; });
     void (async () => {
-      if (query.new !== undefined || query.session !== undefined) throw Object.assign(new Error('Terminal session selection is unavailable for leased Device streams.'), { code: 'unsupported_terminal_selection' });
+      if (query.session !== undefined) throw Object.assign(new Error('Atlas restores only interactive terminals it created.'), { code: 'unsupported_terminal_selection' });
       if (!target.startsWith('device:')) throw Object.assign(new Error('A Device target is required.'), { code: 'target_required' });
       const scope = await scopeForContext(target, query.profile, request);
-      const lease = await deviceSessions.acquire(scope);
-      if (closed) { lease.release(); return; }
-      const stream = lease.subscribe(event => {
-        if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
-        if (event.type === 'detached' && socket.readyState === socket.OPEN) socket.close(1000);
-      }, scope);
-      const snapshot = deviceSessions.snapshot(scope);
-      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'ready', sessionId: snapshot?.sessionId, streamId: stream.id, target, recordingMode: 'leased' }));
+      const terminal=fngk.openTerminal(target,{newSession:true,profile:scope.profile,owner:'atlas-user',purpose:'interactive'});
+      const onEvent=(event:TerminalInput|any)=>{if(event.type==='ready'&&terminal.sessionId)atlasUserTerminals.set(terminal.sessionId,{deviceId:scope.deviceId,profile:scope.profile,owner:'atlas-user',purpose:'interactive'});if(socket.readyState===socket.OPEN)socket.send(JSON.stringify(event));if(event.type==='detached'&&socket.readyState===socket.OPEN)socket.close(1000)};
+      terminal.on('event',onEvent);terminal.once('error',(error)=>{if(socket.readyState===socket.OPEN)socket.send(JSON.stringify({type:'error',code:error.code??'terminal_unavailable',message:error.message}))});
+      if(closed){terminal.close();return;}
       socket.on("message", (raw: RawData) => {
         void (async () => {
           try {
             const message = JSON.parse(raw.toString()) as TerminalInput;
             if (!message || !terminalInputs.has(message.type)) throw new Error("unsupported terminal message");
-            await lease.run(async ({ session }) => {
-              if (!session.send(message)) throw Object.assign(new Error('Terminal session is closed.'), { code: 'terminal_closed' });
-            }, { scope });
+            if (!terminal.send(message)) throw Object.assign(new Error('Terminal session is closed.'), { code: 'terminal_closed' });
           } catch (error) {
             if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'error', code: (error as { code?: string }).code ?? 'invalid_input', message: (error as Error).message }));
           }
         })();
       });
-      socket.once("close", () => { stream.release(); lease.release(); });
+      socket.once("close", () => { terminal.detach('atlas-user-panel-closed'); });
     })().catch(error => {
       if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'error', code: (error as { code?: string }).code ?? 'terminal_unavailable', message: (error as Error).message }));
       socket.close(1008);

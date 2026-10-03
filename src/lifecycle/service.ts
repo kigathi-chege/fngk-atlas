@@ -26,7 +26,10 @@ export type DeviceReadiness = {
   profiles: SafeLifecycleProfile[];
   profile?: SafeLifecycleProfile;
   diagnostics: Array<{ code: string; message: string }>;
+  capabilities: DeviceLifecycleCapabilities;
 };
+
+export type DeviceLifecycleCapabilities = Record<'disconnect'|'retire'|'delete', {available:boolean;reason?:string}>;
 
 type LifecycleSource = {
   profiles: () => Promise<{ profiles: SafeLifecycleProfile[] }>;
@@ -65,6 +68,8 @@ export class DeviceLifecycleService {
   }
 
   private result(contextId: string, state: DeviceReadinessState, profileSelection: DeviceReadiness['profileSelection'], profiles: SafeLifecycleProfile[], profile: SafeLifecycleProfile | undefined, code: string, message: string): DeviceReadiness {
-    return { protocolVersion: 'atlas.device-lifecycle.v1', contextId, state, profileSelection, profiles: profiles.map((value) => ({ ...value })), ...(profile ? { profile: { ...profile } } : {}), diagnostics: [{ code, message }] };
+    const disconnect=state==='inspection-unavailable'&&Boolean(profile)?{available:true}:{available:false,reason:'Connect an online Device with an authorized profile before releasing its local Atlas route.'};
+    const unavailable={available:false,reason:'This FNGK control-plane operation is not available to Atlas yet. Atlas will not emulate it with a shell command.'};
+    return { protocolVersion: 'atlas.device-lifecycle.v1', contextId, state, profileSelection, profiles: profiles.map((value) => ({ ...value })), ...(profile ? { profile: { ...profile } } : {}), diagnostics: [{ code, message }], capabilities:{disconnect,retire:unavailable,delete:unavailable} };
   }
 }

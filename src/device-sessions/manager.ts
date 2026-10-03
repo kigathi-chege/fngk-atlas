@@ -337,6 +337,6 @@ export class DeviceSessionManager extends EventEmitter {
 
   #emit(event: DeviceSessionStateEvent): void { this.emit('state', event); }
   #snapshot(entry: Entry): DeviceSessionSnapshot {
-    return { scope: entry.scope, state: entry.state, leaseCount: entry.leases.size, activeStreams: entry.streams.size, ...(entry.terminal?.sessionId ? { sessionId: entry.terminal.sessionId } : {}), handshakeCount: entry.handshakeCount, cacheEpoch: entry.cacheEpoch, ...(entry.connectedAt ? { connectedAt: entry.connectedAt } : {}), ...(entry.lastFailure ? { lastFailure: entry.lastFailure } : {}) };
+    return { scope: entry.scope, state: entry.state, leaseCount: entry.leases.size, activeStreams: entry.streams.size, ...(entry.terminal?.sessionId ? { sessionId: entry.terminal.sessionId } : {}), handshakeCount: entry.handshakeCount, cacheEpoch: entry.cacheEpoch, owner:'atlas-internal', purpose:'device-session', ...(entry.connectedAt ? { connectedAt: entry.connectedAt } : {}), ...(entry.lastFailure ? { lastFailure: entry.lastFailure } : {}) };
   }
 }
