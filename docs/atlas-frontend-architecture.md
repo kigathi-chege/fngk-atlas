@@ -1,10 +1,20 @@
 # Atlas frontend architecture
 
+## Rail, panel, form, and loading conventions
+
+Atlas has one minimization lifecycle. `Workbench.svelte` retains a minimized panel descriptor and `PinnedRootsRail.svelte` displays every minimized panel through `MinimizedTray.svelte`. The right rail shows seven direct type-specific restore icons; extra panels belong in its typed overflow menu. There is no terminal-only dock or terminal-only minimized history. Minimizing a terminal changes presentation only and does not disconnect its stream.
+
+`ActivityRail.svelte` has fixed top and bottom regions. Its device list is the sole scrollable middle region, using `RailScrollViewport.svelte`; native scrolling remains available while the browser scrollbar is hidden and chevrons signal more devices.
+
+New user-facing controls use `src/web/components/ui/`: `AtlasInput`, `AtlasTextarea`, `AtlasSelect`, and `AtlasCombobox`. They own tokenized presentation, focus rings, disabled behavior, and accessibility; the enclosing panel owns validation, network work, errors, and busy state. `form-controls.css` supplies the same baseline to legacy native controls during migration, so do not create a new bespoke input/select style.
+
+Use `LoadingSpinner.svelte` for a local action and `LoadingState.svelte` when pending work replaces panel content. Cancellation is normal control flow: `FilesystemTree.svelte` owns one `AbortController` per normalized path. Expanding one folder cannot cancel another; root/context changes and teardown cancel all pending requests. `FileService` must rethrow cancellation rather than turn it into a route-unavailable error.
+
 Atlas is a Svelte 5 + Vite renderer in [`src/web`](../src/web), served by the local TypeScript process in [`src/server/index.ts`](../src/server/index.ts) and packaged through Tauri in [`desktop`](../desktop). It is a desktop workspace: presentation state belongs in the renderer; authentication, profile storage, terminal ownership, and Device authority remain in FNGK.
 
 ## Startup and boundaries
 
-[`App.svelte`](../src/web/App.svelte) creates one `WorkbenchState`, discovers the active FNGK context, and mounts permanent chrome: title/menu, activity rail, Dockview workbench, terminal dock, notifications, recovery and context menu. [`api.ts`](../src/web/lib/api.ts) is the renderer's only HTTP/WebSocket boundary. Do not add shell execution to a component.
+[`App.svelte`](../src/web/App.svelte) creates one `WorkbenchState`, discovers the active FNGK context, and mounts permanent chrome: title/menu, activity rail, Dockview workbench, shared right minimization rail, notifications, recovery and context menu. [`api.ts`](../src/web/lib/api.ts) is the renderer's only HTTP/WebSocket boundary. Do not add shell execution to a component.
 
 ```
 App → Workbench → PanelHost (lazy panel) → API/WebSocket → server → FNGK
