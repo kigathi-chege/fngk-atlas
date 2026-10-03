@@ -10,6 +10,10 @@ export interface FilePage { items: TransportEntry[]; nextCursor: string | null; 
 
 function fingerprint(content: Uint8Array): string { return createHash('sha256').update(content).digest('hex'); }
 function cursorName(cursor?: string | null): string { if (!cursor) return ''; try { return Buffer.from(cursor, 'base64url').toString('utf8'); } catch { return ''; } }
+function isCancelled(error: unknown, signal?: AbortSignal): boolean {
+  const value = error as { code?: string; name?: string };
+  return Boolean(signal?.aborted) || value.code === 'cancelled' || value.name === 'AbortError';
+}
 
 export class FileService {
   readonly resolver: OperationResolver;
@@ -38,7 +42,7 @@ export class FileService {
       const all = await route.list(target.path, { signal: options.signal }), cursorIndex = after ? all.findIndex(item => item.name === after) : -1, values = all.slice(cursorIndex + 1);
       const items = values.slice(0, limit), nextCursor = values.length > limit ? Buffer.from(items.at(-1)!.name).toString('base64url') : null;
       return { items, nextCursor, route };
-    } catch (error) { errors.push(error); }
+    } catch (error) { if (isCancelled(error, options.signal)) throw error; errors.push(error); }
     throw this.#unavailable('list', errors);
   }
 
@@ -50,7 +54,7 @@ export class FileService {
       if (metadata.size > this.maxReadBytes) return { path: target.path, bytes: metadata.size, tooLarge: true as const, binary: false, fingerprint: undefined, content: undefined, text: undefined, route };
       const content = await route.read(target.path, { signal: options.signal }), binary = content.includes(0);
       return { path: target.path, bytes: content.length, tooLarge: false as const, binary, fingerprint: fingerprint(content), content: binary ? content : undefined, text: binary ? undefined : content.toString('utf8'), route };
-    } catch (error) { errors.push(error); }
+    } catch (error) { if (isCancelled(error, options.signal)) throw error; errors.push(error); }
     throw this.#unavailable('read', errors);
   }
 
@@ -60,7 +64,7 @@ export class FileService {
     for (const route of this.#routes(target, 'stat')) try {
       const value = await route.stat(target.path, { signal: options.signal });
       return { path: target.path, size: Number(value.size), mode: Number(value.mode), route };
-    } catch (error) { errors.push(error); }
+    } catch (error) { if (isCancelled(error, options.signal)) throw error; errors.push(error); }
     throw this.#unavailable('stat', errors);
   }
 

@@ -71,6 +71,16 @@ describe('logical filesystem', () => {
     await expect(files.search({ contextId: 'host', path: '/' }, 'needle', { signal: controller.signal })).rejects.toMatchObject({ code: 'cancelled' });
   });
 
+  it('preserves a cancelled list request instead of reporting every route unavailable', async () => {
+    const cancelled = Object.assign(new Error('Terminal command cancelled.'), { code: 'cancelled' });
+    const transport = {
+      id: 'cancelled-route', kind: 'terminal', contextId: 'host', available: true,
+      operations: ['list'], effectiveIdentity: 'fixture', privilege: 'unknown', observedAt: new Date().toISOString(),
+      covers: () => true, list: async () => { throw cancelled; }
+    } as unknown as FileTransport;
+    await expect(new FileService([transport]).list({ contextId: 'host', path: '/' })).rejects.toMatchObject({ code: 'cancelled', message: 'Terminal command cancelled.' });
+  });
+
   it('stops name matching at the requested result limit', async () => {
     const { root, files } = await harness();
     await Promise.all(['needle-a.txt', 'needle-b.txt', 'needle-c.txt'].map(name => writeFile(path.join(root, name), '')));

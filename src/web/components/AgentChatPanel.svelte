@@ -6,6 +6,7 @@
   import { AgentChatStore, createAtlasConversationTransport, type AgentReference, type ConversationEvent } from '../lib/agent-chat.js';
   import { authorizedSlashCommands, loadAtlasCapabilities, type AtlasCapability } from '../lib/atlas-capabilities.js';
   import ToolApprovalCard from './ToolApprovalCard.svelte';
+  import AtlasTextarea from './ui/AtlasTextarea.svelte';
   import './AgentChatPanel.css';
 
   export let state: WorkbenchState;
@@ -34,5 +35,5 @@
   {#if error}<p class="connection-warning">{error}</p>{/if}
   <div class="reference-list" aria-label="Conversation references">{#each references as reference}<span>{reference.kind}: {reference.label}<button aria-label={`Remove ${reference.label}`} onclick={() => removeReference(reference)}>×</button></span>{/each}{#if !references.length}<small>No context references attached.</small>{/if}</div>
   <div class="transcript" aria-live="polite">{#each messages as message}<article class:user={message.role === 'user'} class="message">{message.text}</article>{/each}{#each [...toolCalls.values()] as call}<article class="tool-card"><header><strong>{call.title ?? 'Atlas tool'}</strong><small>{call.status}</small></header><p>{call.summary ?? call.id}</p>{#if call.documentationTarget}<a href="#documentation" onclick={() => window.dispatchEvent(new CustomEvent('atlas:open-documentation', { detail: { topicId: call.documentationTarget } }))}>Open documentation</a>{/if}</article>{/each}{#each [...approvals.values()] as approval}<ToolApprovalCard {approval} onDecision={(decision) => decide(approval, decision)} onRevoke={() => void revoke()}/>{/each}</div>
-  <form class="composer" onsubmit={(event) => { event.preventDefault(); void send(); }}><textarea bind:value={prompt} aria-label="Message Atlas Agent" placeholder={slash.length ? `Ask Atlas or use ${slash[0].command}` : 'Ask Atlas…'}></textarea><button type="submit" disabled={!prompt.trim()}><Send size={14}/>Send</button>{#if conversationId}<button type="button" onclick={resume}>Resume</button>{/if}</form>
+  <form class="composer" onsubmit={(event) => { event.preventDefault(); void send(); }}><AtlasTextarea bind:value={prompt} ariaLabel="Message Atlas Agent" placeholder={slash.length ? `Ask Atlas or use ${slash[0].command}` : 'Ask Atlas…'}/><button type="submit" disabled={!prompt.trim()}><Send size={14}/>Send</button>{#if conversationId}<button type="button" onclick={resume}>Resume</button>{/if}</form>
 </section>

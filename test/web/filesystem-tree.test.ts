@@ -5,10 +5,13 @@ import { describe, expect, it } from 'vitest';
 const root = resolve(import.meta.dirname, '../..');
 
 describe('FilesystemTree navigation contract', () => {
-  it('cancels an in-flight directory request before navigating to the next path', async () => {
+  it('only cancels a superseded request for the same directory', async () => {
     const source = await readFile(resolve(root, 'src/web/components/FilesystemTree.svelte'), 'utf8');
-    expect(source).toContain('navigationController?.abort()');
-    expect(source).toContain('signal:navigationController.signal');
+    expect(source).toContain('requestControllers=new Map<string,AbortController>()');
+    expect(source).toContain('requestControllers.get(normalized)?.abort()');
+    expect(source).toContain('signal:controller.signal');
+    expect(source).toContain('requestGenerations.get(normalized)===token');
+    expect(source).toContain('abortFileRequests()');
   });
 
   it('tracks loading per directory and clears stale indicators after a context change', async () => {
