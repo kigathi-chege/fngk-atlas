@@ -30,13 +30,11 @@
 .command-palette button.command-selected { background:var(--atlas-surface-2); outline:1px solid var(--atlas-cyan);outline-offset:-1px; }
 .command-palette button:disabled { opacity:.4; }
 .palette-empty { padding:16px;color:var(--atlas-muted); }
-.atlas-shell { grid-template-rows: 40px minmax(0, 1fr) 30px 24px; background: var(--atlas-bg); color: var(--atlas-text); }
+.atlas-shell { grid-template-rows: 40px minmax(0, 1fr) 24px; background: var(--atlas-bg); color: var(--atlas-text); }
 .atlas-shell > .atlas-command-menu { height:40px; background:var(--atlas-surface-0); }
-.atlas-shell > .terminal-dock { grid-column:1/-1; grid-row:3; }
-.atlas-shell > footer { grid-row:4; background:var(--atlas-surface-0); border-color:var(--atlas-border); }
+.atlas-shell > footer { grid-row:3; background:var(--atlas-surface-0); border-color:var(--atlas-border); }
 .atlas-shell .activity-rail, .atlas-shell .pinned-roots-rail { background:var(--atlas-surface-0); }
-.atlas-shell .rail-contexts { flex:1; min-height:48px; overflow-y:auto; scrollbar-width:thin; }
-.atlas-shell .rail-spacer { flex:0; }
+.atlas-shell .rail-contexts { flex:1; min-height:48px; overflow-y:auto; scrollbar-width:none; }
 .atlas-shell button:focus-visible, .atlas-shell select:focus-visible, .atlas-shell input:focus-visible { outline:2px solid var(--atlas-focus); outline-offset:2px; }
 .atlas-shell .panel, .atlas-shell .navigator, .atlas-shell .context-sidebar, .atlas-shell .tree-explorer { background:var(--atlas-surface-1); color:var(--atlas-text); }
 .atlas-shell input, .atlas-shell select { background:var(--atlas-surface-0); color:var(--atlas-text); border-color:var(--atlas-border); }

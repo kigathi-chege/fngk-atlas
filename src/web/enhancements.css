@@ -85,6 +85,9 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 
 /* Final viewport contract: the application owns the viewport and panels own scrolling. */
 .atlas-shell{height:100dvh!important;min-height:0;overflow:hidden}
+.activity-rail{display:flex;flex-direction:column;overflow:hidden}.activity-rail-top,.activity-rail-bottom{flex:none;display:grid;justify-items:center;gap:3px;width:100%}.activity-rail-devices{flex:1;min-height:0;width:100%;overflow:hidden}
+.activity-rail-top,.activity-rail-bottom{flex:none}
+.activity-rail-devices{flex:1;min-height:0}
 .activity-rail .rail-contexts{display:grid;gap:3px;flex:1;min-height:0;overflow-y:auto;scrollbar-width:none}.activity-rail .rail-contexts::-webkit-scrollbar{display:none}.activity-rail .rail-contexts button[style*="--device-color"]{color:var(--device-color);box-shadow:inset 2px 0 var(--device-color)}
 
 .pinned-roots-rail .rail-fill{flex:1;min-height:4px}

@@ -10,18 +10,21 @@
   onMount(()=>{minimizedNavigator=((document.querySelector('.root-dock') as any)?.__atlasMinimizedPanels??[]).some((item:AtlasPanelDescriptor)=>item.id==='atlas.navigator');const unsubscribe=state.subscribe(value=>selected=value.contextId);const panels=(event:Event)=>minimizedNavigator=((event as CustomEvent<any[]>).detail??[]).some(item=>item.id==='atlas.navigator');const appearance=()=>appearanceRevision++;window.addEventListener('atlas:minimized-panels',panels);window.addEventListener('atlas:device-appearance-changed',appearance);void load();return()=>{unsubscribe();window.removeEventListener('atlas:minimized-panels',panels);window.removeEventListener('atlas:device-appearance-changed',appearance)}});
 </script>
 <nav class="activity-rail context-rail" aria-label="Atlas activity">
-  <button class="rail-brand" title="FNGK Atlas" aria-label="FNGK Atlas"><img src="/brand/fngk-mark.svg" alt=""/></button>
-  <button title="Open Device lifecycle" aria-label="Open Device lifecycle" onclick={()=>window.dispatchEvent(new Event('atlas:open-device-lifecycle'))}><Settings2 size={17}/></button>
-  <button title="Open Device Sessions" aria-label="Open Device Sessions" onclick={()=>window.dispatchEvent(new Event('atlas:open-device-sessions'))}><Network size={17}/></button>
-  <button title="Open Agent Chat" aria-label="Open Agent Chat" onclick={()=>window.dispatchEvent(new Event('atlas:open-agent-chat'))}><Bot size={17}/></button>
-  <button title="Manage app connections" aria-label="Manage app connections" onclick={()=>window.dispatchEvent(new Event('atlas:open-app-connections'))}><Network size={17}/></button>
-  <button title="Open documentation" aria-label="Open documentation" onclick={()=>window.dispatchEvent(new Event('atlas:open-documentation'))}><BookOpen size={17}/></button>
-  <div data-appearance-revision={appearanceRevision}><RailScrollViewport>{#each contexts as item}<button class:active={item.id===selected} class:offline={!item.online} data-context-id={item.id} data-context-kind={item.kind??'context'} style={item.device?.id&&deviceAppearanceStore.get(item.device.id).color?`--device-color:var(--atlas-device-${deviceAppearanceStore.get(item.device.id).color})`:''} title={label(item)} aria-label={label(item)} onclick={()=>choose(item.id)}><Monitor size={18}/><i class:online={item.online}></i></button>{/each}</RailScrollViewport></div>
-  {#if minimizedNavigator}<button aria-label="Restore Atlas" title="Restore explorer" onclick={restoreNavigator}><FolderOpen size={17}/></button>{/if}
-  <span class="rail-spacer"></span>
-  <button title="Search" aria-label="Search" onclick={()=>window.dispatchEvent(new Event('atlas:focus-search'))}><Search size={17}/></button>
-  <button title="Open filesystem" aria-label="Open filesystem" onclick={()=>window.dispatchEvent(new CustomEvent('atlas:open-root',{detail:{contextId:selected,path:'/'}}))}><FolderOpen size={17}/></button>
-  <button title="Open terminal" aria-label="Open terminal" onclick={()=>window.dispatchEvent(new Event('atlas:open-terminal'))}><SquareTerminal size={17}/></button>
-  <button title="Open command palette" aria-label="Open command palette" onclick={()=>window.dispatchEvent(new Event('atlas:shortcuts'))}><Command size={17}/></button>
-  <button class:loading title="Refresh FNGK namespace" aria-label="Refresh FNGK namespace" onclick={()=>load(true)}><RefreshCw size={15}/></button>
+  <div class="activity-rail-top">
+    <button class="rail-brand" title="FNGK Atlas" aria-label="FNGK Atlas"><img src="/brand/fngk-mark.svg" alt=""/></button>
+    <button title="Open Device lifecycle" aria-label="Open Device lifecycle" onclick={()=>window.dispatchEvent(new Event('atlas:open-device-lifecycle'))}><Settings2 size={17}/></button>
+    <button title="Open Device Sessions" aria-label="Open Device Sessions" onclick={()=>window.dispatchEvent(new Event('atlas:open-device-sessions'))}><Network size={17}/></button>
+    <button title="Open Agent Chat" aria-label="Open Agent Chat" onclick={()=>window.dispatchEvent(new Event('atlas:open-agent-chat'))}><Bot size={17}/></button>
+    <button title="Manage app connections" aria-label="Manage app connections" onclick={()=>window.dispatchEvent(new Event('atlas:open-app-connections'))}><Network size={17}/></button>
+    <button title="Open documentation" aria-label="Open documentation" onclick={()=>window.dispatchEvent(new Event('atlas:open-documentation'))}><BookOpen size={17}/></button>
+    {#if minimizedNavigator}<button aria-label="Restore Atlas" title="Restore explorer" onclick={restoreNavigator}><FolderOpen size={17}/></button>{/if}
+  </div>
+  <div class="activity-rail-devices" data-appearance-revision={appearanceRevision}><RailScrollViewport label="Devices">{#each contexts as item}<button class:active={item.id===selected} class:offline={!item.online} data-context-id={item.id} data-context-kind={item.kind??'context'} style={item.device?.id&&deviceAppearanceStore.get(item.device.id).color?`--device-color:var(--atlas-device-${deviceAppearanceStore.get(item.device.id).color})`:''} title={label(item)} aria-label={label(item)} onclick={()=>choose(item.id)}><Monitor size={18}/><i class:online={item.online}></i></button>{/each}</RailScrollViewport></div>
+  <div class="activity-rail-bottom">
+    <button title="Search" aria-label="Search" onclick={()=>window.dispatchEvent(new Event('atlas:focus-search'))}><Search size={17}/></button>
+    <button title="Open filesystem" aria-label="Open filesystem" onclick={()=>window.dispatchEvent(new CustomEvent('atlas:open-root',{detail:{contextId:selected,path:'/'}}))}><FolderOpen size={17}/></button>
+    <button title="Open terminal" aria-label="Open terminal" onclick={()=>window.dispatchEvent(new Event('atlas:open-terminal'))}><SquareTerminal size={17}/></button>
+    <button title="Open command palette" aria-label="Open command palette" onclick={()=>window.dispatchEvent(new Event('atlas:shortcuts'))}><Command size={17}/></button>
+    <button class:loading title="Refresh FNGK namespace" aria-label="Refresh FNGK namespace" onclick={()=>load(true)}><RefreshCw size={15}/></button>
+  </div>
 </nav>
