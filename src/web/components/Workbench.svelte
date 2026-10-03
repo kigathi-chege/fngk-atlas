@@ -100,7 +100,7 @@
     const openRoot=(event:Event)=>{const detail=(event as CustomEvent<{contextId?:string;path?:string}>).detail,contextId=detail?.contextId??state.snapshot().contextId,path=detail?.path;if(!path)return;state.setContext(contextId);focusFiles();queueMicrotask(()=>window.dispatchEvent(new CustomEvent('atlas:filesystem-root',{detail:{contextId,path}})));};
     const focusNavigator=()=>{ensureBase();if(panelRegistry.get('atlas.navigator')?.minimized)restorePanel('atlas.navigator');let panel=dock.getPanel('atlas.navigator');if(!panel)panel=dock.addPanel({id:'atlas.navigator',title:'Atlas',component:'navigator',initialWidth:sidebarWidths.left,position:{referencePanel:ensureBase(),direction:'left'}});panel.api.setActive();syncEmpty()};
     const minimizeRequested=(event:Event)=>{const id=(event as CustomEvent<{panelId?:string}>).detail?.panelId,panel=id?dock.getPanel(id):undefined;if(panel)minimizePanel(panel)};
-    const minimizeOperations=()=>{const anchor=dock.getPanel('atlas.operations');if(!anchor)return;for(const panel of [...anchor.api.group.panels])if(panel.id!=='atlas.operations')minimizePanel(panel);const remaining=dock.getPanel('atlas.operations');if(remaining){minimizing.add(remaining.id);dock.removePanel(remaining)}updateMinimized();syncEmpty();persist()};
+    const minimizeOperations=()=>{const anchor=dock.getPanel('atlas.operations');if(!anchor)return;for(const panel of [...anchor.api.group.panels])minimizePanel(panel);updateMinimized();syncEmpty();persist()};
     const confirm=(event:Event)=>pendingClose=(event as CustomEvent<any>).detail;
     const unload=(event:BeforeUnloadEvent)=>{if(dirtyPanels.size||atlasBuffers.hasDirty())event.preventDefault();};
     window.addEventListener('atlas:open-logs',openLogs);
