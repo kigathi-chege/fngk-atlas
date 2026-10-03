@@ -3,7 +3,7 @@
   export let label='Devices';let viewport:HTMLDivElement, above=false, below=false;
   const refresh=()=>{if(!viewport)return;above=viewport.scrollTop>1;below=viewport.scrollTop+viewport.clientHeight<viewport.scrollHeight-1};
   const scroll=(direction:number)=>viewport?.scrollBy({top:direction*Math.max(48,viewport.clientHeight*.65),behavior:'smooth'});
-  onMount(()=>{const observer=new ResizeObserver(refresh);observer.observe(viewport);refresh();return()=>observer.disconnect()});
+  onMount(()=>{const observer=new ResizeObserver(refresh),mutations=new MutationObserver(refresh);observer.observe(viewport);mutations.observe(viewport,{childList:true,subtree:true});refresh();return()=>{observer.disconnect();mutations.disconnect()}});
 </script>
 <div class="rail-scroll-wrap">
   {#if above}<button class="rail-scroll-control before" aria-label={`Show earlier ${label}`} title={`Show earlier ${label}`} onclick={()=>scroll(-1)}><ChevronUp size={14}/></button>{/if}

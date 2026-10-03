@@ -9,4 +9,5 @@ describe('RailScrollViewport',()=>it('measures overflow and provides accessible 
  expect(source).toContain('Show earlier ${label}');
  expect(source).toContain('Show later ${label}');
  expect(source).toContain('scrollBy');
+ expect(source).toContain('MutationObserver');
 }));

@@ -4,7 +4,7 @@
   import { FitAddon } from '@xterm/addon-fit';
   import RotateCw from '@lucide/svelte/icons/rotate-cw';
   import X from '@lucide/svelte/icons/x';
-  import { atlasWebSocket } from '../lib/api.js';
+  import { api, atlasWebSocket } from '../lib/api.js';
   import type { WorkbenchState } from '../lib/workbench-state.js';
   import DocumentationHelp from './DocumentationHelp.svelte';
 
@@ -13,24 +13,26 @@
   let host: HTMLDivElement;
   let target = params.target ?? (state.snapshot().contextId.startsWith('device:') ? state.snapshot().contextId : '');
   let sessionId = '', streamId = '', status = 'Opening…', approval = '';
+  let sessions: Array<{id:string;title?:string;status?:string}> = [];
   let terminal: Terminal, fit: FitAddon, socket: WebSocket | undefined;
   let disposed = false, retries = 0, reconnectTimer: ReturnType<typeof setTimeout>, generation = 0, request = 0, lastRequest = '';
   const send = (value: Record<string, unknown>) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify(value));
   const encoded = (value: string) => { const bytes = new TextEncoder().encode(value); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary); };
 
-  function connect(force = false, newSession = false) {
+  async function refreshSessions() { if (!target.startsWith('device:')) return; try { const value=await api<any>(`/api/fngk/sessions?deviceId=${encodeURIComponent(target.slice(7))}${params.profile?`&profile=${encodeURIComponent(params.profile)}`:''}`);sessions=value.sessions??[]; } catch {} }
+  function connect(force = false, newSession = false, restoreSessionId = '') {
     if (!target.trim() || disposed) return;
     if (socket && !force && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
     clearTimeout(reconnectTimer);
     const token = ++generation;
     socket?.close(1000);
-    sessionId = ''; streamId = ''; approval = '';
-    terminal.reset();
+    if(newSession||!restoreSessionId){sessionId = ''; streamId = '';terminal.reset();}approval = '';
     terminal.writeln(`\x1b[38;2;211;250;114mFNGK Atlas\x1b[0m  attaching to ${target}…`);
     status = retries ? 'Reconnecting…' : 'Connecting…';
     const query = new URLSearchParams({ target });
     if (params.profile) query.set('profile', params.profile);
     if (newSession) query.set('new', '1');
+    if (restoreSessionId) query.set('session', restoreSessionId);
     const current = atlasWebSocket(`/api/fngk/terminals?${query}`);
     socket = current;
     current.onmessage = event => {
@@ -40,6 +42,7 @@
         sessionId = String(value.sessionId ?? '');
         streamId = String(value.streamId ?? '');
         retries = 0; status = 'Live';
+        void refreshSessions();
         terminal.writeln(`\x1b[2mconnected · ${value.target ?? target} · ${value.recordingMode ?? 'leased'}\x1b[0m`);
         resize();
       } else if (value.type === 'output' || value.type === 'replay') {
@@ -57,7 +60,7 @@
       socket = undefined;
       if (event.code === 1000) { status = 'Detached'; return; }
       status = 'Interrupted';
-      if (retries < 4) reconnectTimer = setTimeout(() => connect(), Math.min(5000, 400 * 2 ** retries++));
+      if (retries < 6) reconnectTimer = setTimeout(() => connect(false,false,sessionId), Math.min(8000, 500 * 2 ** retries++));
     };
     current.onerror = () => { if (socket === current) status = 'Connection error'; };
   }
@@ -75,7 +78,7 @@
     fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(host); fit.fit(); terminal.focus();
     terminal.onData(data => send({ type: 'input', requestId: `input-${++request}`, bodyBase64: encoded(data) }));
     const observer = new ResizeObserver(() => requestAnimationFrame(resize)); observer.observe(host);
-    lastRequest = params.requestId ?? ''; connect();
+    lastRequest = params.requestId ?? ''; connect(); void refreshSessions();
     return () => { disposed = true; clearTimeout(reconnectTimer); generation++; observer.disconnect(); socket?.close(1000); terminal.dispose(); };
   });
 </script>
@@ -83,5 +86,5 @@
 <DocumentationHelp topicId="terminals" label="Terminal documentation"/>
 <section class="panel terminal-panel">
   <header><div class="terminal-target"><strong>{target || 'No remote Device selected'}</strong><small>Interactive terminal{#if sessionId} · Session {sessionId.slice(0, 8)}{/if}</small></div><span class:live={status.startsWith('Live')}>{status}</span><div>{#if approval}<button onclick={() => resolveApproval('approve')}>Approve</button><button onclick={() => resolveApproval('deny')}>Deny</button>{/if}<button title="New terminal session" aria-label="New terminal session" onclick={() => { retries = 0; connect(true, true); }}>New</button><button title="Reconnect terminal stream" aria-label="Reconnect terminal stream" onclick={() => { retries = 0; connect(true); }}><RotateCw size={13}/></button><button title="Close terminal panel" onclick={() => window.dispatchEvent(new CustomEvent('atlas:close-terminal', { detail: { panelId: params.panelId } }))}><X size={13}/></button></div></header>
-  <div class="terminal-body"><div class="terminal" bind:this={host}></div></div>
+  <div class="terminal-body"><div class="terminal" bind:this={host}></div><aside class="terminal-rail" aria-label="Your terminal sessions"><header class="terminal-rail-heading"><span>TERMINALS</span><button class="new-session" title="New terminal session" aria-label="New terminal session" onclick={()=>{retries=0;connect(true,true)}}>+</button></header><div class="terminal-session-list">{#each sessions as item}<div class="terminal-rail-item"><button class="session-select" class:active={item.id===sessionId} title={`Open ${item.title??item.id}`} onclick={()=>{retries=0;connect(true,false,item.id)}}><span class="session-glyph">›_</span><span class="session-label"><b>{item.title??`Terminal ${item.id.slice(0,8)}`}</b><small>{item.status??'unknown'}</small></span></button></div>{/each}{#if !sessions.length}<small class="empty-copy">No user terminals.</small>{/if}</div></aside></div>
 </section>
