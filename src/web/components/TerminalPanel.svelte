@@ -13,12 +13,13 @@
   let host: HTMLDivElement;
   let target = params.target ?? (state.snapshot().contextId.startsWith('device:') ? state.snapshot().contextId : '');
   let sessionId = '', streamId = '', status = 'Opening…', approval = '';
+  let sessions: Array<{id:string; status:string}> = [];
   let terminal: Terminal, fit: FitAddon, socket: WebSocket | undefined;
   let disposed = false, retries = 0, reconnectTimer: ReturnType<typeof setTimeout>, generation = 0, request = 0, lastRequest = '';
   const send = (value: Record<string, unknown>) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify(value));
   const encoded = (value: string) => { const bytes = new TextEncoder().encode(value); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary); };
 
-  function connect(force = false) {
+  function connect(force = false, newSession = false) {
     if (!target.trim() || disposed) return;
     if (socket && !force && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
     clearTimeout(reconnectTimer);
@@ -30,6 +31,7 @@
     status = retries ? 'Reconnecting…' : 'Connecting…';
     const query = new URLSearchParams({ target });
     if (params.profile) query.set('profile', params.profile);
+    if (newSession) query.set('new', '1');
     const current = atlasWebSocket(`/api/fngk/terminals?${query}`);
     socket = current;
     current.onmessage = event => {
@@ -39,6 +41,7 @@
         sessionId = String(value.sessionId ?? '');
         streamId = String(value.streamId ?? '');
         retries = 0; status = 'Live';
+        if (sessionId) sessions = [{id:sessionId,status:'Live'}, ...sessions.filter(item => item.id !== sessionId)].slice(0, 8);
         terminal.writeln(`\x1b[2mconnected · ${value.target ?? target} · ${value.recordingMode ?? 'leased'}\x1b[0m`);
         resize();
       } else if (value.type === 'output' || value.type === 'replay') {
@@ -81,6 +84,7 @@
 
 <DocumentationHelp topicId="terminals" label="Terminal documentation"/>
 <section class="panel terminal-panel">
-  <header><div class="terminal-target"><strong>{target || 'No remote Device selected'}</strong>{#if sessionId}<small title={streamId}>Session {sessionId.slice(0, 8)}</small>{/if}</div><span class:live={status.startsWith('Live')}>{status}</span><div>{#if approval}<button onclick={() => resolveApproval('approve')}>Approve</button><button onclick={() => resolveApproval('deny')}>Deny</button>{/if}<button title="Reconnect terminal stream" aria-label="Reconnect terminal stream" onclick={() => { retries = 0; connect(true); }}><RotateCw size={13}/></button><button title="Close terminal panel" onclick={() => window.dispatchEvent(new CustomEvent('atlas:close-terminal', { detail: { panelId: params.panelId } }))}><X size={13}/></button></div></header>
+  <header><div class="terminal-target"><strong>{target || 'No remote Device selected'}</strong>{#if sessionId}<small title={streamId}>Session {sessionId.slice(0, 8)}</small>{/if}</div><span class:live={status.startsWith('Live')}>{status}</span><div>{#if approval}<button onclick={() => resolveApproval('approve')}>Approve</button><button onclick={() => resolveApproval('deny')}>Deny</button>{/if}<button title="New terminal session" aria-label="New terminal session" onclick={() => { retries = 0; connect(true, true); }}>New</button><button title="Reconnect terminal stream" aria-label="Reconnect terminal stream" onclick={() => { retries = 0; connect(true); }}><RotateCw size={13}/></button><button title="Close terminal panel" onclick={() => window.dispatchEvent(new CustomEvent('atlas:close-terminal', { detail: { panelId: params.panelId } }))}><X size={13}/></button></div></header>
+  <nav class="terminal-sessions" aria-label="Terminal sessions">{#each sessions as item}<span class="session-label" title={item.id}>{item.id.slice(0, 12)} · {item.status}</span>{/each}</nav>
   <div class="terminal-body"><div class="terminal" bind:this={host}></div></div>
 </section>
