@@ -14,7 +14,7 @@ describe('Calculator conversation gateway', () => {
       return new Response(JSON.stringify({ session: { id: 'conversation-1' } }), { status: 201, headers: { 'content-type': 'application/json' } });
     });
     await gateway.create({ engine: 'codex', references: [{ kind: 'device', id: 'device:one', label: 'one' }] });
-    expect(calls[0].url).toBe('https://calculator.example/api/signal-sessions');
+    expect(calls[0].url).toBe('https://calculator.example/api/integrations/v1/signal-sessions');
     expect(calls[0].init?.headers).toMatchObject({ authorization: 'Bearer secret-token' });
     expect(calls[0].init?.body).toContain('device:one');
   });

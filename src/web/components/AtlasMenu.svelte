@@ -18,6 +18,7 @@
     registry.register({id:'view.lifecycle',label:'FNGK: Device management',run:()=>dispatch('atlas:open-device-lifecycle')}),
     registry.register({id:'atlas:open-device-sessions',label:'FNGK: Device Sessions',keywords:['connections','persistent','leases'],run:()=>dispatch('atlas:open-device-sessions')}),
     registry.register({id:'atlas:open-agent-chat',label:'Atlas: Agent Chat',keywords:['calculator','assistant','ai','tools'],run:()=>dispatch('atlas:open-agent-chat')}),
+    registry.register({id:'atlas:open-app-connections',label:'Atlas: Manage app connections',keywords:['calculator','authorization','connect'],run:()=>dispatch('atlas:open-app-connections')}),
     registry.register({id:'view.theme',label:'View: Toggle light / dark theme',run:()=>state.setTheme(state.snapshot().theme==='dark'?'light':'dark')}),
     registry.register({id:'terminal.newPane',label:'Terminal: New pane',run:()=>{window.dispatchEvent(new CustomEvent('atlas:open-terminal',{detail:{create:true}}))}}),
     registry.register({id:'terminal.open',label:'Terminal: Open',keywords:['shell session'],run:()=>dispatch('atlas:open-terminal')}),

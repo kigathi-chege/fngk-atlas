@@ -119,6 +119,7 @@ pub fn start_atlas_server(config: AtlasServerConfig) -> Result<LocalServerHandle
         .current_dir(&config.working_directory)
         .env("ATLAS_HOST", "127.0.0.1")
         .env("ATLAS_PORT", config.address.port().to_string())
+        .env("ATLAS_CALLBACK_ORIGIN", format!("http://127.0.0.1:{}", config.address.port()))
         .env("ATLAS_DB", &config.database_path)
         .env("ATLAS_CAPABILITY", &config.capability)
         .envs(config.environment.iter().map(|(key, value)| (key, value)))
