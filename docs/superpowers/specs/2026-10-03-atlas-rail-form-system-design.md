@@ -18,6 +18,7 @@ This design preserves the existing Svelte, Dockview, and token-based Atlas archi
 5. Existing raw controls migrate to the shared primitives when the form is user-facing. Native controls remain only where they are semantically required and wrapped/styled by the shared primitive.
 6. Every user-visible asynchronous operation exposes a local loading state. A local operation does not block unrelated controls or panels.
 7. Duplicated control styles and obsolete ad-hoc components are removed only after all imports migrate and the build/test suite proves they are unused.
+8. Atlas has one shared right minimization rail. It is the only place a minimized panel appears, and it has no terminal-specific exception.
 
 ## Architecture
 
@@ -53,6 +54,14 @@ The primitives consume Atlas CSS tokens and emit ordinary Svelte bindings/events
 
 An audit migrates current raw form and loading sites, including profile selection, unified-search filtering, filesystem sorting/search/create/rename, save-as, handoff/deployment/port configuration, lifecycle controls, app connections, and agent/chat prompts. Lazy panel imports must use a loading fallback rather than blank panel space.
 
+### Shared Right Minimization Rail
+
+`PinnedRootsRail.svelte` is the shared right-side minimized-panel presentation. It receives every minimized `AtlasPanelDescriptor`, including terminal, operations, navigator, filesystem, and inspector panels. No panel kind is filtered out. `TerminalDock.svelte` is removed from the application shell.
+
+`MinimizedTray.svelte` presents at most seven direct restore icons. Icons are selected by stable panel kind through one mapping (`terminal`, `file`, `filesystem`, `deployment`, `database`, `agent-chat`, `documentation`, `operations`, and a generic fallback); they are not all rendered as the same generic panel icon. The eighth and later descriptors are represented by one overflow icon. Its contextual menu displays each hidden item’s own icon, title, and restore action.
+
+Minimization is always registry-backed: `Workbench.minimizePanel` remembers then minimizes the descriptor, retains renderers where required, removes the Dockview panel, and publishes the descriptor list. Operations no longer receives a bespoke minimization path. Minimizing Operations applies that same function to every panel in its group, including the `atlas.operations` anchor, so all entries are restorable by the common right rail. Restoring returns the existing renderer/session where one was retained; a terminal’s live user session is therefore preserved without a terminal dock or a terminal-only navigator.
+
 ## Visual and Accessibility Rules
 
 - Tokens in `theme.css`/workspace CSS define control height, radius, surface, border, focus ring, text, placeholder, error, and disabled colors; components do not hard-code their own palette.
@@ -68,6 +77,7 @@ An audit migrates current raw form and loading sites, including profile selectio
 - A cancelled directory request removes only its own pending indicator.
 - Switching context/root clears obsolete pending requests and data without allowing old responses to repopulate the current tree.
 - Failed combobox data loads present an inline retry action and retain the current selection.
+- The seventh direct minimized icon remains directly restorable; the eighth moves to overflow without dropping its title, type icon, or retained state.
 
 ## Validation
 
