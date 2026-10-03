@@ -19,7 +19,7 @@ The filesystem loading failure is a separate correctness incident. This shell wo
 3. The left permanent region is a Devices explorer; Devices are removed from the rail.
 4. Every Device has a stable, deterministic Atlas identity: avatar, compact pseudonym, and color derived from its immutable Device ID.
 5. Device-scoped tabs and panels receive a restrained, accessible ownership accent.
-6. The right permanent region is the existing Observability surface, expanded into the durable record of Atlas activity.
+6. The right permanent region is Filesystem with its attached Inspector; the existing center-bottom Operations dock retains terminals, logs, and Observability.
 7. Every meaningful pending operation reports loading, success, error, cancellation, or reconnect state through one event model.
 8. Notifications are dismissible presentation of that model, not the sole record of work.
 9. Device selection, terminal continuity, background-device sessions, and external FNGK state remain independent of layout, minimization, and visibility changes.
@@ -48,44 +48,50 @@ The center’s ordinary work panels retain normal Dockview behavior: closable ta
 
 ### Permanent regions and visibility controls
 
-There are three persistent workspace regions:
+There are four persistent workspace regions:
 
 | Region | Content | Visibility behavior |
 | --- | --- | --- |
 | Left | **Devices explorer** | Cannot be dismissed. A top-bar/rail icon toggles its width between its persisted width and collapsed state. |
 | Center | Workspace fallback and ordinary work tabs | Always present. Workspace appears only as fallback. |
-| Right | **Observability** | Cannot be dismissed. A top-bar/rail icon toggles its width between its persisted width and collapsed state. |
+| Right | **Filesystem + Inspector** | Cannot be dismissed. A top-bar/rail icon toggles its width between its persisted width and collapsed state. |
+| Bottom (inside center) | **Operations** — terminals, logs, and Observability | Cannot be dismissed. It collapses to its Workspace-style header strip and restores without unmounting its content. |
 
 The activity rail is narrowed to global navigation and commands. It contains no device collection. It is a rail: compact, icon-led, stable in order, and not a secondary dashboard.
 
 The existing quick actions near Search, Filesystem, Terminal, Command palette, and Refresh become explicit visibility/action controls. Add two dedicated controls:
 
 - Toggle Devices explorer.
-- Toggle Observability inspector.
+- Toggle Filesystem/Inspector sidebar.
+- Toggle Operations dock.
 
 Each control exposes `aria-pressed`, a tooltip, and a keyboard command. Collapse does not unmount the permanent panel; it preserves its state and remote subscriptions.
 
 ### Left Devices explorer
 
-The left sidebar is renamed **Devices**. It contains two non-dismissable internal surfaces:
+The left sidebar is **Devices**. It is a non-dismissable profile list and device-oriented action surface. Its header uses the permanent-panel grammar, with explicit icon controls rather than a Dockview tab strip.
 
-1. **Devices** — the profile list and device-oriented actions.
-2. **Inspector** — context-sensitive details for the selected Device, selected resource, or selected operation.
+### Right Filesystem and Inspector sidebar
 
-These are internal sidebar modes, not Dockview tabs. Their header uses the permanent-panel header grammar and switches mode via explicit icon buttons.
+The right sidebar is non-dismissable and contains two internal surfaces controlled by header icons, not Dockview tabs:
 
-Inspector is attached to the Devices sidebar beneath the list. It cannot be closed. It may collapse vertically until only its header remains; its header has expand/collapse control and matching keyboard shortcut. Its height is persisted. A collapsed Inspector continues receiving the selected-context data needed to render immediately on expansion but does not run unnecessary heavy queries.
+- **Filesystem** — the contextual file tree and file actions for the selected Device/context.
+- **Inspector** — context-sensitive details for the selected Device, selected resource, selected file, or selected operation.
 
-### Right Observability inspector
+Inspector is attached beneath Filesystem. It cannot be closed. It may collapse vertically until only its header remains; its header has expand/collapse control and matching keyboard shortcut. Its height is persisted. A collapsed Inspector continues receiving the selected-context data needed to render immediately on expansion but does not run unnecessary heavy queries.
 
-The right permanent sidebar reuses and upgrades the existing Observability/operations capability instead of introducing a competing activity view. It has internal modes controlled by header icons:
+### Center-bottom Operations dock and Observability
+
+The existing center-bottom Operations dock remains the operational workspace. It is non-dismissable and uses a Workspace-style header with explicit icon controls. It contains ordinary internal modes/panels for terminals, deployment/runtime operations, logs, and the existing Observability surface.
+
+Observability is therefore both a visible bottom-dock destination and a cross-system model. Its activity mode contains:
 
 - **Activity** — chronological operation/event stream.
 - **Connections** — FNGK profile status, selected-device status, session/reconnect state, and transport diagnostics.
 - **Logs** — safe application and operation logs with links to source panel or diagnostic.
 - **Details** — selected event, selected operation, or selected resource metadata.
 
-The right inspector cannot be dismissed. It may be horizontally collapsed through its visibility control, while retaining its event history and subscriptions.
+The Operations dock can be vertically collapsed to its header strip through a header action and shortcut. This preserves user terminals, active operation views, event history, and subscriptions. It must never create the separate bottom terminal rail that Atlas intentionally removed.
 
 ## Deterministic Device identity
 
@@ -144,7 +150,11 @@ Global, profile-only, and unscoped panels have no device accent. Color is never 
 
 ### Event store
 
-Atlas adds a typed local operation/event store. It is the sole persistent source for user-visible asynchronous work; panel-local state remains responsible for rendering its own data but publishes lifecycle events to this store.
+Atlas uses Axis Notify as the durable cross-system event and notification backbone. Atlas also keeps a small local in-process adapter for immediate renderer state when Notify is unavailable; it queues/batches safe events and visibly reports delivery state rather than pretending delivery succeeded.
+
+Notify is suited to this role because its registered event schemas prevent silent event-name drift; its installation scope stamps tenant/environment at ingest; it supports scoped dashboard reads, recipient-level notification read/dismiss state, and an SSE notification stream. Atlas must integrate through the documented producer credential and scoped operator/session routes, never embed an administrator key or unscoped dashboard token in the desktop application.
+
+Panel-local state remains responsible for rendering its own data but publishes lifecycle events through the adapter.
 
 ```ts
 type AtlasEventState = 'pending' | 'success' | 'error' | 'cancelled' | 'reconnecting';
@@ -166,7 +176,7 @@ type AtlasEvent = {
 
 Events update by stable `id`, so a folder read or terminal reconnect evolves in place from pending to outcome. Each event can link to its owning panel, Device context, or logs/diagnostic.
 
-History keeps the most recent 500 unpinned local events. Pinned events remain until the user unpins or deletes them. This bounded local history prevents unbounded renderer memory while preserving enough operational context. It contains no secrets, terminal keystrokes, or private Atlas-internal terminal output.
+The local adapter retains the most recent 500 unpinned rendered events as a bounded offline/recent cache. Pinned entries remain until the user unpins or deletes them. Notify remains the durable cross-system source for published events, notifications, workflow/delivery state, and authorized historical inspection. Neither layer contains secrets, terminal keystrokes, or private Atlas-internal terminal output.
 
 ### Loading standards
 
@@ -178,7 +188,7 @@ Cancellation is observable as `cancelled` only when relevant to the user; supers
 
 ### Notifications and retention
 
-Notifications are a view over event-store entries:
+Notifications are a view over Notify notification records and local pending adapter entries:
 
 - Pending events may show compact progress toast only for operations expected to exceed a short threshold.
 - Success/info toasts auto-dismiss after five seconds but their event remains in Observability history.
@@ -186,7 +196,7 @@ Notifications are a view over event-store entries:
 - Toast controls: dismiss, open details/logs, and pin where applicable.
 - Observability controls: filter, search, pin/unpin, delete one local event, clear unpinned local history, and clear all local history after confirmation.
 
-Deletion and clearing never alter remote FNGK state, remote logs, Device records, terminal sessions, or server audit records. Remote diagnostic retention follows its own service contract.
+Marking an incoming Notify notification read or dismissed updates only that recipient's delivery state; it does not delete the shared notification or source event. Atlas may delete/clear only its local rendered cache. Neither action alters remote FNGK state, remote logs, Device records, terminal sessions, or Notify audit history.
 
 ## Header and tab presentation
 
@@ -198,7 +208,7 @@ Permanent surfaces use a shared `WorkspaceHeader`-style component or contract:
 - no Dockview tab strip;
 - consistent height, spacing, focus treatment, borders, and action button geometry.
 
-Normal center tabs have a minimum width and overflow behavior that maintains usable close/preview/ownership indication. Preview tabs use italic title text only; they never display the word `preview`. Workspace, Devices, and Observability are excluded from normal closable tab-bar rules.
+Normal center tabs have a minimum width and overflow behavior that maintains usable close/preview/ownership indication. Preview tabs use italic title text only; they never display the word `preview`. Workspace, Devices, Filesystem/Inspector, and the Operations dock are excluded from normal closable tab-bar rules.
 
 ## State persistence and recovery
 
@@ -206,9 +216,10 @@ Persist locally and version the following:
 
 - center panel layout and normal panel metadata;
 - permanent sidebar widths/collapsed state;
-- Inspector height/collapsed state and active internal mode;
-- Devices/Observability selected internal mode;
-- bounded event history and pinned events, with safe schema validation;
+- right Inspector height/collapsed state and active internal mode;
+- Filesystem/Inspector, Devices, and Operations selected internal mode;
+- Operations dock height/collapsed state;
+- bounded local event cache and pinned entries, with safe schema validation;
 - Device identity generator version, not mutable per-device overrides.
 
 Malformed persistence is isolated: invalid layout resets the affected layout area; invalid event data resets the event store; invalid Device identity data is regenerated from the UUID. No malformed entry may block startup or remove a remote Device.
@@ -228,14 +239,14 @@ When the final center work panel closes, recovery chooses Workspace. When an ext
 ## Acceptance criteria
 
 1. With a normal work tab open, Workspace has no visible normal tab; closing the last work tab restores and activates Workspace.
-2. Devices and Observability show permanent Workspace-style headers and cannot be closed through UI, keyboard, context menu, layout restore, or narrow-layout transition.
+2. Devices, Filesystem/Inspector, and Operations show permanent Workspace-style headers and cannot be closed through UI, keyboard, context menu, layout restore, or narrow-layout transition.
 3. Devices leave the activity rail entirely. The left Devices explorer is selectable/collapsible through explicit controls and retains state while collapsed.
 4. The same Device UUID renders the same pseudonym/avatar/color in a fresh Atlas installation and after restart.
 5. Device hover/focus cards and context menus show the correct authoritative ID/details and safe actions.
 6. Device-scoped file, terminal, deployment, and live-project panels have the correct restrained ownership accent; global panels do not.
-7. Inspector collapses to its header, restores by button/shortcut, and does not discard selected-context state.
-8. A slow filesystem/file/terminal operation visibly transitions pending → outcome in both its local panel and Observability; an actual error is visible and actionable.
-9. Toast dismissal does not erase event history. Local clear/delete never affects remote data.
+7. The right Inspector and center-bottom Operations dock both collapse to their headers, restore by button/shortcut, and do not discard state or terminal continuity.
+8. A slow filesystem/file/terminal operation visibly transitions pending → outcome in both its local panel and the bottom Observability view; an actual error is visible and actionable.
+9. Toast dismissal updates only its recipient/local presentation state, does not erase event history, and never affects FNGK remote data.
 10. Existing user terminals remain reconnectable and listed only as user-owned terminal sessions; internal transport sessions remain hidden.
 
 ## Delivery boundaries
@@ -243,9 +254,9 @@ When the final center work panel closes, recovery chooses Workspace. When an ext
 Implementation must proceed in coherent, independently testable increments:
 
 1. Deterministic Device identity and data model.
-2. Event store, notification integration, and shared headers/loading state.
+2. Notify integration audit/onboarding, the local adapter, notification streaming, and shared headers/loading state.
 3. Workbench fallback Workspace and permanent-region docking model.
-4. Devices explorer and Inspector interactions.
-5. Observability adoption, panel operation publishing, persistence, and desktop acceptance pass.
+4. Devices explorer and right Filesystem/Inspector interactions.
+5. Bottom Operations/Observability adoption, panel operation publishing, persistence, and desktop acceptance pass.
 
 No increment may claim completion without focused tests, full web/type checks, production web build, and manual desktop verification of terminal continuity and panel restoration.
