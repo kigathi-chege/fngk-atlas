@@ -156,6 +156,21 @@ user selects delete → confirmation dialog → lifecycle API capability check
 - Rails and tabs retain focus outlines. Device color is supplemental rather than the sole channel for ownership, selection, status, or destructive meaning.
 - Delete confirmation names the exact target and cannot be submitted by an incidental Enter key before the confirmation value matches.
 
+## Terminal ownership and history boundary
+
+Atlas uses persistent FNGK terminals internally for device-session transport, filesystem work, discovery, deployment, and other background operations. These are infrastructure sessions, not user terminal sessions. They must never appear in the terminal picker, bottom dock, session history, or user-facing logs.
+
+Every terminal session created by Atlas therefore carries an immutable ownership classification at creation time:
+
+```ts
+type TerminalOwner = 'atlas-user' | 'atlas-internal';
+type TerminalPurpose = 'interactive' | 'device-session' | 'filesystem' | 'discovery' | 'deployment' | 'diagnostic';
+```
+
+Only `atlas-user` sessions with the `interactive` purpose may be listed, restored, renamed, archived, stopped, or displayed as user terminal history. `atlas-internal` sessions are addressable only by their owning service and summarized through safe telemetry (state, stream count, reconnection count, and failure reason) in Device Sessions. Their terminal output/history is never exposed to the Atlas user interface or persisted as a user buffer.
+
+The server enforces this boundary on every list/action route; the web client does not merely hide rows. Existing FNGK sessions with no Atlas ownership metadata are treated as external/unknown and remain outside the Atlas-owned user-terminal history unless explicitly adopted through a future, confirmed workflow.
+
 ## Verification and acceptance tests
 
 ### Automated
