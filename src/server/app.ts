@@ -51,6 +51,16 @@ import { BootstrapService } from "../onboarding/service.js";
 import { AuthFlow } from "../onboarding/auth-flow.js";
 import { createLocalFngkLoginLauncher, FngkBrowserAuthorizationRuntime } from "../onboarding/fngk-auth.js";
 import { DeviceLifecycleService } from "../lifecycle/service.js";
+import { DeviceSessionManager, type DeviceSessionLease } from "../device-sessions/manager.js";
+import type { DeviceScope, DeviceSessionSnapshot } from "../device-sessions/types.js";
+import { FilesystemCache } from "../device-sessions/filesystem-cache.js";
+import { FileService } from "../files/file-service.js";
+import { TerminalFileTransport } from "../transports/terminal-file.js";
+import { AtlasToolRegistry } from '../agent-tools/registry.js';
+import { AtlasToolExecutor } from '../agent-tools/executor.js';
+import { GrantStore } from '../agent-tools/grants.js';
+import { HttpCalculatorConversationGateway, type CalculatorConversationGateway } from '../intelligence/conversation-gateway.js';
+import { CalculatorConnectionService } from '../integrations/calculator-connection.js';
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -77,6 +87,7 @@ interface CreateAppOptions {
   logger?: boolean;
   diagnosticRegistry?: DiagnosticRegistry;
   calculatorProvider?: CalculatorProvider;
+  calculatorConversationGateway?: CalculatorConversationGateway;
   deviceAdapters?: RegisteredDeviceAdapter[];
   worldRefreshMode?: 'inline'|'worker';
   capability?: string;
@@ -172,6 +183,24 @@ export async function createApp(
     profile:profileScope.current,
     localRoot: options.localRoot,
   });
+  const deviceSessions = new DeviceSessionManager({
+    createSession: (scope, signal) =>
+      fngk.openTerminal(`device:${scope.deviceId}`, {
+        newSession: true,
+        profile: scope.profile,
+        signal,
+      }),
+  });
+  const scopedFileService = (scope: DeviceScope, lease: DeviceSessionLease) => new FileService([new TerminalFileTransport({
+    id: `terminal:${scope.deviceId}`,
+    contextId: `device:${scope.deviceId}`,
+    deviceId: scope.deviceId,
+    executor: lease.commandExecutor(scope),
+  })]);
+  const filesystemCache = new FilesystemCache({
+    sessions: deviceSessions,
+    service: scopedFileService,
+  });
   const retryableFileFailure=(error:unknown)=>{const value=error as {code?:string;causes?:Array<{code?:string}>};return value.code==='route_unavailable'&&value.causes?.some(cause=>['terminal_closed','timeout','process_error','process_failed','invalid_json','unsupported_protocol'].includes(String(cause.code)))===true};
   const readThroughFiles=async<T>(contextId:string,operation:(service:Awaited<ReturnType<EffectiveContextService['files']>>)=>Promise<T>)=>{try{return await operation(await contexts.files(contextId))}catch(error){if(contextId==='local'||!retryableFileFailure(error))throw error;contexts.release(contextId);return await operation(await contexts.files(contextId))}};
   const evidence = new EvidenceStore(databaseFile);
@@ -196,15 +225,22 @@ export async function createApp(
   const worldStore = new WorldStore(databaseFile),
     world = new WorldService(worldStore, extensionInterpreters);
   const worldRefreshMode=options.worldRefreshMode??(process.env.NODE_ENV==='test'?'inline':'worker');
-  const calculatorProvider =
+  const callbackOrigin = process.env.ATLAS_CALLBACK_ORIGIN ?? `http://${process.env.ATLAS_HOST ?? '127.0.0.1'}:${process.env.ATLAS_PORT ?? '3000'}`;
+  const calculatorConnection = new CalculatorConnectionService(databaseFile, callbackOrigin);
+  const storedCalculatorToken = calculatorConnection.bearer();
+  const storedCalculatorOrigin = calculatorConnection.status().connection?.origin;
+  let calculatorProvider =
       options.calculatorProvider ??
-      (process.env.ATLAS_CALCULATOR_URL
+      (storedCalculatorOrigin && storedCalculatorToken
+        ? new HttpCalculatorProvider(storedCalculatorOrigin, storedCalculatorToken)
+        : process.env.ATLAS_CALCULATOR_URL
         ? new HttpCalculatorProvider(
             process.env.ATLAS_CALCULATOR_URL,
             process.env.ATLAS_CALCULATOR_TOKEN,
           )
-        : undefined),
-    intelligence = new AtlasIntelligenceService(
+        : undefined);
+  let calculatorConversationGateway = options.calculatorConversationGateway ?? (storedCalculatorOrigin && storedCalculatorToken ? new HttpCalculatorConversationGateway(storedCalculatorOrigin, storedCalculatorToken) : process.env.ATLAS_CALCULATOR_URL ? new HttpCalculatorConversationGateway(process.env.ATLAS_CALCULATOR_URL, process.env.ATLAS_CALCULATOR_TOKEN) : undefined);
+  const intelligence = new AtlasIntelligenceService(
       worldStore,
       world,
       calculatorProvider,
@@ -413,6 +449,9 @@ export async function createApp(
   const launchCapability = options.capability ?? process.env.ATLAS_CAPABILITY;
   if (launchCapability) app.addHook("onRequest", async (request, reply) => {
     if (!request.url.startsWith("/api/")) return;
+    // The browser returns from Calculator without Atlas' launch secret. This
+    // endpoint still requires a single-use state generated by this process.
+    if (request.method === 'GET' && request.url.startsWith('/api/app-connections/callback')) return;
     const header = request.headers["x-atlas-capability"];
     const supplied = Array.isArray(header) ? header[0] : header;
     const protocols = String(request.headers["sec-websocket-protocol"] ?? "").split(",").map(value => value.trim());
@@ -421,9 +460,11 @@ export async function createApp(
   });
   await app.register(websocket);
   app.addHook("onClose", async () => {
+    await deviceSessions.close();
     await liveProjects.close();
     await headHandoffs.close();
     portSharing.close();
+    toolGrants.close();
     contexts.close();
     await worldRefreshTail.catch(() => {});
     worldStore.close();
@@ -444,11 +485,139 @@ export async function createApp(
     return payload;
   });
 
+  const scopeError = (code: string, message: string) => Object.assign(new Error(message), { code });
+  const scopeField = (value: unknown) => typeof value === 'string' && value ? value : undefined;
+  const namespaceContext = (namespace: any, device: Record<string, unknown>, deviceId: string, field: 'teamId' | 'projectId'): string | undefined | null => {
+    const values = new Set<string>();
+    const direct = scopeField(device[field]); if (direct) values.add(direct);
+    for (const resource of namespace.resources ?? []) if (resource.deviceId === deviceId) {
+      const value = scopeField((resource as Record<string, unknown>)[field]); if (value) values.add(value);
+    }
+    return values.size > 1 ? null : [...values][0];
+  };
+  const resolveDeviceScope = async (input: Record<string, unknown>, request: { raw: NodeJS.EventEmitter }, reply?: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }): Promise<DeviceScope> => {
+    const requestedProfile = scopeField(input.profile), selectedProfile = profileScope.current();
+    if (requestedProfile && selectedProfile && requestedProfile !== selectedProfile) throw scopeError('device_scope_mismatch', 'The requested profile does not match this request scope.');
+    const namespace = await fngk.namespace(requestedProfile ?? selectedProfile, requestSignal(request, reply));
+    const deviceId = scopeField(input.deviceId);
+    if (!deviceId) throw scopeError('context_not_found', 'A Device identifier is required.');
+    const device = namespace.devices.find(value => value.id === deviceId);
+    if (!device) throw scopeError('context_not_found', 'The Device is not available in the selected profile.');
+    const authoritativeContext = (field: 'teamId' | 'projectId') => {
+      const resolved = namespaceContext(namespace, device, deviceId, field);
+      if (resolved === null) throw scopeError('device_scope_mismatch', `The Device has ambiguous ${field} access.`);
+      const requested = scopeField(input[field]);
+      if (requested && requested !== resolved) throw scopeError('device_scope_mismatch', `The requested ${field} is not authorized for this Device.`);
+      return resolved;
+    };
+    const teamId = authoritativeContext('teamId'), projectId = authoritativeContext('projectId');
+    return { profile: namespace.profile.name, ...(teamId ? { teamId } : {}), ...(projectId ? { projectId } : {}), deviceId };
+  };
+  const scopeForContext = async (contextId: string, profile: string | undefined, request: { raw: NodeJS.EventEmitter }, reply?: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }, claims: Record<string, unknown> = {}) => {
+    if (!contextId.startsWith('device:')) throw scopeError('context_not_found', 'A Device context is required.');
+    return await resolveDeviceScope({ ...claims, profile: claims.profile ?? profile, deviceId: contextId.slice('device:'.length) }, request, reply);
+  };
+  const withScopedFiles = async <T>(contextId: string, claims: Record<string, unknown>, request: { raw: NodeJS.EventEmitter }, reply: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }, operation: (service: FileService) => Promise<T>, mutation = false): Promise<T> => {
+    if (contextId === 'local') return await operation(await contexts.files(contextId));
+    const scope = await scopeForContext(contextId, profileScope.current(), request, reply, claims);
+    const lease = await deviceSessions.acquire(scope);
+    try { return await operation(scopedFileService(scope, lease)); }
+    finally { if (mutation) filesystemCache.invalidate(scope); lease.release(); }
+  };
+  const agentTools = new AtlasToolRegistry();
+  const toolGrants = new GrantStore(databaseFile);
+  const guardedToolExecutor = (request: { raw: NodeJS.EventEmitter }, reply: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }) => new AtlasToolExecutor({
+    registry: agentTools,
+    resolveScope: async (candidate, signal) => {
+      const resolved = await resolveDeviceScope({ ...candidate }, request, reply);
+      if (signal?.aborted) throw scopeError('cancelled', 'The tool request was cancelled.');
+      return resolved;
+    },
+    acquireFiles: async scope => {
+      const lease = await deviceSessions.acquire(scope);
+      return { service: scopedFileService(scope, lease), release: () => lease.release() };
+    },
+    acquireTerminal: async (scope, signal) => {
+      if (signal?.aborted) throw scopeError('cancelled', 'The tool request was cancelled.');
+      const lease = await deviceSessions.acquire(scope);
+      const session = deviceSessions.snapshot(scope);
+      if (!session) { lease.release(); throw scopeError('device_session_unavailable', 'The Device Session could not be opened.'); }
+      return { session, release: () => lease.release() };
+    },
+    inspectDeployments: async (scope, signal) => await fngk.deployments(scope.deviceId, { profile: scope.profile, signal }),
+    listPorts: async scope => portSharing.list(`device:${scope.deviceId}`),
+    inspectDevice: async (scope, signal) => {
+      const namespace = await fngk.namespace(scope.profile, signal);
+      const device = namespace.devices.find(value => value.id === scope.deviceId);
+      if (!device) throw scopeError('context_not_found', 'The Device is no longer available in this profile.');
+      return {
+        profile: namespace.profile.name,
+        device,
+        resources: (namespace.resources ?? []).filter(value => value.deviceId === scope.deviceId)
+      };
+    },
+    runTerminalCommand: async (scope, command, signal) => {
+      const lease = await deviceSessions.acquire(scope);
+      try {
+        const result = await lease.commandExecutor(scope).execute(command, { signal, timeoutMs: 30_000 });
+        return {
+          exitCode: result.exitCode,
+          stdout: redact(result.output.toString('utf8')).slice(0, 1_000_000),
+          stderr: ''
+        };
+      } finally { lease.release(); }
+    },
+    grants: toolGrants
+  });
+
   app.get("/api/health", async () => ({
     ok: true,
     version: "0.2.0",
     activeIndex: activeIndex?.summary ?? null,
   }));
+  app.get('/api/agent-tools', async () => ({ tools: agentTools.list() }));
+  app.get('/api/app-connections/status', async () => calculatorConnection.status());
+  app.post('/api/app-connections/connect', async (request, reply) => {
+    try {
+      const origin = String((request.body as { origin?: string })?.origin ?? '');
+      return reply.code(201).send(calculatorConnection.begin({ origin }));
+    } catch (error) { return reply.code(400).send({ error:'app_connection_invalid', message:(error as Error).message }); }
+  });
+  app.get('/api/app-connections/callback', async (request, reply) => {
+    try {
+      const query=request.query as { code?:string; state?:string };
+      const complete=await calculatorConnection.complete(query);
+      const connection=complete.connection!;
+      const token=calculatorConnection.bearer()!;
+      calculatorProvider=new HttpCalculatorProvider(connection.origin,token);
+      calculatorConversationGateway=new HttpCalculatorConversationGateway(connection.origin,token);
+      return reply.type('text/html; charset=utf-8').header('cache-control','no-store').send('<!doctype html><title>Atlas connected</title><body><p>FNGK Atlas is connected to Calculator. You may close this window.</p><script>window.close()</script></body>');
+    } catch (error) { return reply.code(400).type('text/html; charset=utf-8').send(`<!doctype html><title>Atlas connection failed</title><body><p>${String((error as Error).message).replace(/[<>&]/g,'')}</p></body>`); }
+  });
+  app.delete('/api/app-connections', async () => {
+    calculatorProvider=undefined; calculatorConversationGateway=undefined;
+    return calculatorConnection.disconnect();
+  });
+  app.get('/api/agent-chat/status', async () => ({ configured: Boolean(calculatorConversationGateway), connection:calculatorConnection.status().connection, health: calculatorConversationGateway ? await calculatorConversationGateway.health() : { available: false, message: 'Connect Calculator from Atlas to begin a conversation.' }, tools: agentTools.list() }));
+  app.post('/api/agent-chat/conversations', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { const value: any = await calculatorConversationGateway.create(request.body as any); return reply.code(201).send({ ...value, conversationId: value.conversationId ?? value.session?.id }); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
+  app.post('/api/agent-chat/conversations/:id/messages', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { return reply.code(202).send(await calculatorConversationGateway.message(decodeURIComponent(String((request.params as any).id)), request.body)); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
+  app.post('/api/agent-chat/conversations/:id/cancel', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { return reply.send(await calculatorConversationGateway.cancel(decodeURIComponent(String((request.params as any).id)))); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
+  app.post('/api/agent-chat/conversations/:id/steer', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { return reply.send(await calculatorConversationGateway.steer(decodeURIComponent(String((request.params as any).id)), request.body)); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
+  app.get('/api/agent-chat/conversations/:id/events', async (request, reply) => { if (!calculatorConversationGateway) return reply.code(503).send({ error: 'calculator_unavailable', message: 'Calculator provider is not configured.' }); try { const upstream = await calculatorConversationGateway.events(decodeURIComponent(String((request.params as any).id)), String((request.query as any).cursor ?? '') || undefined); reply.hijack(); reply.raw.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' }); for await (const chunk of upstream.body as any) reply.raw.write(chunk); reply.raw.end(); } catch (error) { return reply.code(502).send({ error: 'calculator_unavailable', message: (error as Error).message }); } });
+  app.get('/api/agent-tools/grants', async () => ({ grants: toolGrants.list() }));
+  app.post('/api/agent-tools/grants', async (request, reply) => { const body = (request.body ?? {}) as any; try { if (!body.scope || !Array.isArray(body.toolIds) || !body.actor || !['once','conversation','durable','full_access'].includes(body.kind)) throw scopeError('tool_input_invalid','A valid scope, actor, grant kind, and tool list are required.'); const scope = await resolveDeviceScope({ ...body.scope }, request, reply); return reply.code(201).send({ grant: toolGrants.create({ scope, toolIds: body.toolIds.map(String).slice(0,32), kind: body.kind, actor: String(body.actor).slice(0,256), expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : undefined }) }); } catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); } });
+  app.post('/api/agent-tools/grants/:id/revoke', async (request) => ({ revoked: toolGrants.revoke(decodeURIComponent(String((request.params as any).id ?? '')), String(((request.body ?? {}) as any).actor ?? 'operator').slice(0,256)) }));
+  app.get('/api/agent-tools/:id', async (request, reply) => {
+    const descriptor = agentTools.describe(decodeURIComponent(String((request.params as { id?: string }).id ?? '')));
+    return descriptor ? descriptor : reply.code(404).send({ error: 'tool_not_found' });
+  });
+  app.post('/api/agent-tools/:id/execute', async (request, reply) => {
+    const body = (request.body ?? {}) as { input?: Record<string, unknown>; scope?: DeviceScope };
+    try {
+      if (!body.scope || !body.input) throw scopeError('tool_input_invalid', 'Tool input and Device scope are required.');
+      return await guardedToolExecutor(request, reply).execute({ toolId: decodeURIComponent(String((request.params as { id?: string }).id ?? '')), input: body.input, scope: body.scope, signal: requestSignal(request, reply) });
+    } catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
+  });
   app.get("/api/onboarding/status", async (request, reply) => {
     try { return await bootstrap.check(profileScope.current(), requestSignal(request)); }
     catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
@@ -537,6 +706,49 @@ export async function createApp(
   app.get("/api/contexts/terminals", async () => ({
     items: contexts.activeTerminals(),
   }));
+  app.get('/api/device-sessions', async (request, reply) => {
+    try {
+      const selected = profileScope.current(), requested = scopeField((request.query as { profile?: unknown }).profile) ?? selected;
+      const namespace = await fngk.namespace(requested, requestSignal(request, reply));
+      const authorized = (session: DeviceSessionSnapshot) => {
+        if (session.scope.profile !== namespace.profile.name || (selected && session.scope.profile !== selected) || (requested && session.scope.profile !== requested)) return false;
+        const device = namespace.devices.find((value: Record<string, unknown>) => value.id === session.scope.deviceId);
+        if (!device) return false;
+        return session.scope.teamId === namespaceContext(namespace, device, session.scope.deviceId, 'teamId') && session.scope.projectId === namespaceContext(namespace, device, session.scope.deviceId, 'projectId');
+      };
+      return { items: deviceSessions.snapshot().filter(authorized) };
+    } catch (error) {
+      const result = processError(error);
+      return reply.code(result.statusCode).send(result.body);
+    }
+  });
+  app.post('/api/device-sessions/reconnect', async (request, reply) => {
+    try {
+      const scope = await resolveDeviceScope((request.body ?? {}) as Record<string, unknown>, request, reply);
+      return { session: await deviceSessions.reconnect(scope) };
+    } catch (error) {
+      const result = processError(error);
+      return reply.code(result.statusCode).send(result.body);
+    }
+  });
+  app.post('/api/device-sessions/revoke', async (request, reply) => {
+    try {
+      const scope = await resolveDeviceScope((request.body ?? {}) as Record<string, unknown>, request, reply);
+      return { revoked: await deviceSessions.revoke(scope, 'operator_revoked') };
+    } catch (error) {
+      const result = processError(error);
+      return reply.code(result.statusCode).send(result.body);
+    }
+  });
+  app.post('/api/device-sessions/cache/clear', async (request, reply) => {
+    try {
+      const scope = await resolveDeviceScope((request.body ?? {}) as Record<string, unknown>, request, reply);
+      return { session: deviceSessions.clearCache(scope) };
+    } catch (error) {
+      const result = processError(error);
+      return reply.code(result.statusCode).send(result.body);
+    }
+  });
   app.get("/api/fngk/sessions", async (request, reply) => {
     const query = request.query as { profile?: string; deviceId?: string },
       profile = String(query.profile ?? "") || undefined;
@@ -1404,11 +1616,14 @@ export async function createApp(
       limit?: string;
     };
     try {
-      const contextId=query.contextId??'local',page = await readThroughFiles(contextId,service=>service.list(
-        { contextId: query.contextId ?? "local", path: query.path ?? "/" },
-        { cursor: query.cursor, limit: Number(query.limit) || 100 },
-      ));
-      return { ...page, route: routeEvidence(page.route) };
+      const contextId=query.contextId??'local';
+      if (contextId === 'local') {
+        const page = await readThroughFiles(contextId,service=>service.list({ contextId, path: query.path ?? "/" }, { cursor: query.cursor, limit: Number(query.limit) || 100, signal: requestSignal(request, reply) }));
+        return { ...page, route: routeEvidence(page.route) };
+      }
+      const scope = await scopeForContext(contextId, profileScope.current(), request, reply, query);
+      const page = await filesystemCache.list(scope, query.path ?? '/', { cursor: query.cursor, limit: Number(query.limit) || 100, signal: requestSignal(request, reply) });
+      return { ...page, route: routeEvidence(page.route), diagnostics: filesystemCache.diagnostics(scope) };
     } catch (error) {
       const result = processError(error);
       return reply.code(result.statusCode).send(result.body);
@@ -1418,7 +1633,10 @@ export async function createApp(
     const query = request.query as { contextId?: string; path?: string };
     if (!query.path) return reply.code(400).send({ error: "path_required" });
     try {
-      const contextId=query.contextId??'local',value = await readThroughFiles(contextId,service=>service.read({ contextId, path: query.path! }));
+      const contextId=query.contextId??'local';
+      const value = contextId === 'local'
+        ? await readThroughFiles(contextId,service=>service.read({ contextId, path: query.path! }, { signal: requestSignal(request, reply) }))
+        : await filesystemCache.read(await scopeForContext(contextId, profileScope.current(), request, reply, query), query.path!, { signal: requestSignal(request, reply) });
       return {
         ...value,
         contentBase64: value.content?.toString("base64"),
@@ -1444,14 +1662,13 @@ export async function createApp(
     )
       return reply.code(400).send({ error: "invalid_write" });
     try {
+      const filePath = body.path, contentBase64 = body.contentBase64, expectedFingerprint = body.expectedFingerprint;
       const contextId = body.contextId ?? "local",
-        value = await (
-          await contexts.files(contextId)
-        ).write(
-          { contextId, path: body.path },
-          Buffer.from(body.contentBase64, "base64"),
-          body.expectedFingerprint,
-        );
+        value = await withScopedFiles(contextId, body, request, reply, service => service.write(
+          { contextId, path: filePath },
+          Buffer.from(contentBase64, "base64"),
+          expectedFingerprint,
+        ), true);
       return {
         ...value,
         route: routeEvidence(value.route),
@@ -1484,13 +1701,12 @@ export async function createApp(
     )
       return reply.code(400).send({ error: "invalid_create" });
     try {
+      const filePath = body.path, contentBase64 = body.contentBase64;
       const contextId = body.contextId ?? "local",
-        value = await (
-          await contexts.files(contextId)
-        ).createFile(
-          { contextId, path: body.path },
-          Buffer.from(body.contentBase64, "base64"),
-        );
+        value = await withScopedFiles(contextId, body, request, reply, service => service.createFile(
+          { contextId, path: filePath },
+          Buffer.from(contentBase64, "base64"),
+        ), true);
       return reply
         .code(201)
         .send({
@@ -1516,21 +1732,11 @@ export async function createApp(
     const query = request.query as { contextId?: string; path?: string };
     if (!query.path) return reply.code(400).send({ error: "path_required" });
     try {
-      const service = await contexts.files(query.contextId ?? "local"),
-        route = service.resolver.resolve(
-          { contextId: query.contextId ?? "local", path: query.path },
-          "stat",
-        )[0] as any;
-      if (!route)
-        throw Object.assign(new Error("No route can stat this path."), {
-          code: "route_unavailable",
-        });
-      const value = await route.stat(query.path);
+      const contextId = query.contextId ?? 'local';
+      const value = await withScopedFiles(contextId, query, request, reply, service => service.stat({ contextId, path: query.path! }, { signal: requestSignal(request, reply) }));
       return {
-        path: query.path,
-        size: Number(value.size),
-        mode: Number(value.mode),
-        route: routeEvidence(route),
+        ...value,
+        route: routeEvidence(value.route),
       };
     } catch (error) {
       const result = processError(error);
@@ -1550,7 +1756,7 @@ export async function createApp(
     if (!query.query?.trim()) return { matches: [], route: null };
     const contextId = query.contextId ?? "local";
     try {
-      const value = await readThroughFiles(contextId,service=>service.search({ contextId, path: query.path ?? "/" }, query.query!, {
+      const value = await withScopedFiles(contextId, query, request, reply, service=>service.search({ contextId, path: query.path ?? "/" }, query.query!, {
         mode: query.mode ?? "all",
         limit: Number(query.limit) || 200,
         maxEntries: Number(query.maxEntries) || 5_000,
@@ -1583,15 +1789,14 @@ export async function createApp(
       return reply.code(400).send({ error: "invalid_create" });
     try {
       const contextId = body.contextId ?? "local",
-        service = await contexts.files(contextId),
         target = { contextId, path: body.path },
-        value =
+        value = await withScopedFiles(contextId, body, request, reply, service =>
           body.type === "directory"
-            ? await service.createDirectory(target)
-            : await service.createFile(
+            ? service.createDirectory(target)
+            : service.createFile(
                 target,
                 Buffer.from(body.contentBase64 ?? "", "base64"),
-              );
+              ), true);
       return reply
         .code(201)
         .send({
@@ -1618,10 +1823,9 @@ export async function createApp(
     if (!body.path || !body.destination)
       return reply.code(400).send({ error: "invalid_move" });
     try {
+      const filePath = body.path, destination = body.destination;
       const contextId = body.contextId ?? "local",
-        value = await (
-          await contexts.files(contextId)
-        ).move({ contextId, path: body.path }, body.destination);
+        value = await withScopedFiles(contextId, body, request, reply, service => service.move({ contextId, path: filePath }, destination), true);
       return {
         ...value,
         route: routeEvidence(value.route),
@@ -1646,12 +1850,12 @@ export async function createApp(
     if (body.permanent && body.confirm !== true)
       return reply.code(409).send({ error: "confirmation_required" });
     try {
+      const filePath = body.path;
       const contextId = body.contextId ?? "local",
-        service = await contexts.files(contextId),
-        target = { contextId, path: body.path },
-        value = body.permanent
-          ? await service.remove(target)
-          : await service.trash(target);
+        target = { contextId, path: filePath },
+        value = await withScopedFiles(contextId, body, request, reply, service => body.permanent
+          ? service.remove(target)
+          : service.trash(target), true);
       return {
         ...value,
         permanent: Boolean(body.permanent),
@@ -1675,10 +1879,9 @@ export async function createApp(
     const body = request.body as { contextId?: string; path?: string };
     if (!body.path) return reply.code(400).send({ error: "path_required" });
     try {
+      const filePath = body.path;
       const contextId = body.contextId ?? "local",
-        value = await (
-          await contexts.files(contextId)
-        ).restore({ contextId, path: body.path });
+        value = await withScopedFiles(contextId, body, request, reply, service => service.restore({ contextId, path: filePath }), true);
       return {
         ...value,
         route: routeEvidence(value.route),
@@ -2314,63 +2517,37 @@ export async function createApp(
       profile?: string;
     };
     const target = String(query.target ?? "").trim();
-    if (!target) {
-      socket.send(
-        JSON.stringify({
-          type: "error",
-          code: "target_required",
-          message: "A Device or Connection target is required.",
-        }),
-      );
+    let closed = false;
+    socket.once('close', () => { closed = true; });
+    void (async () => {
+      if (query.new !== undefined || query.session !== undefined) throw Object.assign(new Error('Terminal session selection is unavailable for leased Device streams.'), { code: 'unsupported_terminal_selection' });
+      if (!target.startsWith('device:')) throw Object.assign(new Error('A Device target is required.'), { code: 'target_required' });
+      const scope = await scopeForContext(target, query.profile, request);
+      const lease = await deviceSessions.acquire(scope);
+      if (closed) { lease.release(); return; }
+      const stream = lease.subscribe(event => {
+        if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
+        if (event.type === 'detached' && socket.readyState === socket.OPEN) socket.close(1000);
+      }, scope);
+      const snapshot = deviceSessions.snapshot(scope);
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'ready', sessionId: snapshot?.sessionId, streamId: stream.id, target, recordingMode: 'leased' }));
+      socket.on("message", (raw: RawData) => {
+        void (async () => {
+          try {
+            const message = JSON.parse(raw.toString()) as TerminalInput;
+            if (!message || !terminalInputs.has(message.type)) throw new Error("unsupported terminal message");
+            await lease.run(async ({ session }) => {
+              if (!session.send(message)) throw Object.assign(new Error('Terminal session is closed.'), { code: 'terminal_closed' });
+            }, { scope });
+          } catch (error) {
+            if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'error', code: (error as { code?: string }).code ?? 'invalid_input', message: (error as Error).message }));
+          }
+        })();
+      });
+      socket.once("close", () => { stream.release(); lease.release(); });
+    })().catch(error => {
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: 'error', code: (error as { code?: string }).code ?? 'terminal_unavailable', message: (error as Error).message }));
       socket.close(1008);
-      return;
-    }
-    const session = fngk.openTerminal(target, {
-      newSession: query.new === "1",
-      sessionId: query.session,
-      profile: query.profile,
-    });
-    session.on("event", (event) => {
-      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
-      if (event.type === "detached" && socket.readyState === socket.OPEN)
-        socket.close(1000);
-    });
-    session.on("error", (error) => {
-      if (socket.readyState === socket.OPEN)
-        socket.send(
-          JSON.stringify({
-            type: "error",
-            code: (error as { code?: string }).code ?? "terminal_error",
-            message: (error as Error).message,
-          }),
-        );
-    });
-    session.on("close", () => {
-      if (socket.readyState === socket.OPEN) socket.close(1000);
-    });
-    socket.on("message", (raw: RawData) => {
-      try {
-        const message = JSON.parse(raw.toString()) as TerminalInput;
-        if (!message || !terminalInputs.has(message.type))
-          throw new Error("unsupported terminal message");
-        if (!session.send(message))
-          throw new Error("terminal session is closed");
-      } catch (error) {
-        socket.send(
-          JSON.stringify({
-            type: "error",
-            code: "invalid_input",
-            message: (error as Error).message,
-          }),
-        );
-      }
-    });
-    socket.once("close", () => {
-      if (session.process.exitCode === null) {
-        session.detach("browser-disconnect");
-        const timer = setTimeout(() => session.process.kill("SIGTERM"), 1_000);
-        timer.unref();
-      }
     });
   });
 

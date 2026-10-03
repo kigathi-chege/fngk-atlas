@@ -436,17 +436,29 @@ describe("Atlas FNGK-native server", () => {
 
   it("requests a verified immutable source snapshot from the selected Device",async()=>{const app=await harness(),response=await app.inject({method:'POST',url:'/api/deployment-sources/snapshot',payload:{contextId:'device:device-1',path:'/srv/app',profile:'work'}});expect(response.statusCode,response.body).toBe(201);expect(response.json()).toMatchObject({protocolVersion:'fngk.source.v1',kind:'device-directory',verified:true,input:{path:'/srv/app'}})});
 
+  it("rejects a filesystem mutation for a Device outside the authorized session scope", async () => {
+    const app = await harness();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/files',
+      payload: { contextId: 'device:unknown-device', path: '/workspace', type: 'directory', profile: 'work' },
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toMatchObject({ error: 'context_not_found' });
+  });
+
   it("relays a terminal as WebSocket JSONL events", async () => {
     const app = await harness();
     const address = await app.listen({ host: "127.0.0.1", port: 0 });
     const socket = new WebSocket(
       address.replace(/^http/, "ws") +
-        "/api/fngk/terminals?target=kigathi&new=1",
+        "/api/fngk/terminals?target=device%3Adevice-1",
     );
     const messages: any[] = [];
     socket.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
     while (!messages.some((message) => message.type === "ready"))
       await once(socket, "message");
+    expect(messages).toContainEqual(expect.objectContaining({ type: 'ready', recordingMode: 'leased', streamId: expect.any(String) }));
     socket.send(
       JSON.stringify({
         type: "command",

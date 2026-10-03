@@ -31,27 +31,37 @@ export class FileService {
     return { ...target, path: path.posix.normalize(target.path) };
   }
 
-  async list(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, options: { limit?: number; cursor?: string | null } = {}): Promise<FilePage> {
+  async list(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, options: { limit?: number; cursor?: string | null; signal?: AbortSignal } = {}): Promise<FilePage> {
     target = this.#target(target);
     const limit = Math.min(500, Math.max(1, options.limit ?? 100)), after = cursorName(options.cursor), errors: unknown[] = [];
     for (const route of this.#routes(target, 'list')) try {
-      const all = await route.list(target.path), cursorIndex = after ? all.findIndex(item => item.name === after) : -1, values = all.slice(cursorIndex + 1);
+      const all = await route.list(target.path, { signal: options.signal }), cursorIndex = after ? all.findIndex(item => item.name === after) : -1, values = all.slice(cursorIndex + 1);
       const items = values.slice(0, limit), nextCursor = values.length > limit ? Buffer.from(items.at(-1)!.name).toString('base64url') : null;
       return { items, nextCursor, route };
     } catch (error) { errors.push(error); }
     throw this.#unavailable('list', errors);
   }
 
-  async read(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>) {
+  async read(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, options: { signal?: AbortSignal } = {}) {
     target = this.#target(target);
     const errors: unknown[] = [];
     for (const route of this.#routes(target, 'read')) try {
-      const metadata = await route.stat(target.path);
+      const metadata = await route.stat(target.path, { signal: options.signal });
       if (metadata.size > this.maxReadBytes) return { path: target.path, bytes: metadata.size, tooLarge: true as const, binary: false, fingerprint: undefined, content: undefined, text: undefined, route };
-      const content = await route.read(target.path), binary = content.includes(0);
+      const content = await route.read(target.path, { signal: options.signal }), binary = content.includes(0);
       return { path: target.path, bytes: content.length, tooLarge: false as const, binary, fingerprint: fingerprint(content), content: binary ? content : undefined, text: binary ? undefined : content.toString('utf8'), route };
     } catch (error) { errors.push(error); }
     throw this.#unavailable('read', errors);
+  }
+
+  async stat(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, options: { signal?: AbortSignal } = {}) {
+    target = this.#target(target);
+    const errors: unknown[] = [];
+    for (const route of this.#routes(target, 'stat')) try {
+      const value = await route.stat(target.path, { signal: options.signal });
+      return { path: target.path, size: Number(value.size), mode: Number(value.mode), route };
+    } catch (error) { errors.push(error); }
+    throw this.#unavailable('stat', errors);
   }
 
   async write(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, content: Buffer, expectedFingerprint: string) {

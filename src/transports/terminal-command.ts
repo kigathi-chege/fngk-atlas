@@ -9,6 +9,7 @@ export interface CommandExecutor { execute(command: string, options?: { signal?:
 export class FngkTerminalCommandExecutor implements CommandExecutor {
   constructor(readonly session: TerminalSession, readonly timeoutMs = 30_000) {}
   async execute(command: string, options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<CommandResult> {
+    if (options.signal?.aborted) throw Object.assign(new Error('Terminal command cancelled.'), { code: 'cancelled' });
     const requestId = randomUUID(), frameId = requestId.replaceAll('-', '_'), chunks: Buffer[] = [];
     return await new Promise<CommandResult>((resolve, reject) => {
       let settled = false, completion: TerminalEvent | undefined;
