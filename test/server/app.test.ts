@@ -492,6 +492,20 @@ describe("Atlas FNGK-native server", () => {
     await once(socket, "close");
   });
 
+  it('reattaches an Atlas-owned terminal session instead of creating a second session', async () => {
+    const app = await harness(), address = await app.listen({ host: '127.0.0.1', port: 0 });
+    const open = async (suffix: string) => {
+      const socket = new WebSocket(address.replace(/^http/, 'ws') + `/api/fngk/terminals?target=device%3Adevice-1${suffix}`);
+      const messages: any[] = []; socket.on('message', raw => messages.push(JSON.parse(raw.toString())));
+      while (!messages.some(message => message.type === 'ready')) await once(socket, 'message');
+      return { socket, ready: messages.find(message => message.type === 'ready') };
+    };
+    const first = await open('');
+    const resumed = await open(`&session=${encodeURIComponent(first.ready.sessionId)}`);
+    expect(resumed.ready.argv).toContain('--session'); expect(resumed.ready.argv).not.toContain('--new');
+    first.socket.close(); resumed.socket.close();
+  });
+
   it("scopes terminal sessions to one Device and reports lifecycle counts", async () => {
     const directory = await mkdtemp(
       path.join(tmpdir(), "fngk-atlas-sessions-"),

@@ -2540,10 +2540,12 @@ export async function createApp(
     let closed = false;
     socket.once('close', () => { closed = true; });
     void (async () => {
-      if (query.session !== undefined) throw Object.assign(new Error('Atlas restores only interactive terminals it created.'), { code: 'unsupported_terminal_selection' });
       if (!target.startsWith('device:')) throw Object.assign(new Error('A Device target is required.'), { code: 'target_required' });
       const scope = await scopeForContext(target, query.profile, request);
-      const terminal=fngk.openTerminal(target,{newSession:true,profile:scope.profile,owner:'atlas-user',purpose:'interactive'});
+      const sessionId=typeof query.session==='string'&&query.session.trim()?query.session.trim():undefined;
+      const remembered=sessionId?atlasUserTerminals.get(sessionId):undefined;
+      if(sessionId&&(!remembered||remembered.deviceId!==scope.deviceId||remembered.profile!==scope.profile))throw Object.assign(new Error('Atlas can restore only its own terminal for this Device and profile.'),{code:'terminal_session_unavailable'});
+      const terminal=fngk.openTerminal(target,{newSession:!sessionId,sessionId,profile:scope.profile,owner:'atlas-user',purpose:'interactive'});
       const onEvent=(event:TerminalInput|any)=>{if(event.type==='ready'&&terminal.sessionId)atlasUserTerminals.set(terminal.sessionId,{deviceId:scope.deviceId,profile:scope.profile,owner:'atlas-user',purpose:'interactive'});if(socket.readyState===socket.OPEN)socket.send(JSON.stringify(event));if(event.type==='detached'&&socket.readyState===socket.OPEN)socket.close(1000)};
       terminal.on('event',onEvent);terminal.once('error',(error)=>{if(socket.readyState===socket.OPEN)socket.send(JSON.stringify({type:'error',code:error.code??'terminal_unavailable',message:error.message}))});
       if(closed){terminal.close();return;}
