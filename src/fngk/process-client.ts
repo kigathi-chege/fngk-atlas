@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { CONNECTION_PROTOCOL, DEPLOYMENT_PROTOCOL, DEPLOYMENT_PROTOCOL_V2, FILES_PROTOCOL, NAMESPACE_PROTOCOL, PROCESS_PROTOCOL, SESSION_PROTOCOL, SURFACE_PROTOCOL, TERMINAL_PROTOCOL, type ManagedDeploymentResult, type ManagedProcess, type ManagedProcessLogs, type NativeFileBindings, type NamespaceSnapshot } from './protocol.js';
 import { parseNamespace } from './namespace.js';
-import { TerminalSession } from './terminal-session.js';
+import { TerminalSession, type TerminalOwner, type TerminalPurpose } from './terminal-session.js';
 import { redact } from './redaction.js';
 
 export interface FngkProcessClientOptions {
@@ -201,14 +201,14 @@ export class FngkProcessClient {
     await this.#run(['install', '--profile', profile], signal);
   }
 
-  openTerminal(target: string, options: { newSession?: boolean; sessionId?: string; profile?: string; signal?: AbortSignal } = {}): TerminalSession {
+  openTerminal(target: string, options: { newSession?: boolean; sessionId?: string; profile?: string; signal?: AbortSignal; owner?:TerminalOwner; purpose?:TerminalPurpose } = {}): TerminalSession {
     const args = [target];
     options={...options,profile:options.profile??this.#profileProvider()};
     if (options.newSession) args.push('--new');
     if (options.sessionId) args.push('--session', options.sessionId);
     if (options.profile) args.push('--profile', options.profile);
     args.push('--stdio-json');
-    return new TerminalSession({ binary: this.binary, args, env: this.env, signal: options.signal });
+    return new TerminalSession({ binary: this.binary, args, env: this.env, signal: options.signal, owner:options.owner, purpose:options.purpose });
   }
 
   async update(onOutput: (line: string) => void, signal?: AbortSignal): Promise<void> {

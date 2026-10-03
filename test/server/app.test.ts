@@ -51,6 +51,11 @@ describe("Atlas FNGK-native server", () => {
     expect((await app.inject({method:'DELETE',url:'/api/device-lifecycle/device',payload:{contextId:'device:device-1',confirm:true}})).statusCode).toBe(409);
     expect((await app.inject({method:'POST',url:'/api/device-lifecycle/retire',payload:{contextId:'device:device-1',confirm:true}})).statusCode).toBe(409);
   });
+  it('keeps unowned FNGK namespace sessions outside Atlas terminal history and actions',async()=>{
+    const app=await harness();
+    expect((await app.inject({method:'GET',url:'/api/fngk/sessions?deviceId=device-1'})).json().sessions).toEqual([]);
+    expect((await app.inject({method:'POST',url:'/api/fngk/sessions/unowned/actions',payload:{action:'archive',confirm:true}})).statusCode).toBe(404);
+  });
   it("requires the desktop launch capability for API access", async () => {
     const app = await protectedHarness();
     expect((await app.inject({ method: "GET", url: "/api/onboarding/status" })).statusCode).toBe(401);
@@ -314,7 +319,7 @@ describe("Atlas FNGK-native server", () => {
           payload: { action: "rename", title: "Build shell", profile: "work" },
         })
       ).json(),
-    ).toMatchObject({ protocolVersion: "fngk.session.v1", action: "rename" });
+    ).toMatchObject({ error:'atlas_user_terminal_not_found' });
     expect((await app.inject({method:'POST',url:'/api/world/refresh',payload:{contextId:'local'}})).statusCode).toBe(200);
     const semantic = await app.inject({
       method: "GET",
@@ -466,7 +471,7 @@ describe("Atlas FNGK-native server", () => {
     socket.on("message", (raw) => messages.push(JSON.parse(raw.toString())));
     while (!messages.some((message) => message.type === "ready"))
       await once(socket, "message");
-    expect(messages).toContainEqual(expect.objectContaining({ type: 'ready', recordingMode: 'leased', streamId: expect.any(String) }));
+    expect(messages).toContainEqual(expect.objectContaining({ type: 'ready', sessionId: expect.any(String) }));
     socket.send(
       JSON.stringify({
         type: "command",
@@ -509,14 +514,7 @@ describe("Atlas FNGK-native server", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      sessions: [
-        { id: "session-live", deviceId: "device-1" },
-        { id: "session-detached", deviceId: "device-1" },
-        { id: "session-archived", deviceId: "device-1" },
-      ],
-      counts: { total: 3, active: 2, live: 1, detached: 1, archived: 1 },
-    });
+    expect(response.json()).toMatchObject({sessions:[],counts:{total:0,active:0,live:0,detached:0,archived:0}});
   });
 
   it("requires explicit confirmation and streams a guided FNGK update", async () => {

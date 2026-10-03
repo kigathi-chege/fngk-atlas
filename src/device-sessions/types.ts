@@ -28,6 +28,8 @@ export interface DeviceSessionSnapshot {
   cacheEpoch: number;
   connectedAt?: string;
   lastFailure?: { code: string; message: string; occurredAt: string };
+  owner: 'atlas-internal';
+  purpose: 'device-session';
 }
 
 /** A server-side operation is run once against the active scoped terminal. */

@@ -34,7 +34,7 @@ export class LiveProjectService extends EventEmitter {
     const state=await this.fngk.probe();if(!state.compatible){this.options.diagnostics?.update(diagnostic?.id??'',{status:'failed',errorCode:state.reason??'fngk_unavailable',error:'FNGK is not ready for a live project.'});throw Object.assign(new Error('FNGK is not ready for a live project.'),{code:state.reason??'fngk_unavailable',diagnosticSessionId:diagnostic?.id})}
     const managed=typeof (this.fngk as any).createManagedProcess==='function';
     if(!managed)try{await this.#ensurePublishCompatible(input.contextId,state.profile)}catch(error){this.options.diagnostics?.update(diagnostic?.id??'',{status:'failed',errorCode:(error as any).code??'incompatible_cli',error:(error as Error).message});throw Object.assign(error as Error,{diagnosticSessionId:diagnostic?.id})}
-    const terminal=managed?undefined:this.fngk.openTerminal(input.contextId,{newSession:true,profile:state.profile});
+    const terminal=managed?undefined:this.fngk.openTerminal(input.contextId,{newSession:true,profile:state.profile,owner:'atlas-internal',purpose:'deployment'});
     const id=randomUUID(),requestId=`project-${id}`,ttl=Math.min(24*60*60_000,Math.max(60_000,input.ttlMs??60*60_000)),createdAt=new Date(),timer=setTimeout(()=>void this.stop(id,'expired'),ttl);timer.unref();
     const session:InternalSession={id,contextId:input.contextId,repositoryPath:input.repositoryPath,command:input.command.trim(),port:input.port,status:'starting',createdAt:createdAt.toISOString(),expiresAt:new Date(createdAt.getTime()+ttl).toISOString(),terminalSessionId:terminal?.sessionId,output:'',terminal,timer,requestId,diagnosticSessionId:diagnostic?.id,profile:state.profile};
     this.#sessions.set(id,session);if(terminal)this.#listen(session);
@@ -80,7 +80,7 @@ export class LiveProjectService extends EventEmitter {
 
   async #executeManagement(contextId:string,profile:string|undefined,command:string){
     if(this.options.commandExecutor){try{return await (await this.options.commandExecutor(contextId)).execute(command,{timeoutMs:30_000})}catch(error){if((error as any)?.code!=='terminal_closed')throw error;await new Promise(resolve=>setImmediate(resolve));return (await this.options.commandExecutor(contextId)).execute(command,{timeoutMs:30_000})}}
-    const terminal=this.fngk.openTerminal(contextId,{newSession:true,profile});
+    const terminal=this.fngk.openTerminal(contextId,{newSession:true,profile,owner:'atlas-internal',purpose:'deployment'});
     try{
       await this.#waitReady(terminal);
       const modeReady=this.#waitMode(terminal,'queue');

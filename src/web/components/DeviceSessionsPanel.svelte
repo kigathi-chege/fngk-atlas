@@ -28,7 +28,7 @@
     {#each sessions.items as item (item.sessionId ?? `${item.scope.profile}:${item.scope.deviceId}:${item.scope.projectId ?? ''}`)}
       <article class:ready={item.state === 'ready'} class="session-card">
         <div class="session-heading"><div><strong>{describe(item)}</strong><small>{item.scope.profile} · {item.state}</small></div><span>{item.activeStreams} streams</span></div>
-        <dl><div><dt>Session</dt><dd>{item.sessionId?.slice(0, 12) ?? 'connecting'}</dd></div><div><dt>Handshakes</dt><dd>{item.handshakeCount}</dd></div><div><dt>Cache revision</dt><dd>{item.cacheEpoch}</dd></div><div><dt>Grants</dt><dd>Managed per tool</dd></div></dl>
+        <dl><div><dt>Session</dt><dd>{item.sessionId?.slice(0, 12) ?? 'connecting'}</dd></div><div><dt>Purpose</dt><dd>Atlas internal connection</dd></div><div><dt>Handshakes</dt><dd>{item.handshakeCount}</dd></div><div><dt>Cache revision</dt><dd>{item.cacheEpoch}</dd></div><div><dt>Grants</dt><dd>Managed per tool</dd></div></dl>
         {#if item.lastFailure}<p class="failure">{item.lastFailure.message}</p>{/if}
         <div class="session-actions"><button onclick={() => act('reconnect', item)}>Reconnect</button><button onclick={() => act('cache/clear', item)}>Clear cache</button><button class="danger" onclick={() => act('revoke', item)}>Revoke</button></div>
         {#if pending === item}<div class="confirm" role="alert"><span>Revoke this session and all its streams?</span><button onclick={() => pending = undefined}>Cancel</button><button class="danger" onclick={() => act('revoke', item)}>Revoke session</button></div>{/if}

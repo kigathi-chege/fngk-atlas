@@ -80,7 +80,7 @@ describe('DeviceSessionManager', () => {
     const [first, second] = await Promise.all([manager.acquire(scope), manager.acquire({ ...scope })]);
 
     expect(connection.sessions).toHaveLength(1);
-    expect(manager.snapshot(scope)).toMatchObject({ scope, leaseCount: 2, state: 'ready' });
+    expect(manager.snapshot(scope)).toMatchObject({ scope, leaseCount: 2, state: 'ready', owner:'atlas-internal', purpose:'device-session' });
     first.release();
     second.release();
   });

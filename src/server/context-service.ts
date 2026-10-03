@@ -68,7 +68,7 @@ export class EffectiveContextService {
     const namespace = await this.fngk.namespace(profile), deviceId = contextId.startsWith('device:') ? contextId.slice(7) : contextId;
     const device = namespace.devices.find(value => value.id === deviceId); if (!device) throw Object.assign(new Error('FNGK Device is not in the current namespace.'), { code: 'context_not_found' });
     if (device.online === false) throw Object.assign(new Error('FNGK Device is offline.'), { code: 'device_offline' });
-    const terminal = this.fngk.openTerminal(deviceTarget(device), { newSession: true, profile });
+    const terminal = this.fngk.openTerminal(deviceTarget(device), { newSession: true, profile, owner:'atlas-internal', purpose:'filesystem' });
     await Promise.race([once(terminal, 'ready'), once(terminal, 'error').then(([error]) => Promise.reject(error))]);
     const modeChanged = matchingEvent(terminal, event => event.type === 'collaboration' && event.eventType === 'mode' && event.mode === 'queue');
     terminal.setMode('queue', 'atlas-context-mode'); await modeChanged;
