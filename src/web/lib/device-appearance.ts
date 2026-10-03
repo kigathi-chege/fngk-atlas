@@ -13,7 +13,7 @@ export function createDeviceAppearanceStore(storage: StorageLike, changed: (devi
   let values: Record<string, DeviceAppearance> = {};
   try {
     const parsed = JSON.parse(storage.getItem(key) ?? '{}');
-    if (parsed && typeof parsed === 'object') values = Object.fromEntries(Object.entries(parsed).filter(([id, value]) => id && value && typeof value === 'object' && (!('color' in value) || valid((value as DeviceAppearance).color))));
+    if (parsed && typeof parsed === 'object') values = Object.fromEntries(Object.entries(parsed).filter(([id, value]) => id && value && typeof value === 'object' && (!('color' in value) || valid((value as DeviceAppearance).color)))) as Record<string, DeviceAppearance>;
   } catch { storage.removeItem(key); }
   const persist = () => storage.setItem(key, JSON.stringify(values));
   return {
