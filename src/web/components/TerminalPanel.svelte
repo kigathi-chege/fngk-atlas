@@ -13,7 +13,6 @@
   let host: HTMLDivElement;
   let target = params.target ?? (state.snapshot().contextId.startsWith('device:') ? state.snapshot().contextId : '');
   let sessionId = '', streamId = '', status = 'Opening…', approval = '';
-  let sessions: Array<{id:string; status:string}> = [];
   let terminal: Terminal, fit: FitAddon, socket: WebSocket | undefined;
   let disposed = false, retries = 0, reconnectTimer: ReturnType<typeof setTimeout>, generation = 0, request = 0, lastRequest = '';
   const send = (value: Record<string, unknown>) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify(value));
@@ -41,7 +40,6 @@
         sessionId = String(value.sessionId ?? '');
         streamId = String(value.streamId ?? '');
         retries = 0; status = 'Live';
-        if (sessionId) sessions = [{id:sessionId,status:'Live'}, ...sessions.filter(item => item.id !== sessionId)].slice(0, 8);
         terminal.writeln(`\x1b[2mconnected · ${value.target ?? target} · ${value.recordingMode ?? 'leased'}\x1b[0m`);
         resize();
       } else if (value.type === 'output' || value.type === 'replay') {
@@ -85,6 +83,5 @@
 <DocumentationHelp topicId="terminals" label="Terminal documentation"/>
 <section class="panel terminal-panel">
   <header><div class="terminal-target"><strong>{target || 'No remote Device selected'}</strong><small>Interactive terminal{#if sessionId} · Session {sessionId.slice(0, 8)}{/if}</small></div><span class:live={status.startsWith('Live')}>{status}</span><div>{#if approval}<button onclick={() => resolveApproval('approve')}>Approve</button><button onclick={() => resolveApproval('deny')}>Deny</button>{/if}<button title="New terminal session" aria-label="New terminal session" onclick={() => { retries = 0; connect(true, true); }}>New</button><button title="Reconnect terminal stream" aria-label="Reconnect terminal stream" onclick={() => { retries = 0; connect(true); }}><RotateCw size={13}/></button><button title="Close terminal panel" onclick={() => window.dispatchEvent(new CustomEvent('atlas:close-terminal', { detail: { panelId: params.panelId } }))}><X size={13}/></button></div></header>
-  <nav class="terminal-sessions" aria-label="Terminal sessions">{#each sessions as item}<span class="session-label" title={item.id}>{item.id.slice(0, 12)} · {item.status}</span>{/each}</nav>
   <div class="terminal-body"><div class="terminal" bind:this={host}></div></div>
 </section>
