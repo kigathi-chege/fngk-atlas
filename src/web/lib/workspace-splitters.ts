@@ -1,5 +1,9 @@
 import type {DockviewApi} from 'dockview';
 
+export const permanentPanelIds=['atlas.devices','atlas.device-details','atlas.filesystem','atlas.inspector','atlas.operations'] as const;
+export function clampSidebarWidth(width:number|undefined,availableWidth:number){const preferred=Math.round(availableWidth/5);return Math.max(240,Math.min(420,Math.round(width??preferred)))}
+export function clampLowerPanelHeight(height:number|undefined,sidebarHeight:number){const minimum=Math.round(sidebarHeight/3),maximum=Math.round(sidebarHeight/2);return Math.max(minimum,Math.min(maximum,Math.round(height??minimum)))}
+
 /** Add keyboard interaction without replacing Dockview's pointer resizing. */
 export function installWorkspaceSplitters(host:HTMLElement,dock:DockviewApi){
   const vertical=(sash:HTMLElement)=>Boolean(sash.parentElement?.parentElement?.classList.contains('dv-horizontal'));
