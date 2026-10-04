@@ -15,4 +15,11 @@ describe('notification event projection', () => {
     expect(noticeFromAtlasEvent(event('error'))).toMatchObject({level: 'error'});
     expect(noticeFromAtlasEvent(event('cancelled'))).toBeUndefined();
   });
+
+  it('subscribes to the retained event stream without replaying its full history as toasts', async () => {
+    const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
+    const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/NotificationStack.svelte'),'utf8');
+    expect(source).toContain('atlasEvents.subscribe');
+    expect(source).toContain('hydrated=true');
+  });
 });
