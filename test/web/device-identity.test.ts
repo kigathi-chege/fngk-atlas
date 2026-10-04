@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {createDeviceLabelStore, resolveDeviceIdentity} from '../../src/web/lib/device-identity.js';
+import {createDeviceAppearanceStore} from '../../src/web/lib/device-appearance.js';
 
 const deviceId = 'C43A7F25-2AC4-42C7-A15D-0ECFB7E77F6B';
 
@@ -40,5 +41,17 @@ describe('Atlas Device identity', () => {
     const store = createDeviceLabelStore({getItem: () => '{bad', setItem: () => {}, removeItem: () => { removed = true; }});
     expect(store.getLabel(deviceId)).toBeUndefined();
     expect(removed).toBe(true);
+  });
+
+  it('persists a local device color without storing remote credentials', () => {
+    const values = new Map<string, string>();
+    const store = createDeviceAppearanceStore({
+      getItem: key => values.get(key) ?? null,
+      setItem: (key, value) => void values.set(key, value),
+      removeItem: key => void values.delete(key),
+    });
+    store.set(deviceId, 'violet');
+    expect(store.get(deviceId)).toEqual({ color: 'violet' });
+    expect(JSON.stringify([...values.values()])).not.toMatch(/token|secret|password/i);
   });
 });

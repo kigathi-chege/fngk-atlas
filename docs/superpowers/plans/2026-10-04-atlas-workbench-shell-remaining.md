@@ -18,7 +18,7 @@ This document is the maintained follow-on ledger for work intentionally not repr
 
 - [x] Replace the retained left region with a dedicated `DevicesPanel`; global search/tool entry points remain outside it.
 - [x] Add Devices contextual actions for terminal, files, and the existing lifecycle flow. The lifecycle flow provides disconnect, retire stale connection, and delete-device choices.
-- [ ] Finish deterministic device identity profile editing, tooltip/context card, scoped-tab accenting, and behavioural preference tests.
+- [x] Finish deterministic device identity profile editing, profile/context card, scoped-tab accenting, and local color/label preference tests. The Devices menu now exposes a deterministic glyph, local label, authoritative metadata, lifecycle-safe actions, and palette without storing credentials.
 
 ## 4. Complete observability and notifications
 
