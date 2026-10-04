@@ -5,7 +5,7 @@ This document is the maintained follow-on ledger for work intentionally not repr
 ## 1. Complete permanent shell behavior
 
 - [x] Suppress the Workspace recovery tab whenever ordinary center panels exist and reactivate it after the final ordinary panel closes. Bottom-dock panels no longer hide it.
-- [ ] Add `WorkspaceHeader` and replace permanent-region Dockview tab strips with integrated headers and explicit show/collapse controls.
+- [x] Add a shared permanent-panel header and replace the Workspace, Devices, Device Details, Filesystem, and Inspector tab-strip presentation with integrated headers and explicit actions. Observability remains a separate follow-up because its filter is header content rather than a panel action.
 - [x] Persist version-9 side widths and lower-panel collapsed states; safely discard prior layouts that cannot represent the retained shell. Persist explicit lower heights and active internal modes next.
 
 ## 2. Complete retained regions

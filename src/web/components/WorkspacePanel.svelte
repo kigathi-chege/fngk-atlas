@@ -4,6 +4,7 @@
   import Search from '@lucide/svelte/icons/search';
   import Network from '@lucide/svelte/icons/network';
   import {onMount} from 'svelte';
+  import PermanentPanelHeader from './PermanentPanelHeader.svelte';
   import type { WorkbenchState } from '../lib/workbench-state.js';
 
   export let state: WorkbenchState;
@@ -12,6 +13,7 @@
 </script>
 
 <section class="workspace-welcome" aria-label="Workspace start">
+  <PermanentPanelHeader title="Workspace" subtitle={`${snapshot.connection.profile ?? 'default'} profile`} />
   <div class="workspace-welcome-copy">
     <small>FNGK ATLAS</small>
     <h1>Start working</h1>
