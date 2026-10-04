@@ -17,4 +17,12 @@ describe('workbench shell contract', () => {
   it('uses version 8 for the redesigned persisted shell', () => {
     expect(shellLayoutVersion).toBe(8);
   });
+
+  it('hides only the Workspace recovery tab while ordinary center documents exist', async () => {
+    const {readFile}=await import('node:fs/promises');
+    const {resolve}=await import('node:path');
+    const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/Workbench.svelte'),'utf8');
+    expect(source).toContain("[data-panel-id=\"atlas.workspace\"]");
+    expect(source).toContain("workspaceTab.style.display=showWorkspace?'':'none'");
+  });
 });
