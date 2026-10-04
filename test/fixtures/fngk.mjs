@@ -65,7 +65,10 @@ if (args[0] === 'version') {
       const completed = () => process.stdout.write(JSON.stringify({ type: 'command_state', protocolVersion: 'fngk.terminal.v1', requestId: message.requestId, status: 'succeeded', exitCode: 0 }) + '\n');
       if (mode === 'terminal-reordered') completed();
       if (frame) {
-        const output = `noise\n__ATLAS_BEGIN_${frame}__\nframed payload\n__ATLAS_END_${frame}__:0\nprompt`;
+        const filesystemList = message.command.includes(' -printf ')
+          ? Buffer.from(['workspace', 'd', '0', '1789200000', '755', ''].join('\0')).toString('base64')
+          : 'framed payload';
+        const output = `noise\n__ATLAS_BEGIN_${frame}__\n${filesystemList}\n__ATLAS_END_${frame}__:0\nprompt`;
         process.stdout.write(JSON.stringify({ type: 'output', protocolVersion: 'fngk.terminal.v1', bodyBase64: Buffer.from(mode === 'terminal-crlf' ? output.replaceAll('\n', '\r\n') : output).toString('base64') }) + '\n');
       }
       if (mode !== 'terminal-reordered') completed();

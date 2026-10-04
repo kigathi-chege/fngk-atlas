@@ -230,6 +230,15 @@ describe("Atlas FNGK-native server", () => {
     const app=await harness(),response=await app.inject({method:'GET',url:'/api/files/content?contextId=local&path=%2Fdefinitely-not-an-atlas-file'});
     expect(response.statusCode).toBe(409);expect(response.json()).toMatchObject({error:'route_unavailable',routeCauses:expect.arrayContaining([expect.objectContaining({code:'ENOENT'})])});
   });
+  it('serves a remote directory through the retained Device Session without surfacing cancellation as route failure', async () => {
+    const app = await harness();
+    const response = await app.inject({ method: 'GET', url: '/api/files?contextId=device%3Adevice-1&path=%2F&limit=50' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      items: [expect.objectContaining({ name: 'workspace', type: 'directory' })],
+      diagnostics: expect.objectContaining({ handshakeCount: 1, requests: 1, cacheMisses: 1 }),
+    });
+  });
   it("lists redacted diagnostic sessions for operator inspection", async () => {
     const directory = await mkdtemp(
       path.join(tmpdir(), "fngk-atlas-diagnostics-"),

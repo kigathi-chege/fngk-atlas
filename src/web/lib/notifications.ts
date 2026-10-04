@@ -1,4 +1,6 @@
+import {atlasEvents,type AtlasEvent} from './atlas-events.js';
 export type Notice={id:string;message:string;level:'success'|'error'|'info'};
+export function noticeFromAtlasEvent(event:AtlasEvent):Notice|undefined{if(event.state==='success')return{id:event.id,message:event.message??event.title,level:'success'};if(event.state==='warning')return{id:event.id,message:event.message??event.title,level:'info'};if(event.state==='error')return{id:event.id,message:event.message??event.title,level:'error'};return undefined}
 export class NotificationStore {
   #items:Notice[]=[];#listeners=new Set<(items:Notice[])=>void>();#timers=new Map<string,ReturnType<typeof setTimeout>>();
   snapshot(){return this.#items.map(item=>({...item}))}
@@ -8,4 +10,4 @@ export class NotificationStore {
   dispose(){for(const timer of this.#timers.values())clearTimeout(timer);this.#timers.clear();this.#listeners.clear()}
   #publish(){for(const listener of this.#listeners)listener(this.snapshot())}
 }
-export function notify(message:string,level:Notice['level']='info',id=message){window.dispatchEvent(new CustomEvent('atlas:notice',{detail:{id,message,level}}))}
+export function notify(message:string,level:Notice['level']='info',id=message){atlasEvents.begin({id,type:'atlas.notice',title:message,message,state:level==='error'?'error':level==='success'?'success':'warning'});window.dispatchEvent(new CustomEvent('atlas:notice',{detail:{id,message,level}}))}

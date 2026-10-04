@@ -1,8 +1,9 @@
 <script lang="ts">
   import {onMount} from 'svelte';
-  import {NotificationStore,type Notice} from '../lib/notifications.js';
-  const store=new NotificationStore();let items:Notice[]=[];
-  onMount(()=>{const unsubscribe=store.subscribe(value=>items=value);const receive=(event:Event)=>{const item=(event as CustomEvent<Notice>).detail;if(item&&typeof item.message==='string'&&['success','error','info'].includes(item.level))store.push(item)};window.addEventListener('atlas:notice',receive);return()=>{unsubscribe();store.dispose();window.removeEventListener('atlas:notice',receive)}});
+  import {NotificationStore,noticeFromAtlasEvent,type Notice} from '../lib/notifications.js';
+  import {atlasEvents} from '../lib/atlas-events.js';
+  const store=new NotificationStore();let items:Notice[]=[];let hydrated=false;const seenStates=new Map<string,string>();
+  onMount(()=>{const unsubscribe=store.subscribe(value=>items=value),unsubscribeEvents=atlasEvents.subscribe(events=>{for(const event of events){const prior=seenStates.get(event.id);seenStates.set(event.id,event.state);if(!hydrated||prior===event.state)continue;const notice=noticeFromAtlasEvent(event);if(notice)store.push(notice);}hydrated=true}),receive=(event:Event)=>{const item=(event as CustomEvent<Notice>).detail;if(item&&typeof item.message==='string'&&['success','error','info'].includes(item.level))store.push(item)};window.addEventListener('atlas:notice',receive);return()=>{unsubscribe();unsubscribeEvents();store.dispose();window.removeEventListener('atlas:notice',receive)}});
 </script>
 <aside class="notification-stack" aria-label="Notifications" aria-live="polite" aria-relevant="additions text">{#each items as item(item.id)}<div class:error={item.level==='error'} class="notice"><span>{item.message}</span><button aria-label={`Dismiss ${item.message}`} onclick={()=>store.dismiss(item.id)}>×</button></div>{/each}</aside>
 <style>

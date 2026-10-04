@@ -64,6 +64,15 @@ describe('terminal-backed effective access', () => {
     expect(commands.every(command => !command.includes('.atlas-') && !command.includes('mktemp'))).toBe(true);
   });
 
+  it('does not mistake malformed terminal directory output for an empty directory', async () => {
+    const executor: CommandExecutor = { execute: async () => ({ output: Buffer.from('this is not a base64 directory record!'), exitCode: 0 }) };
+    const files = new FileService([new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor })]);
+    await expect(files.list({ contextId: 'remote', path: '/' })).rejects.toMatchObject({
+      code: 'route_unavailable',
+      causes: [expect.objectContaining({ code: 'filesystem_protocol_invalid' })],
+    });
+  });
+
   it('quotes shell-sensitive paths for bounded terminal filesystem operations', async () => {
     const commands: string[] = [];
     const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.alloc(0), exitCode: 0 }; } };

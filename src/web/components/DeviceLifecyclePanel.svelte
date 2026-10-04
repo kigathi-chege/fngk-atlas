@@ -1,6 +1,7 @@
 <script lang="ts">
   import {onMount} from 'svelte';
   import {api} from '../lib/api.js';
+  import {atlasEvents} from '../lib/atlas-events.js';
   import type {WorkbenchState} from '../lib/workbench-state.js';
   import type {DeviceReadiness} from '../../lifecycle/service.js';import DocumentationHelp from './DocumentationHelp.svelte';import {atlasDeviceColors,deviceAppearanceStore,type AtlasDeviceColor} from '../lib/device-appearance.js';
   export let state:WorkbenchState;
@@ -16,7 +17,7 @@
     finally{if(request===sequence)loading=false}
   }
   const deviceId=()=>contextId.slice('device:'.length);const color=()=>deviceAppearanceStore.get(deviceId()).color??'';
-  async function runAction(){if(!action)return;const current=action;acting=true;error='';try{await api(current==='delete'?'/api/device-lifecycle/device':`/api/device-lifecycle/${current}`,{method:current==='delete'?'DELETE':'POST',body:JSON.stringify({contextId,profile,confirm:true,...(current==='delete'?{confirmation}: {})})});action='';confirmation='';await refresh()}catch(cause){error=(cause as Error).message}finally{acting=false}}
+  async function runAction(){if(!action)return;const current=action,eventId=`device.lifecycle:${contextId}:${current}:${Date.now()}`;acting=true;error='';atlasEvents.begin({id:eventId,type:'device.lifecycle',title:`${current[0].toUpperCase()+current.slice(1)} device`,contextId,panelId:'atlas.device-lifecycle'});try{await api(current==='delete'?'/api/device-lifecycle/device':`/api/device-lifecycle/${current}`,{method:current==='delete'?'DELETE':'POST',body:JSON.stringify({contextId,profile,confirm:true,...(current==='delete'?{confirmation}: {})})});atlasEvents.resolve(eventId,{message:'Completed'});action='';confirmation='';await refresh()}catch(cause){error=(cause as Error).message;atlasEvents.fail(eventId,{message:error})}finally{acting=false}}
   onMount(()=>{const unsubscribe=state.subscribe(snapshot=>{const next=snapshot.connection.profile??'';if(snapshot.contextId!==contextId||next!==profile){contextId=snapshot.contextId;profile=next;void refresh()}});return()=>{sequence++;unsubscribe()}});
 </script>
 <DocumentationHelp topicId="recovery" label="Recovery documentation"/>

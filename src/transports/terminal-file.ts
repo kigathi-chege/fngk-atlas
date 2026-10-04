@@ -8,6 +8,37 @@ import { posixQuote } from './posix.js';
 
 export interface TerminalFileTransportOptions { id: string; contextId: string; deviceId: string; identity?: string; privilege?: AccessRoute['privilege']; executor: CommandExecutor; onUnavailable?:(error:unknown)=>void }
 
+function directoryProtocolError(message: string): Error {
+  return Object.assign(new Error(message), { code: 'filesystem_protocol_invalid' });
+}
+
+/**
+ * The terminal route intentionally uses a NUL-delimited, base64 encoded
+ * directory protocol. Buffer.from is forgiving of malformed base64, which
+ * would otherwise turn a broken terminal reply into a believable empty tree.
+ */
+function parseDirectoryRecords(output: Buffer, logicalPath: string): TransportEntry[] {
+  const encoded = output.toString('utf8').trim();
+  if (!encoded) return [];
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+    throw directoryProtocolError('The Device Session returned malformed directory data.');
+  }
+  const fields = Buffer.from(encoded, 'base64').toString('utf8').split('\0');
+  if (fields.pop() !== '' || fields.length % 5 !== 0) {
+    throw directoryProtocolError('The Device Session returned an incomplete directory record.');
+  }
+  const entries: TransportEntry[] = [];
+  for (let index = 0; index < fields.length; index += 5) {
+    const [name, kind, bytes, modified, mode] = fields.slice(index, index + 5);
+    const size = Number(bytes), modifiedSeconds = Number(modified), parsedMode = Number.parseInt(mode, 8);
+    if (!name || name.includes('/') || !['d', 'f', 'l', 'o'].includes(kind) || !Number.isFinite(size) || size < 0 || !Number.isFinite(modifiedSeconds) || !Number.isFinite(parsedMode)) {
+      throw directoryProtocolError('The Device Session returned an invalid directory record.');
+    }
+    entries.push({ name, path: path.posix.join(logicalPath, name), type: kind === 'd' ? 'directory' : kind === 'f' ? 'file' : kind === 'l' ? 'symlink' : 'other', bytes: size, modifiedAt: new Date(modifiedSeconds * 1000).toISOString(), mode: parsedMode });
+  }
+  return entries.sort((left, right) => left.name.localeCompare(right.name));
+}
+
 export class TerminalFileTransport implements FileTransport {
   readonly kind = 'terminal' as const; readonly id: string; readonly contextId: string; readonly deviceId: string;
   readonly effectiveIdentity: string; readonly privilege: AccessRoute['privilege']; readonly observedAt = new Date().toISOString(); readonly available = true;
@@ -21,13 +52,7 @@ export class TerminalFileTransport implements FileTransport {
   async list(logicalPath: string, options: { signal?: AbortSignal } = {}): Promise<TransportEntry[]> {
     const format = `%f\\0%y\\0%s\\0%T@\\0%m\\0`;
     const output = await this.#run(`find ${posixQuote(logicalPath)} -mindepth 1 -maxdepth 1 -printf ${posixQuote(format)} | base64 | tr -d '\\n'`, options);
-    const fields = Buffer.from(output.toString('utf8').trim(), 'base64').toString('utf8').split('\0'); fields.pop();
-    const entries: TransportEntry[] = [];
-    for (let index = 0; index + 4 < fields.length; index += 5) {
-      const [name, kind, bytes, modified, mode] = fields.slice(index, index + 5);
-      entries.push({ name, path: path.posix.join(logicalPath, name), type: kind === 'd' ? 'directory' : kind === 'f' ? 'file' : kind === 'l' ? 'symlink' : 'other', bytes: Number(bytes), modifiedAt: new Date(Number(modified) * 1000).toISOString(), mode: Number.parseInt(mode, 8) });
-    }
-    return entries.sort((left, right) => left.name.localeCompare(right.name));
+    return parseDirectoryRecords(output, logicalPath);
   }
   async stat(logicalPath: string, options: { signal?: AbortSignal } = {}): Promise<FileStat> { const output = await this.#run(`stat -c '%s %a' -- ${posixQuote(logicalPath)}`, options); const [size, mode] = output.toString('utf8').trim().split(/\s+/); return { size: Number(size), mode: Number.parseInt(mode, 8) }; }
   async read(logicalPath: string, options: { signal?: AbortSignal } = {}): Promise<Buffer> { const output = await this.#run(`base64 -- ${posixQuote(logicalPath)} | tr -d '\\n'`, options); return Buffer.from(output.toString('utf8').trim(), 'base64'); }

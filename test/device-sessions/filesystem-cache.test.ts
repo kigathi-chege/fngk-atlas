@@ -96,6 +96,31 @@ describe('FilesystemCache', () => {
     await sessions.close();
   });
 
+  it('does not poison an immediate retry after the last directory waiter cancels', async () => {
+    let requests = 0;
+    let firstStarted!: () => void;
+    const started = new Promise<void>(resolve => { firstStarted = resolve; });
+    const { cache, sessions } = cacheWith([() => route('device-a', options => new Promise((resolve, reject) => {
+      requests += 1;
+      if (requests === 1) {
+        firstStarted();
+        options?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('Terminal command cancelled.'), { code: 'cancelled' })), { once: true });
+        return;
+      }
+      resolve([{ name: 'recovered.txt', path: '/retry/recovered.txt', type: 'file', bytes: 9, modifiedAt: '2026-09-29T00:00:00.000Z', mode: 0o644 }]);
+    }))]);
+    const controller = new AbortController();
+    const abandoned = cache.list(scope, '/retry', { signal: controller.signal });
+    await started;
+    controller.abort();
+    await expect(abandoned).rejects.toMatchObject({ code: 'cancelled' });
+
+    const retry = await cache.list(scope, '/retry');
+    expect(retry.items).toEqual([expect.objectContaining({ name: 'recovered.txt' })]);
+    expect(requests).toBe(2);
+    await sessions.close();
+  });
+
   it('never serves a directory entry across profiles or devices', async () => {
     const requests: string[] = [];
     const { cache, sessions } = cacheWith([value => route(value.deviceId, async () => {

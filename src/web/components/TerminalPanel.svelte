@@ -5,6 +5,7 @@
   import RotateCw from '@lucide/svelte/icons/rotate-cw';
   import X from '@lucide/svelte/icons/x';
   import { api, atlasWebSocket } from '../lib/api.js';
+  import {atlasEvents} from '../lib/atlas-events.js';
   import type { WorkbenchState } from '../lib/workbench-state.js';
   import DocumentationHelp from './DocumentationHelp.svelte';
 
@@ -24,7 +25,8 @@
     if (!target.trim() || disposed) return;
     if (socket && !force && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
     clearTimeout(reconnectTimer);
-    const token = ++generation;
+    const token = ++generation, eventId=`terminal.connect:${params.panelId??target}:${token}`;
+    atlasEvents.begin({id:eventId,type:'terminal.command',title:`Connecting to ${target}`,contextId:target,panelId:params.panelId});
     socket?.close(1000);
     if(newSession||!restoreSessionId){sessionId = ''; streamId = '';terminal.reset();}approval = '';
     terminal.writeln(`\x1b[38;2;211;250;114mFNGK Atlas\x1b[0m  attaching to ${target}…`);
@@ -41,7 +43,7 @@
       if (value.type === 'ready') {
         sessionId = String(value.sessionId ?? '');
         streamId = String(value.streamId ?? '');
-        retries = 0; status = 'Live';
+        retries = 0; status = 'Live'; atlasEvents.resolve(eventId,{message:'Terminal connected'});
         void refreshSessions();
         terminal.writeln(`\x1b[2mconnected · ${value.target ?? target} · ${value.recordingMode ?? 'leased'}\x1b[0m`);
         resize();
@@ -51,18 +53,18 @@
         approval = String(value.approvalId);
         terminal.writeln(`\r\n\x1b[33mApproval required: ${value.approvalId}\x1b[0m`);
       } else if (value.type === 'collaboration') status = `Live · ${value.mode ?? value.collaborationMode ?? 'collaborative'}`;
-      else if (value.type === 'error') terminal.writeln(`\r\n\x1b[31m${value.message ?? value.code}\x1b[0m`);
-      else if (value.type === 'exit') { status = 'Exited'; terminal.writeln(`\r\n[exit ${value.exitCode ?? ''}]`); }
+      else if (value.type === 'error') { atlasEvents.fail(eventId,{message:String(value.message ?? value.code ?? 'Terminal error')});terminal.writeln(`\r\n\x1b[31m${value.message ?? value.code}\x1b[0m`); }
+      else if (value.type === 'exit') { status = 'Exited'; atlasEvents.resolve(eventId,{message:`Terminal exited ${value.exitCode ?? ''}`});terminal.writeln(`\r\n[exit ${value.exitCode ?? ''}]`); }
       state.appendActivity(`terminal · ${value.type}`);
     };
     current.onclose = event => {
       if (socket !== current || token !== generation || disposed) return;
       socket = undefined;
-      if (event.code === 1000) { status = 'Detached'; return; }
-      status = 'Interrupted';
+      if (event.code === 1000) { status = 'Detached'; atlasEvents.cancel(eventId); return; }
+      status = 'Interrupted'; atlasEvents.fail(eventId,{message:'Terminal stream interrupted'});
       if (retries < 6) reconnectTimer = setTimeout(() => connect(false,false,sessionId), Math.min(8000, 500 * 2 ** retries++));
     };
-    current.onerror = () => { if (socket === current) status = 'Connection error'; };
+    current.onerror = () => { if (socket === current) { status = 'Connection error';atlasEvents.fail(eventId,{message:'Terminal connection error'}); } };
   }
   function resize() { if (!terminal || !fit) return; try { fit.fit(); send({ type: 'resize', requestId: `resize-${++request}`, cols: terminal.cols, rows: terminal.rows }); } catch {} }
   function resolveApproval(decision: 'approve' | 'deny') { send({ type: 'nested_approval_resolve', requestId: `approval-${++request}`, approvalId: approval, decision }); approval = ''; }
