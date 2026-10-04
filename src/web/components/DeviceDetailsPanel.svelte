@@ -3,15 +3,16 @@
   import type {WorkbenchState} from '../lib/workbench-state.js';
   import {loadContextCatalog} from '../lib/context-catalog.js';
   import {deviceLabelStore,resolveDeviceIdentity} from '../lib/device-identity.js';
+  import {deviceAppearanceStore} from '../lib/device-appearance.js';
   export let state:WorkbenchState;
-  let device:any;let label='';let editing=false;
+  let device:any;let label='';let editing=false;let appearanceRevision=0;
   async function refresh(){const catalog=await loadContextCatalog(false,state.snapshot().connection.profile);device=catalog.contexts.find((item:any)=>item.id===state.snapshot().contextId&&item.kind==='fngk-device');label=device?.device?.id?deviceLabelStore.getLabel(device.device.id)??resolveDeviceIdentity(device.device.id).label:'';}
   function save(){if(device?.device?.id)deviceLabelStore.setLabel(device.device.id,label);editing=false;}
-  onMount(()=>{void refresh();return state.subscribe(()=>void refresh())});
+  onMount(()=>{void refresh();const unsubscribe=state.subscribe(()=>void refresh()),appearanceChanged=()=>appearanceRevision++;window.addEventListener('atlas:device-appearance-changed',appearanceChanged);return()=>{unsubscribe();window.removeEventListener('atlas:device-appearance-changed',appearanceChanged)}});
 </script>
 <section class="device-details" aria-label="Device details">
-  {#if device}{@const identity=resolveDeviceIdentity(device.device.id)}
-    <header><b class="glyph" style={`--atlas-device-color:var(--atlas-device-${identity.color})`}>{identity.glyph}</b><div><strong>{deviceLabelStore.getLabel(device.device.id)??identity.label}</strong><small>{device.name}</small></div></header>
+  {#if device}{@const identity=resolveDeviceIdentity(device.device.id)}{@const color=appearanceRevision>=0?deviceAppearanceStore.get(device.device.id).color??identity.color:identity.color}
+    <header><b class="glyph" style={`--atlas-device-color:var(--atlas-device-${color})`}>{identity.glyph}</b><div><strong>{deviceLabelStore.getLabel(device.device.id)??identity.label}</strong><small>{device.name}</small></div></header>
     {#if editing}<form onsubmit={(event)=>{event.preventDefault();save()}}><input bind:value={label} aria-label="Device label" maxlength="32"/><button>Save</button><button type="button" onclick={()=>editing=false}>Cancel</button></form>{:else}<div class="actions"><button class="rename" onclick={()=>editing=true}>Rename Atlas label</button><button onclick={()=>window.dispatchEvent(new Event('atlas:open-device-lifecycle'))}>Manage Device</button></div>{/if}
     <dl><div><dt>State</dt><dd>{device.online?'Online':'Offline'}</dd></div><div><dt>Platform</dt><dd>{device.device?.platform??'Unknown'}</dd></div><div><dt>Device ID</dt><dd>{device.device?.id}</dd></div></dl>
   {:else}<p>Select an FNGK device to inspect its local Atlas identity and connection state.</p>{/if}

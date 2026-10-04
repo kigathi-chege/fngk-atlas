@@ -7,12 +7,14 @@
   import type {WorkbenchState} from '../lib/workbench-state.js';
   import {loadContextCatalog} from '../lib/context-catalog.js';
   import {resolveDeviceIdentity} from '../lib/device-identity.js';
+  import {deviceAppearanceStore} from '../lib/device-appearance.js';
 
   export let state:WorkbenchState;
   let contexts:any[]=[];
   let loading=true;
   let error='';
   let menuDevice:any;
+  let appearanceRevision=0;
 
   const devices=()=>contexts.filter(context=>context.kind==='fngk-device');
   async function refresh(force=false){
@@ -25,12 +27,12 @@
   function openTerminal(device:any){select(device);window.dispatchEvent(new CustomEvent('atlas:open-terminal',{detail:{contextId:device.id,target:device.id,title:device.name??'Terminal',newSession:true}}));}
   function browse(device:any){select(device);window.dispatchEvent(new Event('atlas:focus-files'));}
   function manage(device:any){select(device);window.dispatchEvent(new Event('atlas:open-device-lifecycle'));}
-  onMount(()=>{void refresh();const unsubscribe=state.subscribe(()=>void refresh());return unsubscribe;});
+  onMount(()=>{void refresh();const unsubscribe=state.subscribe(()=>void refresh()),appearanceChanged=()=>appearanceRevision++;window.addEventListener('atlas:device-appearance-changed',appearanceChanged);return()=>{unsubscribe();window.removeEventListener('atlas:device-appearance-changed',appearanceChanged)}});
 </script>
 
 <section class="devices-panel" aria-label="Devices">
   <header class="devices-header"><div><strong>Devices</strong><small>{devices().length} available</small></div><button class="icon-button" title="Refresh devices" aria-label="Refresh devices" onclick={()=>refresh(true)} disabled={loading}><RefreshCw size={14}/></button></header>
-  {#if loading}<p class="devices-status">Discovering devices…</p>{:else if error}<p class="devices-error">{error}</p>{:else if !devices().length}<p class="devices-status">No FNGK devices discovered yet.</p>{:else}<div class="devices-list">{#each devices() as device (device.id)}{@const identity=resolveDeviceIdentity(device.device?.id??device.id)}<article class:active={state.snapshot().contextId===device.id} class:offline={!device.online} style={`--atlas-device-color:var(--atlas-device-${identity.color})`}><button class="device-select" onclick={()=>select(device)} oncontextmenu={(event)=>{event.preventDefault();menuDevice=device}} title={`${identity.label} · ${device.name??device.id}`}><b class="device-glyph">{identity.glyph}</b><span><strong>{identity.label}</strong><small>{device.name??device.id}</small></span><i class:online={device.online} aria-label={device.online?'Online':'Offline'}></i></button><button class="device-menu icon-button" title={`Actions for ${identity.label}`} aria-label={`Actions for ${identity.label}`} onclick={()=>menuDevice=menuDevice?.id===device.id?undefined:device}><CircleEllipsis size={14}/></button></article>{/each}</div>{/if}
+  {#if loading}<p class="devices-status">Discovering devices…</p>{:else if error}<p class="devices-error">{error}</p>{:else if !devices().length}<p class="devices-status">No FNGK devices discovered yet.</p>{:else}<div class="devices-list">{#each devices() as device (device.id)}{@const deviceId=device.device?.id??device.id}{@const identity=resolveDeviceIdentity(deviceId)}{@const color=appearanceRevision>=0?deviceAppearanceStore.get(deviceId).color??identity.color:identity.color}<article class:active={state.snapshot().contextId===device.id} class:offline={!device.online} style={`--atlas-device-color:var(--atlas-device-${color})`}><button class="device-select" onclick={()=>select(device)} oncontextmenu={(event)=>{event.preventDefault();menuDevice=device}} title={`${identity.label} · ${device.name??device.id}`}><b class="device-glyph">{identity.glyph}</b><span><strong>{identity.label}</strong><small>{device.name??device.id}</small></span><i class:online={device.online} aria-label={device.online?'Online':'Offline'}></i></button><button class="device-menu icon-button" title={`Actions for ${identity.label}`} aria-label={`Actions for ${identity.label}`} onclick={()=>menuDevice=menuDevice?.id===device.id?undefined:device}><CircleEllipsis size={14}/></button></article>{/each}</div>{/if}
   {#if menuDevice}<div class="device-actions" role="menu" aria-label="Device actions"><button role="menuitem" onclick={()=>openTerminal(menuDevice)}><SquareTerminal size={13}/>New terminal</button><button role="menuitem" onclick={()=>browse(menuDevice)}><FolderOpen size={13}/>Browse files</button><button role="menuitem" onclick={()=>manage(menuDevice)}><CircleEllipsis size={13}/>Manage device</button></div>{/if}
 </section>
 

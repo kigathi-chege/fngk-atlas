@@ -52,5 +52,6 @@ describe('permanent workbench geometry', () => {
     expect(host).toContain("devices:()=>import('./DevicesPanel.svelte')");
     expect(devices).toContain("aria-label=\"Devices\"");
     expect(devices).toContain("atlas:open-device-lifecycle");
+    expect(devices).toContain('deviceAppearanceStore.get');
   });
 });
