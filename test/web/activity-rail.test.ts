@@ -12,6 +12,7 @@ describe('ActivityRail',()=>{
   expect(rail).not.toContain('class="activity-rail-devices"');
   expect(rail).toContain('class="activity-rail-bottom"');
   expect(rail).toContain('aria-label="Open Device lifecycle"');
+  expect(rail).toContain('aria-label="Open Observability"');
   expect(rail).toContain('aria-label="Open Devices"');
   expect(css).toContain('.activity-rail-top,.activity-rail-bottom{flex:none}');
  });
