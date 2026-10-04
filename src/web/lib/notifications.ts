@@ -1,6 +1,6 @@
 import {atlasEvents,type AtlasEvent} from './atlas-events.js';
 export type Notice={id:string;message:string;level:'success'|'error'|'info'};
-export function noticeFromAtlasEvent(event:AtlasEvent):Notice|undefined{if(event.state==='success')return{id:event.id,message:event.message??event.title,level:'success'};if(event.state==='warning')return{id:event.id,message:event.message??event.title,level:'info'};if(event.state==='error')return{id:event.id,message:event.message??event.title,level:'error'};return undefined}
+export function noticeFromAtlasEvent(event:AtlasEvent):Notice|undefined{if(event.state==='success')return{id:event.id,message:event.message??event.title,level:'success'};if(event.state==='warning'||event.state==='cancelled')return{id:event.id,message:event.message??event.title,level:'info'};if(event.state==='error')return{id:event.id,message:event.message??event.title,level:'error'};return undefined}
 export class NotificationStore {
   #items:Notice[]=[];#listeners=new Set<(items:Notice[])=>void>();#timers=new Map<string,ReturnType<typeof setTimeout>>();
   snapshot(){return this.#items.map(item=>({...item}))}

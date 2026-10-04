@@ -56,13 +56,13 @@ describe('FilesystemTree navigation contract', () => {
     expect(source).toContain("metadata:{route:page.route?.id");
   });
 
-  it('publishes real load outcomes but silences superseded requests', async () => {
+  it('publishes every filesystem outcome, including a superseded request', async () => {
     const source = await readFile(resolve(root, 'src/web/components/FilesystemTree.svelte'), 'utf8');
     expect(source).toContain("import {atlasEvents}");
     expect(source).toContain("type:'filesystem.list'");
     expect(source).toContain('atlasEvents.resolve(eventId');
     expect(source).toContain('atlasEvents.fail(eventId');
-    expect(source).toContain('atlasEvents.removeLocal(eventId');
-    expect(source).not.toContain('atlasEvents.cancel(eventId');
+    expect(source).toContain('atlasEvents.cancel(eventId');
+    expect(source).not.toContain('atlasEvents.removeLocal(eventId');
   });
 });

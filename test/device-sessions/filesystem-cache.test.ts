@@ -54,13 +54,15 @@ describe('FilesystemCache', () => {
     await sessions.close();
   });
 
-  it('propagates a superseded navigation abort to the typed filesystem operation', async () => {
+  it('detaches a superseded navigation without interrupting the shared Device Session command', async () => {
     let aborted = false;
     let started!: () => void;
+    let complete!: (items: any[]) => void;
     const begun = new Promise<void>(resolve => { started = resolve; });
-    const { cache, sessions } = cacheWith([() => route('device-a', options => new Promise((_, reject) => {
+    const { cache, sessions } = cacheWith([() => route('device-a', options => new Promise((resolve, reject) => {
       started();
       options?.signal?.addEventListener('abort', () => { aborted = true; reject(Object.assign(new Error('cancelled'), { code: 'cancelled' })); }, { once: true });
+      complete = resolve;
     }))]);
     const controller = new AbortController();
     const pending = cache.list(scope, '/slow', { signal: controller.signal });
@@ -68,7 +70,8 @@ describe('FilesystemCache', () => {
     controller.abort();
 
     await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
-    expect(aborted).toBe(true);
+    expect(aborted).toBe(false);
+    complete([]);
     await sessions.close();
   });
 
@@ -96,15 +99,16 @@ describe('FilesystemCache', () => {
     await sessions.close();
   });
 
-  it('does not poison an immediate retry after the last directory waiter cancels', async () => {
+  it('lets an immediate refresh join an abandoned request instead of cancelling its terminal command', async () => {
     let requests = 0;
     let firstStarted!: () => void;
+    let complete!: (items: any[]) => void;
     const started = new Promise<void>(resolve => { firstStarted = resolve; });
-    const { cache, sessions } = cacheWith([() => route('device-a', options => new Promise((resolve, reject) => {
+    const { cache, sessions } = cacheWith([() => route('device-a', options => new Promise(resolve => {
       requests += 1;
       if (requests === 1) {
         firstStarted();
-        options?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('Terminal command cancelled.'), { code: 'cancelled' })), { once: true });
+        complete = resolve;
         return;
       }
       resolve([{ name: 'recovered.txt', path: '/retry/recovered.txt', type: 'file', bytes: 9, modifiedAt: '2026-09-29T00:00:00.000Z', mode: 0o644 }]);
@@ -115,9 +119,10 @@ describe('FilesystemCache', () => {
     controller.abort();
     await expect(abandoned).rejects.toMatchObject({ code: 'cancelled' });
 
-    const retry = await cache.list(scope, '/retry');
-    expect(retry.items).toEqual([expect.objectContaining({ name: 'recovered.txt' })]);
-    expect(requests).toBe(2);
+    const retry = cache.list(scope, '/retry');
+    complete([{ name: 'recovered.txt', path: '/retry/recovered.txt', type: 'file', bytes: 9, modifiedAt: '2026-09-29T00:00:00.000Z', mode: 0o644 }]);
+    expect((await retry).items).toEqual([expect.objectContaining({ name: 'recovered.txt' })]);
+    expect(requests).toBe(1);
     await sessions.close();
   });
 

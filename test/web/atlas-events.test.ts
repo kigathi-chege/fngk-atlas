@@ -28,13 +28,31 @@ describe('AtlasEventStore', () => {
     })]);
   });
 
-  it('caps unpinned history while retaining pinned entries', () => {
-    const store = createAtlasEventStore(undefined, 3);
+  it('retains every lifecycle outcome until the operator explicitly clears or deletes it', () => {
+    const store = createAtlasEventStore();
     store.begin({...pending('pinned'), title: 'Keep this'});
     store.pin('pinned');
     for (let index = 0; index < 4; index += 1) store.begin({...pending(`run-${index}`), title: `Run ${index}`});
     expect(store.snapshot().map(event => event.id)).toContain('pinned');
-    expect(store.snapshot()).toHaveLength(4);
+    expect(store.snapshot()).toHaveLength(5);
+  });
+
+  it('retains remote events regardless of their producer version metadata', () => {
+    const store = createAtlasEventStore();
+    store.upsertRemote({...pending('remote-old'), state: 'error', metadata: {producerVersion: '0.0.1', route: 'terminal'}});
+    expect(store.snapshot()).toEqual([expect.objectContaining({
+      id: 'remote-old', source: 'remote', state: 'error', metadata: {producerVersion: '0.0.1', route: 'terminal'},
+    })]);
+  });
+
+  it('retains an event state introduced by a newer Atlas version as a visible warning', () => {
+    const storage = new MemoryStorage();
+    storage.setItem('atlas.events.v1', JSON.stringify([{
+      ...pending('remote-new'), source: 'remote', state: 'recovering', metadata: {producerVersion: '99.0.0'},
+    }]));
+    expect(createAtlasEventStore(storage).snapshot()).toEqual([expect.objectContaining({
+      id: 'remote-new', state: 'warning', metadata: {producerVersion: '99.0.0', reportedState: 'recovering'},
+    })]);
   });
 
   it('recovers from malformed persistence and never writes sensitive metadata', () => {

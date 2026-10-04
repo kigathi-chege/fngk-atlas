@@ -12,8 +12,9 @@ describe('ObservabilityPanel cancellation policy',()=>{
     expect(source).toContain('pin(');
   });
 
-  it('keeps intentionally cancelled UI work out of the actionable event history',async()=>{
+  it('keeps cancelled work visible so a user can distinguish it from a failure',async()=>{
     const source=await readFile(resolve(root,'src/web/components/ObservabilityPanel.svelte'),'utf8');
-    expect(source).toContain("event.state!=='cancelled'");
+    expect(source).not.toContain("event.state!=='cancelled'");
+    expect(source).toContain('event.state');
   });
 });

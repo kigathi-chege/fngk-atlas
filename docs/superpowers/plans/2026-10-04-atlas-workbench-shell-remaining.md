@@ -4,7 +4,7 @@ This document is the maintained follow-on ledger for work intentionally not repr
 
 ## Audit record — 2026-10-04 completion loop
 
-- `npm test` passes: 116 test files and 390 assertions. `npm run check:web`, `npm run typecheck`, and `npm run build` pass.
+- `npm test` passes: 116 test files and 393 assertions. `npm run check:web`, `npm run typecheck`, and `npm run build` pass.
 - Focused desktop checks pass for retained-sidebar collapse/restore across reload, exact sidebar-width restoration, Workspace fallback geometry, live-terminal minimization without socket closure, and Device lifecycle selection.
 - The all-in-one Playwright process is not a valid final signal in this constrained runner: Chromium is killed after several independent pages because only about 0.5 GiB RAM and 47 MiB swap were free. Run the same focused desktop cases in a normal desktop/CI runner before release; do not reinterpret the kills as successful product checks.
 - The retained panel headers now own their controls. Dockview tabs are hidden only while their group contains no ordinary tab, so non-disposable panels no longer leak a duplicate tab strip.
@@ -30,7 +30,7 @@ This document is the maintained follow-on ledger for work intentionally not repr
 
 ## 4. Complete observability and notifications
 
-- [x] Adopt `AtlasEventStore` in file editor, filesystem search, deployment, live project, database, port, device, recovery, Calculator connection, agent-grant, and exact-head handoff workflows. Filesystem and terminal lifecycles are complete; event tests prohibit credentials, file bodies, search terms, and published URLs from event metadata.
+- [x] Adopt `AtlasEventStore` in file editor, filesystem search, deployment, live project, database, port, device, recovery, Calculator connection, agent-grant, and exact-head handoff workflows. Filesystem and terminal lifecycles preserve pending, success, error, and cancellation outcomes; remote cancellation is an actionable error, client cancellation remains visibly cancelled, and unfamiliar producer states are retained as warnings. Event tests prohibit credentials, file bodies, search terms, and published URLs from event metadata.
 - [x] Add a visible rail action for Observability, with filtering, pinning, persisted local event browsing, inspectable safe details, per-event local deletion, and clear-all confirmation. Connection-state correlation remains pending.
 - Make notification dismissal presentation-only and project event outcomes without replaying old history as new toasts.
 
@@ -43,6 +43,6 @@ This document is the maintained follow-on ledger for work intentionally not repr
 ## 6. Validate and release
 
 - [x] Emit filesystem loading lifecycle events.
-- [ ] Diagnose real filesystem routes against a live FNGK device, including the observed empty-tree regression. The UI now bypasses a cached empty page on explicit refresh and records safe route/session/cache correlation in Observability; a real-device reproduction plus route/session correlation evidence is still required before closing the historical `route_unavailable` incident.
+- [ ] Diagnose real filesystem routes against a live FNGK device, including the observed empty-tree regression. The request-abort race is covered: abandoning a browser waiter does not interrupt the shared persistent Device Session command, and an immediate refresh joins it. The UI records safe route/session/cache correlation in Observability; a real-device reproduction plus route/session correlation evidence is still required before closing the historical `route_unavailable` incident.
 - [ ] Add desktop E2E coverage for panel persistence, terminal continuity, collapse/restore, device identity, filesystem events, and Notify-offline operation.
 - Run full web/server/desktop builds and manual desktop acceptance before merge.

@@ -108,10 +108,12 @@ export class FilesystemCache {
       if (departed) return;
       departed = true;
       entry.waiters -= 1;
-      if (entry.waiters === 0 && !entry.settled) {
-        if (this.#pending.get(key) === entry) this.#pending.delete(key);
-        entry.controller.abort();
-      }
+      // A browser navigation/refresh only abandons its own HTTP waiter.  The
+      // in-flight command belongs to the shared Device Session: aborting it
+      // here cancels the terminal command for a refresh arriving milliseconds
+      // later, which presents as a spurious empty/failed filesystem tree.
+      // Let the bounded terminal-command timeout settle it and allow the next
+      // caller to join this pending request.
     };
     return await new Promise<T>((resolve, reject) => {
       const finish = () => { signal?.removeEventListener('abort', cancel); depart(); };

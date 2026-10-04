@@ -22,7 +22,7 @@
 
 - 364 automated tests, web typecheck, and production build pass.
 - Retained Devices/Device Details and Filesystem/Inspector regions exist; Workspace fallback, panel collapse, local device colors, local event history, and terminal/filesystem lifecycle events exist.
-- Known live defect: remote filesystem may receive `route_unavailable` after `cancelled: Terminal command cancelled`; no live-device correlation capture yet exists.
+- The request-abort path that could cancel a shared terminal command is fixed and covered. A live-device verification of the original empty-tree incident remains required before declaring the remote filesystem path fully closed.
 - Known integration gap: Notify bridge is an abstraction only; no local Notify checkout/profile or trusted publisher is present.
 
 ## Workstreams and execution order
@@ -49,7 +49,7 @@
 ### 4. Unified forms, loading, and observability
 
 1. Finish migration to `AtlasInput`, `AtlasSelect`, `AtlasTextarea`, and `AtlasCombobox`; introduce a searchable combobox only for dynamic/high-cardinality choices.
-2. Expand operation events across file editor, search, deployment, live projects, database, ports, recovery, and Agent Chat, using stable IDs and intentional cancellation silence.
+2. Expand operation events across file editor, search, deployment, live projects, database, ports, recovery, and Agent Chat, using stable IDs and visible, classified cancellation outcomes.
 3. Improve Observability with details links, connection/session diagnostics, one-item deletion, and clear-all confirmation.
 
 ### 5. Optional hosted extension and agent workflows

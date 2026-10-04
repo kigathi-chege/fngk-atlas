@@ -8,12 +8,12 @@ const event = (state: AtlasEvent['state']): AtlasEvent => ({
 });
 
 describe('notification event projection', () => {
-  it('only toasts outcomes that need immediate attention', () => {
+  it('projects every completed outcome, including cancellations, into a visible notification', () => {
     expect(noticeFromAtlasEvent(event('pending'))).toBeUndefined();
     expect(noticeFromAtlasEvent(event('success'))).toMatchObject({level: 'success'});
     expect(noticeFromAtlasEvent(event('warning'))).toMatchObject({level: 'info'});
     expect(noticeFromAtlasEvent(event('error'))).toMatchObject({level: 'error'});
-    expect(noticeFromAtlasEvent(event('cancelled'))).toBeUndefined();
+    expect(noticeFromAtlasEvent(event('cancelled'))).toMatchObject({level: 'info'});
   });
 
   it('subscribes to the retained event stream without replaying its full history as toasts', async () => {
