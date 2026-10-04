@@ -10,3 +10,11 @@ describe('DeviceDetailsPanel', () => it('uses Atlas local identity and never ren
   expect(source).toContain("new Event('atlas:open-device-lifecycle')");
   expect(source).not.toContain('/api/devices/rename');
 }));
+
+describe('DeviceLifecyclePanel observability', () => it('records lifecycle action outcomes without recording command content', async () => {
+  const source=await readFile(resolve(root,'src/web/components/DeviceLifecyclePanel.svelte'),'utf8');
+  expect(source).toContain("import {atlasEvents}");
+  expect(source).toContain("type:'device.lifecycle'");
+  expect(source).toContain('atlasEvents.resolve(eventId');
+  expect(source).toContain('atlasEvents.fail(eventId');
+}));
