@@ -1,5 +1,5 @@
 /** Versioned, framework-free rules for Atlas's retained workspace shell. */
-export const shellLayoutVersion=8;
+export const shellLayoutVersion=9;
 export const permanentPanelIds=['atlas.workspace','atlas.devices','atlas.device-details','atlas.filesystem','atlas.inspector','atlas.operations'] as const;
 const permanent=new Set<string>(permanentPanelIds);
 const bottomDockPanels=new Set(['atlas.observability','atlas.activity','atlas.metrics','atlas.terminal']);

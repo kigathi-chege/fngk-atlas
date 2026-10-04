@@ -31,6 +31,12 @@ describe('permanent workbench geometry', () => {
     const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/Workbench.svelte'),'utf8');
     expect(source).toContain('if(height<=36)continue');
   });
+  it('persists collapsed permanent panel state separately from the Dockview layout', async () => {
+    const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
+    const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/Workbench.svelte'),'utf8');
+    expect(source).toContain('collapsedPanels');
+    expect(source).toContain('collapsedPanels:[...collapsedPanels]');
+  });
   it('does not treat bottom-dock tools as ordinary center documents', async () => {
     const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
     const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/Workbench.svelte'),'utf8');

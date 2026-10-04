@@ -15,8 +15,8 @@ describe('workbench shell contract', () => {
     expect(isPermanentPanel('file:/srv/a.ts')).toBe(false);
   });
 
-  it('uses version 8 for the redesigned persisted shell', () => {
-    expect(shellLayoutVersion).toBe(8);
+  it('uses version 9 for the redesigned persisted shell', () => {
+    expect(shellLayoutVersion).toBe(9);
   });
 
   it('hides only the Workspace recovery tab while ordinary center documents exist', async () => {
