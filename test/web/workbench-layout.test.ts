@@ -37,6 +37,14 @@ describe('permanent workbench geometry', () => {
     expect(source).toContain('collapsedPanels');
     expect(source).toContain('collapsedPanels:[...collapsedPanels]');
   });
+  it('collapses retained sidebars in place so their mounted subscriptions survive', async () => {
+    const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
+    const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/Workbench.svelte'),'utf8');
+    expect(source).toContain('collapsedSidebars=new Set');
+    expect(source).toContain('const toggleSidebarCollapse=');
+    expect(source).toContain('sidebarCollapsed:[...collapsedSidebars]');
+    expect(source).toContain("window.addEventListener('atlas:toggle-sidebar-collapse'");
+  });
   it('does not treat bottom-dock tools as ordinary center documents', async () => {
     const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
     const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/Workbench.svelte'),'utf8');

@@ -12,7 +12,7 @@ This document is the maintained follow-on ledger for work intentionally not repr
 
 - [x] Enforce lower-panel one-third start, one-half maximum, and header-only collapse for Device Details and Inspector. Collapsed panels are exempt from the resize clamp.
 - [x] Keep the existing semantic Inspector mounted below Filesystem with no close affordance.
-- [ ] Keep sidebars mounted when collapsed rather than minimizing/removing them.
+- [x] Keep retained sidebars mounted when collapsed: their group contracts to a header-width rail, restores the prior width on focus, and preserves its mounted subscriptions across responsive changes.
 
 ## 3. Complete Devices experience
 
