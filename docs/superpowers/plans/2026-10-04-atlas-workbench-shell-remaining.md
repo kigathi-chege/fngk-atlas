@@ -4,25 +4,25 @@ This document is the maintained follow-on ledger for work intentionally not repr
 
 ## 1. Complete permanent shell behavior
 
-- [x] Suppress the Workspace recovery tab whenever ordinary center panels exist and reactivate it after the final ordinary panel closes.
-- Add `WorkspaceHeader` and replace permanent-region Dockview tab strips with integrated headers and explicit show/collapse controls.
-- Persist version-8 side widths, lower heights, collapsed states, and active internal modes; migrate or safely discard version-7 layouts.
+- [x] Suppress the Workspace recovery tab whenever ordinary center panels exist and reactivate it after the final ordinary panel closes. Bottom-dock panels no longer hide it.
+- [ ] Add `WorkspaceHeader` and replace permanent-region Dockview tab strips with integrated headers and explicit show/collapse controls.
+- [x] Persist version-9 side widths and lower-panel collapsed states; safely discard prior layouts that cannot represent the retained shell. Persist explicit lower heights and active internal modes next.
 
 ## 2. Complete retained regions
 
-- Enforce lower-panel one-third start, one-half maximum, and header-only collapse for Device Details and Inspector.
-- Add a real Inspector lower panel beside Filesystem, with device/file context and no dismissal semantics.
-- Keep sidebars mounted when collapsed rather than minimizing/removing them.
+- [x] Enforce lower-panel one-third start, one-half maximum, and header-only collapse for Device Details and Inspector. Collapsed panels are exempt from the resize clamp.
+- [x] Keep the existing semantic Inspector mounted below Filesystem with no close affordance.
+- [ ] Keep sidebars mounted when collapsed rather than minimizing/removing them.
 
 ## 3. Complete Devices experience
 
-- Replace the legacy Navigator content with a dedicated `DevicesPanel` and move repository/search controls to their relevant tool panels.
-- Add context menus and lifecycle actions: disconnect, remove device, remove stale connection, and explicit remove-device choice flow.
-- Finish deterministic device identity profile editing, tooltip/context card, scoped-tab accenting, and local preference tests.
+- [x] Replace the retained left region with a dedicated `DevicesPanel`; global search/tool entry points remain outside it.
+- [x] Add Devices contextual actions for terminal, files, and the existing lifecycle flow. The lifecycle flow provides disconnect, retire stale connection, and delete-device choices.
+- [ ] Finish deterministic device identity profile editing, tooltip/context card, scoped-tab accenting, and behavioural preference tests.
 
 ## 4. Complete observability and notifications
 
-- Adopt `AtlasEventStore` in terminal, file editor, search, deployment, live project, database, port, device, and recovery workflows.
+- [ ] Adopt `AtlasEventStore` in file editor, search, deployment, live project, database, port, device, and recovery workflows. Filesystem and terminal lifecycles are complete.
 - [x] Add a visible rail action for Observability, with filtering, pinning, and persisted local event browsing. Details and connection state remain pending.
 - Make notification dismissal presentation-only and project event outcomes without replaying old history as new toasts.
 
@@ -34,6 +34,7 @@ This document is the maintained follow-on ledger for work intentionally not repr
 
 ## 6. Validate and release
 
-- [x] Emit filesystem loading lifecycle events; diagnose real filesystem routes against a live FNGK device, including the observed empty-tree regression.
-- Add desktop E2E coverage for panel persistence, terminal continuity, collapse/restore, device identity, filesystem events, and Notify-offline operation.
+- [x] Emit filesystem loading lifecycle events.
+- [ ] Diagnose real filesystem routes against a live FNGK device, including the observed empty-tree regression. The server is returning `route_unavailable` after an underlying `cancelled: Terminal command cancelled` route failure; no live reproduction or route/session correlation evidence has yet been captured.
+- [ ] Add desktop E2E coverage for panel persistence, terminal continuity, collapse/restore, device identity, filesystem events, and Notify-offline operation.
 - Run full web/server/desktop builds and manual desktop acceptance before merge.
