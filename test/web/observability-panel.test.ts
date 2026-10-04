@@ -1,8 +1,19 @@
 import {readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
-import {describe, expect, it} from 'vitest';
+import {describe,expect,it} from 'vitest';
+
 const root=resolve(import.meta.dirname,'../..');
-describe('ObservabilityPanel',()=>it('projects retained local operation history and permits local cleanup',async()=>{
- const source=await readFile(resolve(root,'src/web/components/ObservabilityPanel.svelte'),'utf8');
- expect(source).toContain('atlasEvents.subscribe');expect(source).toContain('clearUnpinned');expect(source).toContain('pin(');
-}));
+
+describe('ObservabilityPanel cancellation policy',()=>{
+  it('projects retained local operation history and permits local cleanup',async()=>{
+    const source=await readFile(resolve(root,'src/web/components/ObservabilityPanel.svelte'),'utf8');
+    expect(source).toContain('atlasEvents.subscribe');
+    expect(source).toContain('clearUnpinned');
+    expect(source).toContain('pin(');
+  });
+
+  it('keeps intentionally cancelled UI work out of the actionable event history',async()=>{
+    const source=await readFile(resolve(root,'src/web/components/ObservabilityPanel.svelte'),'utf8');
+    expect(source).toContain("event.state!=='cancelled'");
+  });
+});

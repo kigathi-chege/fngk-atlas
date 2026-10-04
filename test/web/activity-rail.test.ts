@@ -15,5 +15,6 @@ describe('ActivityRail',()=>{
   expect(rail).toContain('aria-label="Open Observability"');
   expect(rail).toContain('aria-label="Open Devices"');
   expect(css).toContain('.activity-rail-top,.activity-rail-bottom{flex:none}');
+  expect(css).toContain('.activity-rail-bottom{margin-top:auto}');
  });
 });

@@ -16,8 +16,10 @@
   let sessionId = '', streamId = '', status = 'Opening…', approval = '';
   let sessions: Array<{id:string;title?:string;status?:string}> = [];
   let terminal: Terminal, fit: FitAddon, socket: WebSocket | undefined;
-  let disposed = false, retries = 0, reconnectTimer: ReturnType<typeof setTimeout>, generation = 0, request = 0, lastRequest = '';
-  const send = (value: Record<string, unknown>) => socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify(value));
+  let disposed = false, retries = 0, reconnectTimer: ReturnType<typeof setTimeout>, generation = 0, request = 0, lastRequest = '', terminalReady = false;
+  // A WebSocket opens before FNGK has attached the underlying terminal.  Initial
+  // resize/input must wait for its ready event or FNGK correctly rejects it.
+  const send = (value: Record<string, unknown>) => terminalReady && socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify(value));
   const encoded = (value: string) => { const bytes = new TextEncoder().encode(value); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary); };
 
   async function refreshSessions() { if (!target.startsWith('device:')) return; try { const value=await api<any>(`/api/fngk/sessions?deviceId=${encodeURIComponent(target.slice(7))}${params.profile?`&profile=${encodeURIComponent(params.profile)}`:''}`);sessions=value.sessions??[]; } catch {} }
@@ -28,6 +30,7 @@
     const token = ++generation, eventId=`terminal.connect:${params.panelId??target}:${token}`;
     atlasEvents.begin({id:eventId,type:'terminal.command',title:`Connecting to ${target}`,contextId:target,panelId:params.panelId});
     socket?.close(1000);
+    terminalReady = false;
     if(newSession||!restoreSessionId){sessionId = ''; streamId = '';terminal.reset();}approval = '';
     terminal.writeln(`\x1b[38;2;211;250;114mFNGK Atlas\x1b[0m  attaching to ${target}…`);
     status = retries ? 'Reconnecting…' : 'Connecting…';
@@ -41,6 +44,7 @@
       if (socket !== current || token !== generation) return;
       const value = JSON.parse(event.data);
       if (value.type === 'ready') {
+        terminalReady = true;
         sessionId = String(value.sessionId ?? '');
         streamId = String(value.streamId ?? '');
         retries = 0; status = 'Live'; atlasEvents.resolve(eventId,{message:'Terminal connected'});
@@ -53,13 +57,14 @@
         approval = String(value.approvalId);
         terminal.writeln(`\r\n\x1b[33mApproval required: ${value.approvalId}\x1b[0m`);
       } else if (value.type === 'collaboration') status = `Live · ${value.mode ?? value.collaborationMode ?? 'collaborative'}`;
-      else if (value.type === 'error') { atlasEvents.fail(eventId,{message:String(value.message ?? value.code ?? 'Terminal error')});terminal.writeln(`\r\n\x1b[31m${value.message ?? value.code}\x1b[0m`); }
+      else if (value.type === 'error') { terminalReady = false; atlasEvents.fail(eventId,{message:String(value.message ?? value.code ?? 'Terminal error')});terminal.writeln(`\r\n\x1b[31m${value.message ?? value.code}\x1b[0m`); }
       else if (value.type === 'exit') { status = 'Exited'; atlasEvents.resolve(eventId,{message:`Terminal exited ${value.exitCode ?? ''}`});terminal.writeln(`\r\n[exit ${value.exitCode ?? ''}]`); }
       state.appendActivity(`terminal · ${value.type}`);
     };
     current.onclose = event => {
       if (socket !== current || token !== generation || disposed) return;
       socket = undefined;
+      terminalReady = false;
       if (event.code === 1000) { status = 'Detached'; atlasEvents.cancel(eventId); return; }
       status = 'Interrupted'; atlasEvents.fail(eventId,{message:'Terminal stream interrupted'});
       if (retries < 6) reconnectTimer = setTimeout(() => connect(false,false,sessionId), Math.min(8000, 500 * 2 ** retries++));
