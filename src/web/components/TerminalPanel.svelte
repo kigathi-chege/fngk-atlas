@@ -23,6 +23,12 @@
   const encoded = (value: string) => { const bytes = new TextEncoder().encode(value); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary); };
 
   async function refreshSessions() { if (!target.startsWith('device:')) return; try { const value=await api<any>(`/api/fngk/sessions?deviceId=${encodeURIComponent(target.slice(7))}${params.profile?`&profile=${encodeURIComponent(params.profile)}`:''}`);sessions=value.sessions??[]; } catch {} }
+  function scheduleReconnect() {
+    if (disposed || retries >= 6) return;
+    clearTimeout(reconnectTimer);
+    const delay = Math.min(8000, 500 * 2 ** retries++);
+    reconnectTimer = setTimeout(() => connect(true, false, sessionId), delay);
+  }
   function connect(force = false, newSession = false, restoreSessionId = '') {
     if (!target.trim() || disposed) return;
     if (socket && !force && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
@@ -57,7 +63,7 @@
         approval = String(value.approvalId);
         terminal.writeln(`\r\n\x1b[33mApproval required: ${value.approvalId}\x1b[0m`);
       } else if (value.type === 'collaboration') status = `Live · ${value.mode ?? value.collaborationMode ?? 'collaborative'}`;
-      else if (value.type === 'error') { terminalReady = false; atlasEvents.fail(eventId,{message:String(value.message ?? value.code ?? 'Terminal error')});terminal.writeln(`\r\n\x1b[31m${value.message ?? value.code}\x1b[0m`); }
+      else if (value.type === 'error') { terminalReady = false; status = 'Interrupted'; atlasEvents.fail(eventId,{message:String(value.message ?? value.code ?? 'Terminal error')});terminal.writeln(`\r\n\x1b[31m${value.message ?? value.code}\x1b[0m`); scheduleReconnect(); }
       else if (value.type === 'exit') { status = 'Exited'; atlasEvents.resolve(eventId,{message:`Terminal exited ${value.exitCode ?? ''}`});terminal.writeln(`\r\n[exit ${value.exitCode ?? ''}]`); }
       state.appendActivity(`terminal · ${value.type}`);
     };
@@ -65,9 +71,9 @@
       if (socket !== current || token !== generation || disposed) return;
       socket = undefined;
       terminalReady = false;
-      if (event.code === 1000) { status = 'Detached'; atlasEvents.cancel(eventId); return; }
+      if (event.code === 1000) { status = 'Detached'; atlasEvents.cancel(eventId,{message:'Terminal stream detached; reconnecting.'}); scheduleReconnect(); return; }
       status = 'Interrupted'; atlasEvents.fail(eventId,{message:'Terminal stream interrupted'});
-      if (retries < 6) reconnectTimer = setTimeout(() => connect(false,false,sessionId), Math.min(8000, 500 * 2 ** retries++));
+      scheduleReconnect();
     };
     current.onerror = () => { if (socket === current) { status = 'Connection error';atlasEvents.fail(eventId,{message:'Terminal connection error'}); } };
   }
