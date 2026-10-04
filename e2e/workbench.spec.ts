@@ -45,14 +45,16 @@ test('operates commands entirely from the keyboard and reports empty results',as
   await expect(page.locator('.atlas-tab[data-panel-id^="buffer:"]')).toBeVisible();
 });
 
-test('restores minimized sidebars after reload without resetting the workspace',async({page})=>{
+test('restores collapsed sidebars from the activity rail after reload without resetting the workspace',async({page})=>{
   await page.goto('/');
   await expect(page.locator('.root-dock')).toHaveAttribute('data-layout-ready','true');
-  await page.getByRole('button',{name:'Minimize Filesystem',exact:true}).click();
+  await page.getByRole('button',{name:'Collapse Filesystem sidebar',exact:true}).click();
   await page.reload();
   await expect(page.locator('.root-dock')).toHaveAttribute('data-layout-ready','true');
-  await expect(page.locator('.tree-explorer')).toBeHidden();
-  await page.getByRole('button',{name:'Restore Filesystem',exact:true}).click();
+  // Dockview enforces a small intrinsic width for the retained header.  The
+  // content remains mounted; a compact (not zero-width) group is the contract.
+  await expect.poll(()=>page.locator('.tree-explorer').evaluate(node=>node.closest('.dv-groupview')?.getBoundingClientRect().width??0)).toBeLessThanOrEqual(100);
+  await page.getByRole('navigation',{name:'Atlas activity'}).getByRole('button',{name:'Open filesystem'}).click();
   await expect(page.locator('.tree-explorer')).toBeVisible();
 });
 
@@ -129,7 +131,7 @@ test('minimizes a live terminal without closing its socket or losing its rendere
   const before = opened.length;
   await page.getByRole('button', {name:'Minimize Terminal', exact:true}).click();
   await expect(page.locator('.terminal-panel')).toBeHidden();
-  await expect(page.getByRole('navigation', {name:'Terminal dock'})).toBeVisible();
+  await expect(page.getByRole('navigation', {name:'Pinned, workspace, and minimized panels'})).toBeVisible();
   await page.getByRole('button', {name:'Restore Terminal', exact:true}).click();
   await expect(page.locator('.terminal-panel')).toContainText('Live');
   expect(closed).toHaveLength(0);
@@ -347,7 +349,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
   await expect(page.getByRole("button", { name: "Open Device Atlas" })).toBeVisible();
   await expect(page.getByText("Functions & coverage", { exact: true })).toHaveCount(0);
   await expect(
-    page.getByText("Filesystem", { exact: true }).first(),
+    page.locator('.tree-explorer .atlas-permanent-header').getByText("Filesystem", { exact: true }),
   ).toBeVisible();
   await page
     .locator(".context-rail")
@@ -575,7 +577,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
     await close.click({ force: true });
   }
   const minimizeFilesystem = page.getByRole("button", {
-    name: "Minimize Filesystem",
+    name: "Collapse Filesystem sidebar",
   });
   if (await minimizeFilesystem.count()) await minimizeFilesystem.click();
   const minimizeAtlas = page.getByRole("button", { name: "Minimize Atlas" });
@@ -615,22 +617,15 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
   await expect(
     page.getByRole("menuitem", { name: "Pin current folder" }),
   ).toHaveCount(0);
-  const filesystemTab = page.getByRole("tab", {
-    name: "Filesystem",
-    exact: true,
-  });
-  await filesystemTab.click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Minimize" }).click();
-  const restoredFilesystem = page.getByRole("button", {
-    name: "Restore Filesystem",
-  });
-  await expect(restoredFilesystem).toBeVisible();
+  // Retained sidebars do not have disposable Dockview tabs.  Their integrated
+  // header collapses the mounted region and the activity rail restores it.
+  await page.getByRole("button", { name: "Collapse Filesystem sidebar" }).click();
+  await page
+    .getByRole("navigation", { name: "Atlas activity" })
+    .getByRole("button", { name: "Open filesystem" })
+    .click();
   await expect(
-    restoredFilesystem.locator("xpath=ancestor::nav"),
-  ).toHaveAttribute("aria-label", "Pinned, workspace, and minimized panels");
-  await restoredFilesystem.click();
-  await expect(
-    page.getByText("Filesystem", { exact: true }).first(),
+    page.locator('.tree-explorer .atlas-permanent-header').getByText("Filesystem", { exact: true }),
   ).toBeVisible();
   await expect(page.locator(".tree-explorer")).toBeVisible();
   expect(
@@ -967,7 +962,8 @@ test("discards the legacy workbench schema and restores a full-height six-pixel 
       box(document.querySelector(selector)?.closest(".dv-groupview") ?? null);
     return {
       workbench: box(document.querySelector(".workbench")),
-      navigator: group(".context-sidebar"),
+      navigator: group(".devices-panel"),
+      deviceDetails: group(".device-details"),
       center: group(".atlas-workspace-anchor"),
       filesystem: group(".tree-explorer"),
       legacy: localStorage.getItem("atlas.workbench.v2"),
@@ -975,12 +971,13 @@ test("discards the legacy workbench schema and restores a full-height six-pixel 
     };
   });
   expect(geometry.legacy).toBeNull();
-  expect(geometry.saved?.version).toBe(7);
+  expect(geometry.saved?.version).toBe(9);
   expect(geometry.navigator!.left - geometry.workbench!.left).toBe(6);
-  expect(geometry.workbench!.bottom - geometry.navigator!.bottom).toBe(6);
+  expect(geometry.deviceDetails!.top - geometry.navigator!.bottom).toBe(6);
+  expect(geometry.workbench!.bottom - geometry.deviceDetails!.bottom).toBe(6);
   expect(geometry.center!.left - geometry.navigator!.right).toBe(6);
   expect(geometry.filesystem!.left - geometry.center!.right).toBe(6);
-  expect(geometry.navigator!.height).toBe(geometry.workbench!.height - 12);
+  expect(geometry.center!.height).toBe(geometry.workbench!.height - 12);
 });
 
 test("keeps sidebar widths and the center workspace when central tabs close", async ({
@@ -1029,8 +1026,8 @@ test("keeps sidebar widths and the center workspace when central tabs close", as
   }));
   expect(after.left).toBe(widths.left);
   expect(after.right).toBe(widths.right);
-  await page.getByRole("button", { name: "Minimize Filesystem" }).click();
-  await page.getByRole("button", { name: "Restore Filesystem" }).click();
+  await page.getByRole("button", { name: "Collapse Filesystem sidebar" }).click();
+  await page.getByRole("navigation", { name: "Atlas activity" }).getByRole("button", { name: "Open filesystem" }).click();
   await expect(page.locator('.tree-explorer')).toBeVisible();
   const restored = await page.evaluate(() => {
     const right = document

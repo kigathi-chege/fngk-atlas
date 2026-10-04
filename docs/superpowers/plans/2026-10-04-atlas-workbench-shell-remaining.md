@@ -2,6 +2,14 @@
 
 This document is the maintained follow-on ledger for work intentionally not represented as complete by the initial shell implementation. It is ordered by dependency and must be kept current as each item lands.
 
+## Audit record — 2026-10-04 completion loop
+
+- `npm test` passes: 116 test files and 390 assertions. `npm run check:web`, `npm run typecheck`, and `npm run build` pass.
+- Focused desktop checks pass for retained-sidebar collapse/restore across reload, exact sidebar-width restoration, Workspace fallback geometry, live-terminal minimization without socket closure, and Device lifecycle selection.
+- The all-in-one Playwright process is not a valid final signal in this constrained runner: Chromium is killed after several independent pages because only about 0.5 GiB RAM and 47 MiB swap were free. Run the same focused desktop cases in a normal desktop/CI runner before release; do not reinterpret the kills as successful product checks.
+- The retained panel headers now own their controls. Dockview tabs are hidden only while their group contains no ordinary tab, so non-disposable panels no longer leak a duplicate tab strip.
+- Shared controls have been extended through the title command palette, Observability filter, and device-label editing. Remaining raw form controls should be migrated by workflow, with interaction tests, rather than by a broad mechanical replacement.
+
 ## 1. Complete permanent shell behavior
 
 - [x] Suppress the Workspace recovery tab whenever ordinary center panels exist and reactivate it after the final ordinary panel closes. Bottom-dock panels no longer hide it.

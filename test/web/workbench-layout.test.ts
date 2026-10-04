@@ -45,6 +45,14 @@ describe('permanent workbench geometry', () => {
     expect(source).toContain('sidebarCollapsed:[...collapsedSidebars]');
     expect(source).toContain("window.addEventListener('atlas:toggle-sidebar-collapse'");
   });
+  it('removes the duplicate Dockview strip only for a standalone permanent panel', async () => {
+    const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
+    const root=resolve(import.meta.dirname,'../../src/web');
+    const shell=await readFile(resolve(root,'components/Workbench.svelte'),'utf8');
+    const styles=await readFile(resolve(root,'enhancements.css'),'utf8');
+    expect(shell).toContain("classList.toggle('atlas-integrated-panel-group',onlyAnchor)");
+    expect(styles).toContain('.atlas-integrated-panel-group>.dv-tabs-and-actions-container{display:none!important}');
+  });
   it('does not treat bottom-dock tools as ordinary center documents', async () => {
     const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
     const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/Workbench.svelte'),'utf8');

@@ -10,4 +10,10 @@ describe('shared Atlas form controls', () => {
     }
     await expect(readFile(resolve(root, 'src/web/components/ui/form-controls.css'), 'utf8')).resolves.toContain('.atlas-combobox');
   });
+
+  it('preserves native constraints required by reusable device-profile inputs', async () => {
+    const input = await readFile(resolve(root, 'src/web/components/ui/AtlasInput.svelte'), 'utf8');
+    expect(input).toContain('export let maxlength');
+    expect(input).toContain('{maxlength}');
+  });
 });
