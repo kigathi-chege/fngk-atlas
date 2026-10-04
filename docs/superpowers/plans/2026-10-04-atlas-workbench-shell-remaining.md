@@ -23,7 +23,7 @@ This document is the maintained follow-on ledger for work intentionally not repr
 ## 4. Complete observability and notifications
 
 - [ ] Adopt `AtlasEventStore` in file editor, search, deployment, live project, database, port, device, and recovery workflows. Filesystem and terminal lifecycles are complete.
-- [x] Add a visible rail action for Observability, with filtering, pinning, and persisted local event browsing. Details and connection state remain pending.
+- [x] Add a visible rail action for Observability, with filtering, pinning, persisted local event browsing, inspectable safe details, per-event local deletion, and clear-all confirmation. Connection-state correlation remains pending.
 - Make notification dismissal presentation-only and project event outcomes without replaying old history as new toasts.
 
 ## 5. Complete Notify extension
