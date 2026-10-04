@@ -20,4 +20,10 @@ describe('permanent workbench geometry', () => {
     expect(source).toContain("['atlas.device-details','atlas.inspector']");
     expect(source).toContain('clampLowerPanelHeight(height,host.clientHeight)');
   });
+  it('collapses retained lower panels to a header height rather than removing them', async () => {
+    const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
+    const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/Workbench.svelte'),'utf8');
+    expect(source).toContain('atlas:toggle-panel-collapse');
+    expect(source).toContain("['atlas.device-details','atlas.inspector','atlas.operations']");
+  });
 });
