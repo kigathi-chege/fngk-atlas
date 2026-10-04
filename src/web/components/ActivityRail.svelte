@@ -2,10 +2,10 @@
   import {onMount} from 'svelte';import type {AtlasPanelDescriptor} from '../lib/panel-registry.js';import {chooseContext,type WorkbenchState} from '../lib/workbench-state.js';import {loadContextCatalog} from '../lib/context-catalog.js';
   import Search from '@lucide/svelte/icons/search';import FolderOpen from '@lucide/svelte/icons/folder-open';import SquareTerminal from '@lucide/svelte/icons/square-terminal';import Command from '@lucide/svelte/icons/command';import RefreshCw from '@lucide/svelte/icons/refresh-cw';import Settings2 from '@lucide/svelte/icons/settings-2';import BookOpen from '@lucide/svelte/icons/book-open';import Network from '@lucide/svelte/icons/network';import Bot from '@lucide/svelte/icons/bot';
   let minimizedNavigator=false;
-  const restoreNavigator=()=>{(document.querySelector('.root-dock') as any)?.__atlasRestorePanel?.('atlas.navigator')};
+  const restoreNavigator=()=>{(document.querySelector('.root-dock') as any)?.__atlasRestorePanel?.('atlas.devices')};
   export let state:WorkbenchState;let selected=state.snapshot().contextId;let loading=false;
   async function load(force=false){loading=true;try{const value=await loadContextCatalog(force,state.snapshot().connection.profile);selected=chooseContext(value.contexts??[],state.snapshot());state.setContext(selected,false);}finally{loading=false}}
-  onMount(()=>{minimizedNavigator=((document.querySelector('.root-dock') as any)?.__atlasMinimizedPanels??[]).some((item:AtlasPanelDescriptor)=>item.id==='atlas.navigator');const unsubscribe=state.subscribe(value=>selected=value.contextId);const panels=(event:Event)=>minimizedNavigator=((event as CustomEvent<any[]>).detail??[]).some(item=>item.id==='atlas.navigator');window.addEventListener('atlas:minimized-panels',panels);return()=>{unsubscribe();window.removeEventListener('atlas:minimized-panels',panels)}});
+  onMount(()=>{minimizedNavigator=((document.querySelector('.root-dock') as any)?.__atlasMinimizedPanels??[]).some((item:AtlasPanelDescriptor)=>item.id==='atlas.devices');const unsubscribe=state.subscribe(value=>selected=value.contextId);const panels=(event:Event)=>minimizedNavigator=((event as CustomEvent<any[]>).detail??[]).some(item=>item.id==='atlas.devices');window.addEventListener('atlas:minimized-panels',panels);return()=>{unsubscribe();window.removeEventListener('atlas:minimized-panels',panels)}});
 </script>
 <nav class="activity-rail context-rail" aria-label="Atlas activity">
   <div class="activity-rail-top">
