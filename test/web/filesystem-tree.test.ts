@@ -37,6 +37,25 @@ describe('FilesystemTree navigation contract', () => {
     expect(source).toContain('loadedPaths.has(root)&&!visibleRows.length');
   });
 
+  it('labels an empty tree as a successful empty route rather than a cancellation', async () => {
+    const source = await readFile(resolve(root, 'src/web/components/FilesystemTree.svelte'), 'utf8');
+    expect(source).toContain('loadedPaths.add(normalized)');
+    expect(source).toContain('route?.id');
+    expect(source).toContain('No filesystem entries returned');
+  });
+
+  it('asks the server to bypass a stale directory cache on refresh', async () => {
+    const source = await readFile(resolve(root, 'src/web/components/FilesystemTree.svelte'), 'utf8');
+    expect(source).toContain("const forceQuery=force?'&force=1':''");
+    expect(source).toContain('limit=500${forceQuery}');
+  });
+
+  it('records only safe route and session correlation for a completed remote listing', async () => {
+    const source = await readFile(resolve(root, 'src/web/components/FilesystemTree.svelte'), 'utf8');
+    expect(source).toContain('correlationId:page.diagnostics?.sessionId');
+    expect(source).toContain("metadata:{route:page.route?.id");
+  });
+
   it('publishes real load outcomes but silences superseded requests', async () => {
     const source = await readFile(resolve(root, 'src/web/components/FilesystemTree.svelte'), 'utf8');
     expect(source).toContain("import {atlasEvents}");

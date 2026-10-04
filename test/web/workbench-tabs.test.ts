@@ -8,3 +8,9 @@ describe('Workbench file previews',()=>it('uses preview metadata and italic titl
  expect(workbench).not.toContain(' · preview');
  expect(css).toContain('.atlas-file-tab.preview .atlas-file-tab-title{font-style:italic}');
 }));
+
+describe('Workspace fallback tab',()=>it('removes the workspace tab element when an ordinary tab is active',async()=>{
+ const source=await readFile(resolve(root,'src/web/components/Workbench.svelte'),'utf8');
+ expect(source).toContain('workspaceTab.hidden=!showWorkspace');
+ expect(source).toContain('workspaceTab.parentElement?.toggleAttribute');
+}));

@@ -1634,6 +1634,7 @@ export async function createApp(
       path?: string;
       cursor?: string;
       limit?: string;
+      force?: string;
     };
     try {
       const contextId=query.contextId??'local';
@@ -1642,7 +1643,7 @@ export async function createApp(
         return { ...page, route: routeEvidence(page.route) };
       }
       const scope = await scopeForContext(contextId, profileScope.current(), request, reply, query);
-      const page = await filesystemCache.list(scope, query.path ?? '/', { cursor: query.cursor, limit: Number(query.limit) || 100, signal: requestSignal(request, reply) });
+      const page = await filesystemCache.list(scope, query.path ?? '/', { cursor: query.cursor, limit: Number(query.limit) || 100, force: query.force === '1', signal: requestSignal(request, reply) });
       return { ...page, route: routeEvidence(page.route), diagnostics: filesystemCache.diagnostics(scope) };
     } catch (error) {
       const result = processError(error);
