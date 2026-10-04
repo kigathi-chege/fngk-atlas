@@ -2,7 +2,7 @@
   import { onDestroy, onMount, mount, unmount } from 'svelte';
   import { createDockview, themeAbyssSpaced, type GroupPanelPartInitParameters, type IContentRenderer, type ITabRenderer, type TabPartInitParameters } from 'dockview';
   import { writable } from 'svelte/store';
-  import {clampSidebarWidth,installWorkspaceSplitters} from '../lib/workspace-splitters.js';
+  import {clampLowerPanelHeight,clampSidebarWidth,installWorkspaceSplitters} from '../lib/workspace-splitters.js';
   import {isPermanentPanel,isWorkspaceFallbackVisible,shellLayoutVersion} from '../lib/workbench-shell.js';
   import PanelHost from './PanelHost.svelte';
   import SaveAsDialog from './SaveAsDialog.svelte';
@@ -36,7 +36,7 @@
   }
 
   onMount(()=>{
-    let dock:ReturnType<typeof createDockview>;const minimizing=new Set<string>(),responsiveMinimized=new Set<string>();let narrowMode=false;const sidebarWidths={left:clampSidebarWidth(undefined,host.clientWidth),right:clampSidebarWidth(undefined,host.clientWidth)};
+    let dock:ReturnType<typeof createDockview>;const minimizing=new Set<string>(),responsiveMinimized=new Set<string>();let narrowMode=false,constrainingLowerPanels=false;const sidebarWidths={left:clampSidebarWidth(undefined,host.clientWidth),right:clampSidebarWidth(undefined,host.clientWidth)};
     // The mounted workspace owns its scope. Selecting a Device does not replace live editors or terminals.
     const ownerScope={profile:state.snapshot().connection.profile??'default',contextId:state.snapshot().contextId};
     const workspaceScope=()=>ownerScope;
@@ -50,9 +50,9 @@
     const seed=()=>{
       const workspace=dock.getPanel('atlas.workspace')??dock.addPanel({id:'atlas.workspace',title:'Workspace',component:'workspace'});
       const navigator=dock.addPanel({id:'atlas.devices',title:'Devices',component:'navigator',initialWidth:sidebarWidths.left,position:{referencePanel:workspace,direction:'left'}});
-      dock.addPanel({id:'atlas.device-details',title:'Device details',component:'device-details',initialHeight:Math.round(host.clientHeight/3),position:{referencePanel:navigator,direction:'below'}});
+      dock.addPanel({id:'atlas.device-details',title:'Device details',component:'device-details',initialHeight:clampLowerPanelHeight(undefined,host.clientHeight),position:{referencePanel:navigator,direction:'below'}});
       const files=dock.addPanel({id:'atlas.filesystem',title:'Filesystem',component:'filesystem',initialWidth:sidebarWidths.right,position:{referencePanel:workspace,direction:'right'}});
-      dock.addPanel({id:'atlas.inspector',title:'Inspector',component:'details',position:{referencePanel:files,direction:'below'}});
+      dock.addPanel({id:'atlas.inspector',title:'Inspector',component:'details',initialHeight:clampLowerPanelHeight(undefined,host.clientHeight),position:{referencePanel:files,direction:'below'}});
       workspace.api.setActive();
     };
     if(!restored){dock.clear();seed();}
@@ -66,7 +66,8 @@
     const operational=(id:string,component?:string)=>['atlas.operations','atlas.terminal','atlas.metrics','atlas.activity'].includes(id)||component==='logs'||component==='terminal'||/^deployment:.+:(runs|logs|browser|history)$/.test(id);
     const rightSidebar=(id:string)=>['atlas.filesystem','atlas.intelligence'].includes(id);
     const willDrop=dock.onWillDrop((event:any)=>{const panel=event.panel,target=event.group;if(!panel||!target)return;const ids=new Set<string>(target.panels.map((value:any)=>String(value.id))),component=panel.api.component;if(ids.has('atlas.devices')&&panel.id!=='atlas.devices')event.preventDefault();else if([...ids].some(rightSidebar)&&!rightSidebar(panel.id))event.preventDefault();else if(ids.has('atlas.inspector')&&panel.id!=='atlas.inspector')event.preventDefault();else if(ids.has('atlas.operations')&&!operational(panel.id,component))event.preventDefault();else if(operational(panel.id,component)&&!ids.has('atlas.operations'))event.preventDefault();else if((panel.id==='atlas.devices'||rightSidebar(panel.id)||panel.id==='atlas.inspector')&&!ids.has(panel.id)&&!(rightSidebar(panel.id)&&[...ids].some(rightSidebar)))event.preventDefault();});
-    const layout=dock.onDidLayoutChange(persist),added=dock.onDidAddPanel(()=>queueMicrotask(syncWorkspace)),removed=dock.onDidRemovePanel((panel:any)=>{const wasMinimized=minimizing.delete(panel.id),params=panel.api.getParameters() as {bufferId?:string};if(!wasMinimized){dirtyPanels.delete(panel.id);panelRegistry.forget(panel.id);if(params.bufferId)atlasBuffers.remove(params.bufferId)}if(panel.id==='atlas.devices'&&dock.panels.length>0&&!wasMinimized){const reference=dock.getPanel('atlas.workspace')??dock.panels[0];const added=dock.addPanel({id:'atlas.devices',title:'Devices',component:'navigator',position:reference?{referencePanel:reference,direction:'left'}:undefined});remember(added);}updateMinimized();syncEmpty();queueMicrotask(syncWorkspace);persist();});
+    const constrainLowerPanels=()=>{if(constrainingLowerPanels)return;for(const id of ['atlas.device-details','atlas.inspector']){const panel=dock.getPanel(id),height=panel?.api.group.api.boundingBox?.height;if(!panel||!height)continue;const clamped=clampLowerPanelHeight(height,host.clientHeight);if(Math.abs(clamped-height)<2)continue;constrainingLowerPanels=true;panel.api.group.api.setSize({height:clamped});queueMicrotask(()=>constrainingLowerPanels=false);}};
+    const layout=dock.onDidLayoutChange(()=>{constrainLowerPanels();persist()}),added=dock.onDidAddPanel(()=>queueMicrotask(syncWorkspace)),removed=dock.onDidRemovePanel((panel:any)=>{const wasMinimized=minimizing.delete(panel.id),params=panel.api.getParameters() as {bufferId?:string};if(!wasMinimized){dirtyPanels.delete(panel.id);panelRegistry.forget(panel.id);if(params.bufferId)atlasBuffers.remove(params.bufferId)}if(panel.id==='atlas.devices'&&dock.panels.length>0&&!wasMinimized){const reference=dock.getPanel('atlas.workspace')??dock.panels[0];const added=dock.addPanel({id:'atlas.devices',title:'Devices',component:'navigator',position:reference?{referencePanel:reference,direction:'left'}:undefined});remember(added);}updateMinimized();syncEmpty();queueMicrotask(syncWorkspace);persist();});
     const restorePanel=(id:string)=>{const descriptor=panelRegistry.restore(id);if(!descriptor)return;let panel=dock.getPanel(id);if(!panel){const sidebar=id==='atlas.devices'?'left':rightSidebar(id)?'right':undefined,isOperational=operational(id,descriptor.kind),reference=id==='atlas.intelligence'?(dock.getPanel('atlas.filesystem')??dock.getPanel('atlas.workspace')!):sidebar?dock.getPanel('atlas.workspace')??dock.panels[0]:isOperational?ensureOperations():dock.getPanel('atlas.workspace')??dock.panels[0];panel=dock.addPanel({id:descriptor.id,title:descriptor.title,component:descriptor.kind,tabComponent:descriptor.kind==='file'?'guarded-file':undefined,params:descriptor.params,renderer:['file','terminal','agent-chat'].includes(descriptor.kind)?'always':undefined,initialWidth:sidebar?sidebarWidths[sidebar]:undefined,position:reference?{referencePanel:reference,...(sidebar&&id!=='atlas.intelligence'?{direction:sidebar}:{})}:undefined});}panel.api.setActive();updateMinimized();syncEmpty();};
     const adaptNarrowLayout=()=>{const narrow=window.innerWidth<=700;if(narrow===narrowMode)return;if(narrow){narrowMode=true;for(const id of ['atlas.devices','atlas.filesystem','atlas.inspector']){const panel=dock.getPanel(id);if(!panel)continue;responsiveMinimized.add(id);minimizePanel(panel)}updateMinimized();return}for(const id of responsiveMinimized)restorePanel(id);responsiveMinimized.clear();narrowMode=false;updateMinimized();persist()};
     const forgetPanel=(id:string)=>{if(dirtyPanels.has(id)){restorePanel(id);return;}retainedRenderers.get(id)?.dispose();panelRegistry.forget(id);updateMinimized()};

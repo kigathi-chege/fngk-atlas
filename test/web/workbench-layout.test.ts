@@ -13,4 +13,11 @@ describe('permanent workbench geometry', () => {
     expect(clampLowerPanelHeight(700, 900)).toBe(450);
   });
   it('names the five retained permanent panels', () => expect(permanentPanelIds).toEqual(['atlas.devices','atlas.device-details','atlas.filesystem','atlas.inspector','atlas.operations']));
+  it('applies the lower-panel clamp in the live Dockview shell', async () => {
+    const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
+    const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/Workbench.svelte'),'utf8');
+    expect(source).toContain('const constrainLowerPanels=');
+    expect(source).toContain("['atlas.device-details','atlas.inspector']");
+    expect(source).toContain('clampLowerPanelHeight(height,host.clientHeight)');
+  });
 });

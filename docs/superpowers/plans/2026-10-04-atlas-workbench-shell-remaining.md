@@ -4,7 +4,7 @@ This document is the maintained follow-on ledger for work intentionally not repr
 
 ## 1. Complete permanent shell behavior
 
-- Replace the Workspace Dockview tab with a true hidden recovery panel whenever ordinary center panels exist; restore it only after the final ordinary center panel closes.
+- [x] Suppress the Workspace recovery tab whenever ordinary center panels exist and reactivate it after the final ordinary panel closes.
 - Add `WorkspaceHeader` and replace permanent-region Dockview tab strips with integrated headers and explicit show/collapse controls.
 - Persist version-8 side widths, lower heights, collapsed states, and active internal modes; migrate or safely discard version-7 layouts.
 
@@ -23,7 +23,7 @@ This document is the maintained follow-on ledger for work intentionally not repr
 ## 4. Complete observability and notifications
 
 - Adopt `AtlasEventStore` in terminal, file editor, search, deployment, live project, database, port, device, and recovery workflows.
-- Add a visible command/rail action for Observability plus filtering, details, connection state, and persisted local event browsing.
+- [x] Add a visible rail action for Observability, with filtering, pinning, and persisted local event browsing. Details and connection state remain pending.
 - Make notification dismissal presentation-only and project event outcomes without replaying old history as new toasts.
 
 ## 5. Complete Notify extension
@@ -34,6 +34,6 @@ This document is the maintained follow-on ledger for work intentionally not repr
 
 ## 6. Validate and release
 
-- Diagnose real filesystem routes against a live FNGK device, including the observed empty-tree regression.
+- [x] Emit filesystem loading lifecycle events; diagnose real filesystem routes against a live FNGK device, including the observed empty-tree regression.
 - Add desktop E2E coverage for panel persistence, terminal continuity, collapse/restore, device identity, filesystem events, and Notify-offline operation.
 - Run full web/server/desktop builds and manual desktop acceptance before merge.
