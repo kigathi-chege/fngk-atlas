@@ -50,6 +50,7 @@
     const seed=()=>{
       const workspace=dock.getPanel('atlas.workspace')??dock.addPanel({id:'atlas.workspace',title:'Workspace',component:'workspace'});
       const navigator=dock.addPanel({id:'atlas.devices',title:'Devices',component:'navigator',initialWidth:sidebarWidths.left,position:{referencePanel:workspace,direction:'left'}});
+      dock.addPanel({id:'atlas.device-details',title:'Device details',component:'device-details',initialHeight:Math.round(host.clientHeight/3),position:{referencePanel:navigator,direction:'below'}});
       const files=dock.addPanel({id:'atlas.filesystem',title:'Filesystem',component:'filesystem',initialWidth:sidebarWidths.right,position:{referencePanel:workspace,direction:'right'}});
       dock.addPanel({id:'atlas.inspector',title:'Inspector',component:'details',position:{referencePanel:files,direction:'below'}});
       workspace.api.setActive();
