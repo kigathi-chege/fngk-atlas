@@ -1,7 +1,7 @@
 # Atlas workbench shell, Devices explorer, and observability design
 
-**Status:** proposed; awaiting maintainer review before implementation planning  
-**Date:** 2026-10-03  
+**Status:** proposed; awaiting maintainer review before implementation planning
+**Date:** 2026-10-03
 **Owners:** FNGK Atlas maintainers
 
 ## Purpose

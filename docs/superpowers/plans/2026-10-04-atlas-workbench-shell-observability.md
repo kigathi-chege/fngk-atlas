@@ -66,7 +66,7 @@ Assert canonical UUID normalization, stable one-word labels/glyphs/colors, inval
 
 - [ ] **Step 2: Run the focused tests to verify they fail**
 
-Run: `npm test -- --run test/web/device-identity.test.ts test/web/device-appearance.test.ts`  
+Run: `npm test -- --run test/web/device-identity.test.ts test/web/device-appearance.test.ts`
 Expected: FAIL because the identity resolver and label store do not exist.
 
 - [ ] **Step 3: Implement resolver and label store**
@@ -75,7 +75,7 @@ Use a documented stable hash and fixed ordered vocabulary. Keep colors from the 
 
 - [ ] **Step 4: Run focused tests to verify they pass**
 
-Run: `npm test -- --run test/web/device-identity.test.ts test/web/device-appearance.test.ts`  
+Run: `npm test -- --run test/web/device-identity.test.ts test/web/device-appearance.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -104,7 +104,7 @@ Assert lifecycle replacement by ID, 500-unpinned-entry cap, pinned-entry retenti
 
 - [ ] **Step 2: Run focused tests to verify they fail**
 
-Run: `npm test -- --run test/web/atlas-events.test.ts test/web/notification-stack.test.ts`  
+Run: `npm test -- --run test/web/atlas-events.test.ts test/web/notification-stack.test.ts`
 Expected: FAIL because the local event model is absent.
 
 - [ ] **Step 3: Implement the store and adapt notifications**
@@ -113,7 +113,7 @@ Retain the existing `atlas:notice` compatibility event as an adapter into the st
 
 - [ ] **Step 4: Run focused tests to verify they pass**
 
-Run: `npm test -- --run test/web/atlas-events.test.ts test/web/notification-stack.test.ts`  
+Run: `npm test -- --run test/web/atlas-events.test.ts test/web/notification-stack.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -144,7 +144,7 @@ Assert absent configuration is a working local-only state; retryable publish fai
 
 - [ ] **Step 2: Run the focused tests to verify they fail**
 
-Run: `npm test -- --run test/web/notify-bridge.test.ts test/integration/notify-atlas-probe.test.ts`  
+Run: `npm test -- --run test/web/notify-bridge.test.ts test/integration/notify-atlas-probe.test.ts`
 Expected: FAIL because the bridge/profile/probe do not exist.
 
 - [ ] **Step 3: Add the local service profile and onboarding probe**
@@ -157,10 +157,10 @@ Publish only allow-listed Atlas event schemas, batch/retry non-blockingly, prese
 
 - [ ] **Step 5: Run focused tests and local probe**
 
-Run: `npm test -- --run test/web/notify-bridge.test.ts test/integration/notify-atlas-probe.test.ts`  
+Run: `npm test -- --run test/web/notify-bridge.test.ts test/integration/notify-atlas-probe.test.ts`
 Expected: PASS.
 
-Run: `NOTIFY_SOURCE=/absolute/path/to/notify npm run notify:local && npm run notify:probe`  
+Run: `NOTIFY_SOURCE=/absolute/path/to/notify npm run notify:local && npm run notify:probe`
 Expected: registered Atlas event publishes, scoped read-back returns only Atlas development scope, and notification SSE receives one frame.
 
 - [ ] **Step 6: Commit**
@@ -191,7 +191,7 @@ Assert Workspace is hidden while any ordinary center panel is open, appears/acti
 
 - [ ] **Step 2: Run the focused tests to verify they fail**
 
-Run: `npm test -- --run test/web/workbench-model.test.ts test/web/workbench-tabs.test.ts test/web/workspace-persistence.test.ts`  
+Run: `npm test -- --run test/web/workbench-model.test.ts test/web/workbench-tabs.test.ts test/web/workspace-persistence.test.ts`
 Expected: FAIL because Workspace remains a visible normal anchor and geometry version 8 is absent.
 
 - [ ] **Step 3: Implement `WorkspaceHeader` and fallback behavior**
@@ -204,7 +204,7 @@ Wire explicit Devices, Filesystem/Inspector, and Operations visibility toggles w
 
 - [ ] **Step 5: Run focused tests to verify they pass**
 
-Run: `npm test -- --run test/web/workbench-model.test.ts test/web/workbench-tabs.test.ts test/web/workspace-persistence.test.ts`  
+Run: `npm test -- --run test/web/workbench-model.test.ts test/web/workbench-tabs.test.ts test/web/workspace-persistence.test.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -232,7 +232,7 @@ Assert 20% startup width clamps to 240–420px; panel resizing persists only cla
 
 - [ ] **Step 2: Run the focused test to verify it fails**
 
-Run: `npm test -- --run test/web/workbench-layout.test.ts`  
+Run: `npm test -- --run test/web/workbench-layout.test.ts`
 Expected: FAIL because current layout uses unconstrained 320/332px sidebars.
 
 - [ ] **Step 3: Seed and retain the five permanent panels**
@@ -245,7 +245,7 @@ Apply constraints after Dockview layout/resize events, avoid feedback loops, and
 
 - [ ] **Step 5: Run focused test to verify it passes**
 
-Run: `npm test -- --run test/web/workbench-layout.test.ts`  
+Run: `npm test -- --run test/web/workbench-layout.test.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -277,7 +277,7 @@ Assert no Device list exists in ActivityRail; Device rows expose one-word label,
 
 - [ ] **Step 2: Run focused tests to verify they fail**
 
-Run: `npm test -- --run test/web/devices-panel.test.ts test/web/activity-rail.test.ts test/web/workbench-tabs.test.ts`  
+Run: `npm test -- --run test/web/devices-panel.test.ts test/web/activity-rail.test.ts test/web/workbench-tabs.test.ts`
 Expected: FAIL because the rail owns Device list and no retained Devices panel exists.
 
 - [ ] **Step 3: Implement Devices and Details panels**
@@ -290,7 +290,7 @@ Keep only global icons in `ActivityRail`. Resolve tab appearance from explicit `
 
 - [ ] **Step 5: Run focused tests to verify they pass**
 
-Run: `npm test -- --run test/web/devices-panel.test.ts test/web/activity-rail.test.ts test/web/workbench-tabs.test.ts`  
+Run: `npm test -- --run test/web/devices-panel.test.ts test/web/activity-rail.test.ts test/web/workbench-tabs.test.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -322,7 +322,7 @@ Assert root/folder/file failures emit visible error events rather than empty sta
 
 - [ ] **Step 2: Run focused tests to verify they fail**
 
-Run: `npm test -- --run test/web/filesystem-tree.test.ts test/web/observability-panel.test.ts`  
+Run: `npm test -- --run test/web/filesystem-tree.test.ts test/web/observability-panel.test.ts`
 Expected: FAIL because operations are panel-local and observability is not the event-store viewer.
 
 - [ ] **Step 3: Publish filesystem/inspector lifecycle events**
@@ -335,7 +335,7 @@ Reuse Operations docking; add activity, connections, logs, and details modes as 
 
 - [ ] **Step 5: Run focused tests to verify they pass**
 
-Run: `npm test -- --run test/web/filesystem-tree.test.ts test/web/observability-panel.test.ts`  
+Run: `npm test -- --run test/web/filesystem-tree.test.ts test/web/observability-panel.test.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -362,7 +362,7 @@ Assert file open/save, terminal connect/reconnect, search, database actions, dep
 
 - [ ] **Step 2: Run the focused test to verify it fails**
 
-Run: `npm test -- --run test/web/tool-event-lifecycle.test.ts`  
+Run: `npm test -- --run test/web/tool-event-lifecycle.test.ts`
 Expected: FAIL because panel lifecycle publication is incomplete.
 
 - [ ] **Step 3: Adopt the shared adapter across panels**
@@ -375,7 +375,7 @@ Explain local-first operation, local Notify setup/probe, event retention, recipi
 
 - [ ] **Step 5: Run focused test to verify it passes**
 
-Run: `npm test -- --run test/web/tool-event-lifecycle.test.ts`  
+Run: `npm test -- --run test/web/tool-event-lifecycle.test.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -405,12 +405,12 @@ Assert Atlas works locally with no endpoint; then assert local Notify publish/re
 
 - [ ] **Step 3: Run end-to-end suite**
 
-Run: `npm run test:e2e -- --project=desktop`  
+Run: `npm run test:e2e -- --project=desktop`
 Expected: PASS, with no leaked internal terminals or blocked local operation when Notify is unavailable.
 
 - [ ] **Step 4: Run full verification**
 
-Run: `npm test -- --run && npm run check:web && npm run build && npm run desktop:build`  
+Run: `npm test -- --run && npm run check:web && npm run build && npm run desktop:build`
 Expected: all tests and checks pass; desktop build succeeds after exact-head FNGK artifacts are built.
 
 - [ ] **Step 5: Perform manual desktop pass**
