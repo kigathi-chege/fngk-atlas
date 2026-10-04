@@ -35,6 +35,6 @@ This document is the maintained follow-on ledger for work intentionally not repr
 ## 6. Validate and release
 
 - [x] Emit filesystem loading lifecycle events.
-- [ ] Diagnose real filesystem routes against a live FNGK device, including the observed empty-tree regression. The server is returning `route_unavailable` after an underlying `cancelled: Terminal command cancelled` route failure; no live reproduction or route/session correlation evidence has yet been captured.
+- [ ] Diagnose real filesystem routes against a live FNGK device, including the observed empty-tree regression. Cache cancellation/retry isolation is now covered, and malformed terminal directory output is rejected instead of silently appearing as an empty tree. A real-device reproduction plus route/session correlation evidence is still required before closing the historical `route_unavailable` incident.
 - [ ] Add desktop E2E coverage for panel persistence, terminal continuity, collapse/restore, device identity, filesystem events, and Notify-offline operation.
 - Run full web/server/desktop builds and manual desktop acceptance before merge.
