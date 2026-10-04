@@ -65,7 +65,11 @@ export class TerminalSession extends EventEmitter {
     }
     if (event.type === 'ready' && typeof event.sessionId === 'string') this.sessionId = event.sessionId;
     this.emit('event', event);
-    this.emit(event.type, event);
+    // `error` is special to Node's EventEmitter: using it for a normal FNGK
+    // protocol frame makes a command-level failure look like a broken local
+    // transport. Keep protocol errors observable without triggering session
+    // recovery or cancelling unrelated work on the shared Device Session.
+    this.emit(event.type === 'error' ? 'terminal_error' : event.type, event);
   }
 
   send(message: TerminalInput): boolean {

@@ -1,7 +1,7 @@
 import { once } from 'node:events';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { FngkProcessClient } from '../../src/fngk/process-client.js';
 import { FngkTerminalCommandExecutor, type CommandExecutor } from '../../src/transports/terminal-command.js';
 import { TerminalFileTransport } from '../../src/transports/terminal-file.js';
@@ -14,6 +14,24 @@ describe('terminal-backed effective access', () => {
     const controller = new AbortController(); controller.abort();
     class Session extends EventEmitter { sendCommand() { throw new Error('a cancelled request must not reach the terminal'); } interrupt() {} }
     await expect(new FngkTerminalCommandExecutor(new Session() as any).execute('printf payload', { signal: controller.signal })).rejects.toMatchObject({ code: 'cancelled' });
+  });
+
+  it('surfaces a matching FNGK protocol error without interrupting the shared terminal', async () => {
+    class Session extends EventEmitter {
+      interrupt = vi.fn();
+      sendCommand(_command: string, requestId: string) {
+        queueMicrotask(() => this.emit('event', {
+          type: 'error', protocolVersion: 'fngk.terminal.v1', requestId,
+          code: 'command_rejected', message: 'Filesystem access was rejected.',
+        }));
+        return true;
+      }
+    }
+    const session = new Session();
+    await expect(new FngkTerminalCommandExecutor(session as any).execute('find /')).rejects.toMatchObject({
+      code: 'command_rejected', message: 'Filesystem access was rejected.',
+    });
+    expect(session.interrupt).not.toHaveBeenCalled();
   });
 
   it('extracts only framed output from a normal FNGK terminal command', async () => {

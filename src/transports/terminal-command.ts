@@ -29,6 +29,13 @@ export class FngkTerminalCommandExecutor implements CommandExecutor {
         }
       };
       const receive = (event: TerminalEvent) => {
+        if (event.type === 'error' && event.requestId === requestId) {
+          finish(Object.assign(
+            new Error(typeof event.message === 'string' ? event.message : 'FNGK terminal command failed.'),
+            { code: typeof event.code === 'string' ? event.code : 'terminal_command_failed' },
+          ));
+          return;
+        }
         if ((event.type === 'output' || event.type === 'replay') && typeof event.bodyBase64 === 'string') chunks.push(Buffer.from(event.bodyBase64, 'base64'));
         if (event.type === 'command_state' && event.requestId === requestId && (event.status === 'succeeded' || event.status === 'failed')) completion = event;
         tryFinish();
