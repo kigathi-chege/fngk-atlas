@@ -26,4 +26,25 @@ describe('permanent workbench geometry', () => {
     expect(source).toContain('atlas:toggle-panel-collapse');
     expect(source).toContain("['atlas.device-details','atlas.inspector','atlas.operations']");
   });
+  it('does not re-expand a retained lower panel after it was collapsed', async () => {
+    const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
+    const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/Workbench.svelte'),'utf8');
+    expect(source).toContain('if(height<=36)continue');
+  });
+  it('does not treat bottom-dock tools as ordinary center documents', async () => {
+    const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
+    const source=await readFile(resolve(import.meta.dirname,'../../src/web/components/Workbench.svelte'),'utf8');
+    expect(source).toContain('!operational(panel.id,panel.api.component)');
+  });
+  it('mounts the retained left region as the dedicated Devices panel', async () => {
+    const {readFile}=await import('node:fs/promises');const {resolve}=await import('node:path');
+    const root=resolve(import.meta.dirname,'../../src/web');
+    const workbench=await readFile(resolve(root,'components/Workbench.svelte'),'utf8');
+    const host=await readFile(resolve(root,'components/PanelHost.svelte'),'utf8');
+    const devices=await readFile(resolve(root,'components/DevicesPanel.svelte'),'utf8');
+    expect(workbench).toContain("component:'devices'");
+    expect(host).toContain("devices:()=>import('./DevicesPanel.svelte')");
+    expect(devices).toContain("aria-label=\"Devices\"");
+    expect(devices).toContain("atlas:open-device-lifecycle");
+  });
 });

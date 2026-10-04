@@ -6,6 +6,7 @@ describe('workbench shell contract', () => {
     expect(isWorkspaceFallbackVisible([])).toBe(true);
     expect(isWorkspaceFallbackVisible(['file:/srv/a.ts'])).toBe(false);
     expect(isWorkspaceFallbackVisible(['atlas.operations'])).toBe(true);
+    expect(isWorkspaceFallbackVisible(['atlas.observability'])).toBe(true);
   });
 
   it('identifies only retained shell panels as permanent', () => {
