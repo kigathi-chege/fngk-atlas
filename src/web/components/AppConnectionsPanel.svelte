@@ -1,14 +1,15 @@
 <script lang="ts">
   import {onMount} from 'svelte';
   import {api} from '../lib/api.js';
+  import {atlasEvents} from '../lib/atlas-events.js';
   import {openAuthorizationUrl} from '../lib/external-url.js';
   import AtlasInput from './ui/AtlasInput.svelte';
   import LoadingSpinner from './LoadingSpinner.svelte';
-  let origin='https://calculator.signol.org', configured=false, connection:any=null, message='', busy=false;
+  let origin='https://calculator.signol.org', configured=false, connection:any=null, message='', busy=false,pollTimer:number|undefined;
   async function refresh(){try{const value=await api<any>('/api/app-connections/status');configured=value.configured;connection=value.connection}catch(error){message=(error as Error).message}}
-  async function connect(){busy=true;message='Opening Calculator authorization…';try{const value=await api<any>('/api/app-connections/connect',{method:'POST',body:JSON.stringify({origin})});await openAuthorizationUrl(value.authorizationUrl);message='Approve the connection in Calculator, then return here.';const timer=window.setInterval(async()=>{await refresh();if(configured){window.clearInterval(timer);message='Calculator connected.';window.dispatchEvent(new Event('atlas:open-agent-chat'))}},1200)}catch(error){message=(error as Error).message}finally{busy=false}}
-  async function disconnect(){busy=true;try{await api('/api/app-connections',{method:'DELETE'});await refresh();message='Calculator disconnected from this Atlas installation.'}finally{busy=false}}
-  onMount(()=>{void refresh()});
+  async function connect(){const eventId=`app.connection:calculator:${Date.now()}`;atlasEvents.begin({id:eventId,type:'app.connection',title:'Connect Calculator',panelId:'atlas.app-connections'});busy=true;message='Opening Calculator authorization…';try{const value=await api<any>('/api/app-connections/connect',{method:'POST',body:JSON.stringify({origin})});await openAuthorizationUrl(value.authorizationUrl);message='Approve the connection in Calculator, then return here.';window.clearInterval(pollTimer);pollTimer=window.setInterval(async()=>{await refresh();if(configured){window.clearInterval(pollTimer);pollTimer=undefined;message='Calculator connected.';atlasEvents.resolve(eventId,{message});window.dispatchEvent(new Event('atlas:open-agent-chat'))}},1200)}catch(error){message=(error as Error).message;atlasEvents.fail(eventId,{message})}finally{busy=false}}
+  async function disconnect(){const eventId=`app.connection:calculator:disconnect:${Date.now()}`;atlasEvents.begin({id:eventId,type:'app.connection',title:'Disconnect Calculator',panelId:'atlas.app-connections'});busy=true;try{await api('/api/app-connections',{method:'DELETE'});await refresh();message='Calculator disconnected from this Atlas installation.';atlasEvents.resolve(eventId,{message})}catch(error){message=(error as Error).message;atlasEvents.fail(eventId,{message})}finally{busy=false}}
+  onMount(()=>{void refresh();return()=>window.clearInterval(pollTimer)});
 </script>
 <section class="panel app-connections" aria-label="App connections">
   <header><strong>App connections</strong><small>{configured?'Connected':'Not connected'}</small></header>
