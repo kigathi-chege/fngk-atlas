@@ -39,6 +39,22 @@ class PersistentShell implements CommandExecutor {
 const run = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
 
 for (const shell of ['bash', 'dash']) describe(`git through one persistent ${shell}`, () => {
+  it('still works when the shared shell was left with noclobber on', async () => {
+    const base = await mkdtemp(path.join(tmpdir(), 'atlas-git-noclobber-'));
+    const sh = new PersistentShell(shell, base, { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' });
+    try {
+      run(base, 'init', '-q', '-b', 'main');
+      await writeFile(path.join(base, 'a.txt'), 'a\n');
+      // Another tool's command leaked shell options into the long-lived shell.
+      await sh.execute('set -C');
+      const service = new GitService(sh);
+      expect((await service.status(base)).entries.map(entry => entry.path)).toEqual(['a.txt']);
+      const sync = await service.syncCommand(base, 'fetch', {});
+      expect((await sh.execute(sync.command)).exitCode).toBe(0);
+      expect((await sh.execute('printf %s "$-"')).output.toString()).toContain('C');
+    } finally { sh.child.kill(); await rm(base, { recursive: true, force: true }); }
+  });
+
   it('runs status, diff, stage, commit, branches, discard and stash without touching shell state', async () => {
     const base = await mkdtemp(path.join(tmpdir(), 'atlas-git-')), state = path.join(base, 'state'), repo = path.join(base, 'repo'), remote = path.join(base, 'remote.git');
     await mkdir(repo); await mkdir(state);

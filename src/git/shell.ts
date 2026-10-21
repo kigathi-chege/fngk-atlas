@@ -44,13 +44,14 @@ export interface CaptureOptions {
  * nothing can wait on the PTY.
  */
 export function captured(root: string, body: string, options: CaptureOptions = {}): string {
-  const input = options.stdin ? `printf '%s' ${posixQuote(options.stdin.toString('base64'))} | base64 -d > "$i" || exit ${GIT_STATUS.tempUnavailable}; ` : '';
+  const input = options.stdin ? `printf '%s' ${posixQuote(options.stdin.toString('base64'))} | base64 -d >| "$i" || exit ${GIT_STATUS.tempUnavailable}; ` : '';
   return [
     '(',
     `cd -- ${posixQuote(root)} 2>/dev/null || exit ${GIT_STATUS.missingRoot};`,
     `${SSH_DEFAULT};`,
-    `t=$(mktemp 2>/dev/null) || exit ${GIT_STATUS.tempUnavailable}; e="$t.e"; i="$t.i"; : > "$i";`,
-    `${input}{ ${body}; } < "$i" > "$t" 2> "$e"; s=$?;`,
+    // `>|` because a shared shell may have noclobber (`set -C`) left on, and mktemp already created "$t".
+    `t=$(mktemp 2>/dev/null) || exit ${GIT_STATUS.tempUnavailable}; e="$t.e"; i="$t.i"; : >| "$i";`,
+    `${input}{ ${body}; } < "$i" >| "$t" 2>| "$e"; s=$?;`,
     `printf '%s' '${SENTINEL}'; base64 < "$t" | tr -d '\\n'; printf ':'; base64 < "$e" | tr -d '\\n';`,
     'rm -f -- "$t" "$e" "$i"; exit "$s"',
     ')',
@@ -81,7 +82,7 @@ export function streamed(root: string, body: string): string {
     `cd -- ${posixQuote(root)} 2>/dev/null || { echo 'The repository folder does not exist on this machine.'; exit ${GIT_STATUS.missingRoot}; };`,
     `${SSH_DEFAULT};`,
     `t=$(mktemp 2>/dev/null) || exit ${GIT_STATUS.tempUnavailable};`,
-    `{ ${body}; } < /dev/null > "$t" 2>&1 & p=$!;`,
+    `{ ${body}; } < /dev/null >| "$t" 2>&1 & p=$!;`,
     // Follow the log while git runs. `tail -f --pid` is GNU-only, so poll.
     `o=0; while :; do if kill -0 "$p" 2>/dev/null; then r=1; else r=0; fi; n=$(wc -c < "$t"); if [ "$n" -gt "$o" ]; then tail -c "+$((o + 1))" "$t" | head -c "$((n - o))" | tr '\\r' '\\n'; o=$n; fi; [ "$r" = 1 ] || break; sleep 0.25 2>/dev/null || sleep 1; done;`,
     'wait "$p"; s=$?; rm -f -- "$t"; exit "$s"',
