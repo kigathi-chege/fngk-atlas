@@ -1,11 +1,12 @@
-import { chmod, chown, cp, lstat, mkdir, opendir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, chown, cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { AccessRoute, AccessTarget, Operation } from '../domain/access.js';
-import type { FileSearchMatch, FileSearchOptions, SafeWriteOptions } from './file-transport.js';
+import type { FileSearchOptions, SafeWriteOptions } from './file-transport.js';
+import type { FileSearchResult } from '../files/name-search.js';
+import { directSearch } from './direct-search.js';
 import { VERSION_SLOTS, formatVersionMeta, parseVersionMeta, validSlot, versionKey, type FileVersion, type VersionStore } from '../files/versions.js';
-import { compileQuery, lineMatches, pathFilter } from '../files/text-query.js';
 
 const sha256 = (content: Uint8Array) => createHash('sha256').update(content).digest('hex');
 const conflict = () => Object.assign(new Error('The file changed after it was opened.'), { code: 'file_conflict' });
@@ -155,39 +156,14 @@ export class DirectTransport implements AccessRoute {
     },
   };
 
-  async search(logicalPath: string, query: string, options: FileSearchOptions = {}): Promise<FileSearchMatch[]> {
+  async home(): Promise<string> {
+    const home = path.resolve(homedir());
+    if (this.root === '/') return home;
+    return home === this.root ? '/' : home.startsWith(`${this.root}${path.sep}`) ? `/${path.relative(this.root, home).split(path.sep).join('/')}` : '/';
+  }
+  async search(logicalPath: string, query: string, options: FileSearchOptions = {}): Promise<FileSearchResult> {
     const root = this.resolve(logicalPath); await this.#ensureContained(root);
-    const mode = options.mode ?? 'all', limit = Math.min(500, Math.max(1, options.limit ?? 200)), maxFileBytes = Math.min(2 * 1024 * 1024, Math.max(1, options.maxFileBytes ?? 1024 * 1024)), maxEntries = Math.min(20_000, Math.max(1, options.maxEntries ?? 5_000)), maxDepth = Math.min(32, Math.max(0, options.maxDepth ?? 12));
-    const cancelled = () => { if (options.signal?.aborted) throw Object.assign(new Error('Filesystem search was cancelled.'), { code: 'cancelled' }); };
-    const wanted = query.toLocaleLowerCase(), matches: FileSearchMatch[] = [], queue = [{ path: logicalPath, depth: 0 }]; let examined = 0;
-    const accept = pathFilter(options.include ?? [], options.exclude ?? []), relative = (value: string) => path.posix.relative(logicalPath, value), perFile = Math.min(500, Math.max(1, options.maxMatchesPerFile ?? 500));
-    const expression = options.regex || options.wholeWord || options.caseSensitive !== undefined ? compileQuery({ query, regex: options.regex, wholeWord: options.wholeWord, caseSensitive: options.caseSensitive }) : undefined;
-    const maxMatches = options.filesOnly ? Math.min(5_000, Math.max(1, options.limit ?? 200)) : limit;
-    while (queue.length && matches.length < maxMatches) {
-      cancelled(); const current = queue.shift()!;
-      const currentRoot = this.resolve(current.path);
-      let directory;
-      try { await this.#ensureContained(currentRoot); directory = await opendir(currentRoot); }
-      catch { continue; }
-      for await (const value of directory) {
-        cancelled(); if (examined++ >= maxEntries) return matches;
-        const absolute = path.join(currentRoot, value.name); let metadata;
-        try { metadata = await lstat(absolute); } catch { continue; }
-        const entry: TransportEntry = { name: value.name, path: path.posix.join(current.path, value.name), type: metadata.isSymbolicLink() ? 'symlink' : metadata.isDirectory() ? 'directory' : metadata.isFile() ? 'file' : 'other', bytes: metadata.size, modifiedAt: metadata.mtime.toISOString(), mode: metadata.mode };
-        if (!accept(relative(entry.path), entry.type === 'directory' ? 'directory' : 'file')) continue;
-        if (entry.type === 'directory' && current.depth < maxDepth) queue.push({ path: entry.path, depth: current.depth + 1 });
-        if (mode !== 'content' && !options.filesOnly && entry.name.toLocaleLowerCase().includes(wanted)) { matches.push({ path: entry.path, type: entry.type === 'directory' ? 'directory' : 'file' }); if (matches.length >= limit) return matches; }
-        if (matches.length >= maxMatches || entry.type !== 'file' || mode === 'name' || entry.bytes > maxFileBytes) continue;
-        let content:Buffer; try { content = await this.read(entry.path); } catch { continue; } if (content.length > maxFileBytes || content.includes(0)) continue;
-        const lines = content.toString('utf8').split(/\r?\n/);
-        if (options.filesOnly) { if (expression ? lines.some(line => lineMatches(line, expression, 1).length) : lines.some(line => line.toLocaleLowerCase().includes(wanted))) matches.push({ path: entry.path, type: 'file' }); continue; }
-        for (let index = 0, found = 0; index < lines.length && matches.length < limit && found < perFile; index++) {
-          if (!expression) { const column = lines[index].toLocaleLowerCase().indexOf(wanted); if (column >= 0) { found++; matches.push({ path: entry.path, type: 'file', line: index + 1, column: column + 1, length: query.length, preview: lines[index].trim().slice(0, 240) }); } continue; }
-          for (const hit of lineMatches(lines[index], expression, perFile - found)) { found++; matches.push({ path: entry.path, type: 'file', line: index + 1, column: hit.column, length: hit.length, preview: lines[index].trim().slice(0, 240) }); if (matches.length >= limit) break; }
-        }
-      }
-    }
-    return matches;
+    return await directSearch({ root, logicalRoot: logicalPath, query, options, contained: this.root === '/' ? undefined : absolute => this.#ensureContained(absolute) });
   }
   async createFile(logicalPath: string, content = Buffer.alloc(0)): Promise<void> { const resolved=this.resolve(logicalPath);await this.#ensureContained(path.dirname(resolved));await writeFile(resolved,content,{flag:'wx',mode:0o600}); }
   async createDirectory(logicalPath: string): Promise<void> { const resolved=this.resolve(logicalPath);await this.#ensureContained(path.dirname(resolved));await mkdir(resolved); }
