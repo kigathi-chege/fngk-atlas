@@ -19,6 +19,18 @@ describe('Calculator conversation gateway', () => {
     expect(calls[0].init?.body).toContain('device:one');
   });
 
+  it('sends Atlas references as client-supplied external references', async () => {
+    const bodies: any[] = [];
+    const gateway = new HttpCalculatorConversationGateway('https://calculator.example', 't', async (_url, init) => { bodies.push(JSON.parse(String(init?.body))); return new Response('{}', { status: 202 }); });
+    await gateway.message('s1', { text: 'why?', references: [{ kind: 'file', id: '/srv/app.js', label: 'app.js' }] });
+    expect(bodies[0]).toEqual({ text: 'why?', references: [{ type: 'external', source: 'atlas', kind: 'file', id: '/srv/app.js', label: 'app.js' }] });
+  });
+
+  it('keeps Calculator error codes and statuses', async () => {
+    const gateway = new HttpCalculatorConversationGateway('https://calculator.example', 't', async () => new Response(JSON.stringify({ error: 'reference_invalid', message: 'Workspace reference requires a supported type and stable id' }), { status: 400 }));
+    await expect(gateway.message('s1', { text: 'x' })).rejects.toMatchObject({ code: 'reference_invalid', status: 400, message: expect.stringContaining('supported type') });
+  });
+
   it('exposes configured conversation actions through Atlas without exposing the provider origin', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'atlas-agent-chat-'));
     const calls: string[] = [];
