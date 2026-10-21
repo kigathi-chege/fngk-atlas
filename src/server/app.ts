@@ -271,7 +271,13 @@ export async function createApp(
   const lifecycle = new DeviceLifecycleService({
     profiles: () => fngk.profiles(),
     contexts: (profile) => contexts.contexts({profile}),
-    remote: (deviceId, profile) => fngk.deviceLifecycle(deviceId, { profile }),
+    // Agents before lifecycle-inspect.v1 drop their whole connection on this
+    // message, so only ask Devices that advertise support for it.
+    remote: async (deviceId, profile) => {
+      const device = (await fngk.namespace(profile)).devices.find(value => value.id === deviceId);
+      if (!(Array.isArray(device?.capabilities) && device.capabilities.includes('lifecycle-inspect.v1'))) throw Object.assign(new Error('This Device agent predates lifecycle inspection; update its FNGK agent to inspect it remotely.'), { code: 'lifecycle_inspection_unsupported' });
+      return await fngk.deviceLifecycle(deviceId, { profile });
+    },
   });
   const portStore = new PortShareStore(databaseFile);
   const portSharing = new PortSharingService(portStore,fngk,{diagnostics,executorFor:(contextId)=>contexts.commandExecutor(contextId)});

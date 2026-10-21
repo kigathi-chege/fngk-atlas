@@ -75,6 +75,7 @@ export class DeviceLifecycleService {
         if (remote.state === 'ready' && remote.terminal === 'available') return this.result(contextId, 'ready', selection, profiles, profile, 'remote_ready', `The Device agent${remote.activeAgentVersion ? ` ${remote.activeAgentVersion}` : ''} is ready (daemon ${remote.daemon ?? 'unknown'}).`);
         return this.result(contextId, 'inspection-unavailable', selection, profiles, profile, 'remote_not_ready', `The Device agent reported ${remote.state} with terminal ${remote.terminal ?? 'unknown'}.`);
       } catch (error) {
+        if ((error as { code?: string }).code === 'lifecycle_inspection_unsupported') return this.result(contextId, 'needs-update', selection, profiles, profile, 'lifecycle_inspection_unsupported', (error as Error).message);
         return this.result(contextId, 'inspection-unavailable', selection, profiles, profile, 'remote_inspection_failed', `The Device did not answer a lifecycle inspection: ${(error as Error).message}`);
       }
     }
@@ -82,7 +83,7 @@ export class DeviceLifecycleService {
   }
 
   private result(contextId: string, state: DeviceReadinessState, profileSelection: DeviceReadiness['profileSelection'], profiles: SafeLifecycleProfile[], profile: SafeLifecycleProfile | undefined, code: string, message: string): DeviceReadiness {
-    const disconnect=(state==='inspection-unavailable'||state==='ready')&&Boolean(profile)?{available:true}:{available:false,reason:'Connect an online Device with an authorized profile before releasing its local Atlas route.'};
+    const disconnect=(state==='inspection-unavailable'||state==='ready'||state==='needs-update')&&Boolean(profile)?{available:true}:{available:false,reason:'Connect an online Device with an authorized profile before releasing its local Atlas route.'};
     const unavailable={available:false,reason:'This FNGK control-plane operation is not available to Atlas yet. Atlas will not emulate it with a shell command.'};
     return { protocolVersion: 'atlas.device-lifecycle.v1', contextId, state, profileSelection, profiles: profiles.map((value) => ({ ...value })), ...(profile ? { profile: { ...profile } } : {}), diagnostics: [{ code, message }], capabilities:{disconnect,retire:unavailable,delete:unavailable} };
   }
