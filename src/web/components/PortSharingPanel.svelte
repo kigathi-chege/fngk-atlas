@@ -1,4 +1,6 @@
 <script lang="ts">
+  import DeviceChip from './DeviceChip.svelte';
+  import {contextDisplayName} from '../lib/device-directory.js';
   import {onMount} from 'svelte';
   import {api} from '../lib/api.js';
   import {atlasEvents} from '../lib/atlas-events.js';
@@ -17,7 +19,7 @@
 </script>
 <DocumentationHelp topicId="live-projects" label="Port sharing documentation"/>
 <section class="panel port-sharing-panel">
-  <header><div><strong>HTTP ports</strong><span>{contextId}</span></div><button title="Scan listening HTTP ports" disabled={busy} onclick={scan}><RefreshCw size={13}/></button></header>
+  <header><div><strong>HTTP ports</strong><DeviceChip {contextId}/></div><button title="Scan listening HTTP ports" disabled={busy} onclick={scan}><RefreshCw size={13}/></button></header>
   <div class="port-list">
     {#each candidates.filter(item=>!item.stale) as item}
       {@const route=active(item.id)}
@@ -27,4 +29,4 @@
   </div>
   <footer>{busy?'Working…':status||'Publication is explicit and can be stopped here.'}</footer>
 </section>
-{#if confirm}<div class="atlas-dialog-backdrop"><div class="atlas-dialog" role="dialog" aria-modal="true"><h2>Publish port {confirm.port}?</h2><p>This creates a public Signal/HKMN URL for the verified HTTP listener on {contextId}.</p><div><button onclick={()=>confirm=undefined}>Cancel</button><button onclick={()=>publish(confirm)}>Publish</button></div></div></div>{/if}
+{#if confirm}<div class="atlas-dialog-backdrop"><div class="atlas-dialog" role="dialog" aria-modal="true"><h2>Publish port {confirm.port}?</h2><p>This creates a public Signal/HKMN URL for the verified HTTP listener on {contextDisplayName(contextId)}.</p><div><button onclick={()=>confirm=undefined}>Cancel</button><button onclick={()=>publish(confirm)}>Publish</button></div></div></div>{/if}

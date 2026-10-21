@@ -127,3 +127,10 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 /* Collapsed Dockview sidebar columns: a 36px strip; content stays mounted but hidden. */
 .dv-groupview[data-atlas-collapsed]{overflow:hidden}
 .dv-groupview[data-atlas-collapsed]>*{visibility:hidden}
+/* Tree rows: top-level entries start at the edge; a trailing column holds the
+   row's own loading spinner instead of wrapping it onto a line of its own. */
+.file-row{grid-template-columns:16px 20px minmax(0,1fr) auto 14px;column-gap:2px}
+.file-row>.atlas-loading-spinner{grid-column:5;justify-self:end}
+.tree-row{padding-left:calc(2px + (var(--level) - 1) * 12px)}
+.filesystem-search{margin:4px 5px;padding:3px 7px}
+.route-chip{margin:0 5px 3px;padding:2px 6px}
