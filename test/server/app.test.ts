@@ -469,6 +469,24 @@ describe("Atlas FNGK-native server", () => {
     expect(response.json()).toMatchObject({ error: 'context_not_found' });
   });
 
+  it("reattaches its own terminal after Atlas restarts", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fngk-atlas-server-"));
+    cleanups.push(async () => rm(directory, { recursive: true, force: true }));
+    const open = async (query: string) => {
+      const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture }), dbPath: path.join(directory, "atlas.db") });
+      const address = await app.listen({ host: "127.0.0.1", port: 0 });
+      const socket = new WebSocket(address.replace(/^http/, "ws") + `/api/fngk/terminals?target=device%3Adevice-1${query}`);
+      const [raw] = await once(socket, "message");
+      socket.close();
+      await app.close();
+      return JSON.parse(raw.toString());
+    };
+    const first = await open("");
+    expect(first).toMatchObject({ type: "ready", sessionId: expect.any(String) });
+    await expect(open(`&session=${first.sessionId}`)).resolves.toMatchObject({ type: "ready", sessionId: first.sessionId });
+    await expect(open("&session=someone-elses-session")).resolves.toMatchObject({ type: "error", code: "terminal_session_unavailable" });
+  });
+
   it("relays a terminal as WebSocket JSONL events", async () => {
     const app = await harness();
     const address = await app.listen({ host: "127.0.0.1", port: 0 });

@@ -14,6 +14,7 @@ import { observeLocalProcesses } from "../runtime.js";
 import { FngkProcessClient, FngkProcessError } from "../fngk/process-client.js";
 import { redact } from "../fngk/redaction.js";
 import type { TerminalInput } from "../fngk/protocol.js";
+import { UserTerminalRegistry } from "../fngk/user-terminals.js";
 import { EffectiveContextService } from "./context-service.js";
 import { HostDiscovery } from "../discovery/host-discovery.js";
 import { EvidenceStore } from "../store/evidence-store.js";
@@ -193,7 +194,7 @@ export async function createApp(
         purpose:'device-session',
       }),
   });
-  const atlasUserTerminals=new Map<string,{deviceId:string;profile?:string;owner:'atlas-user';purpose:'interactive'}>();
+  const atlasUserTerminals=new UserTerminalRegistry(databaseFile);
   const isUserTerminal=(session:{id?:unknown})=>typeof session.id==='string'&&atlasUserTerminals.has(session.id);
   const scopedFileService = (scope: DeviceScope, lease: DeviceSessionLease) => new FileService([new TerminalFileTransport({
     id: `terminal:${scope.deviceId}`,
@@ -2547,7 +2548,7 @@ export async function createApp(
       const remembered=sessionId?atlasUserTerminals.get(sessionId):undefined;
       if(sessionId&&(!remembered||remembered.deviceId!==scope.deviceId||remembered.profile!==scope.profile))throw Object.assign(new Error('Atlas can restore only its own terminal for this Device and profile.'),{code:'terminal_session_unavailable'});
       const terminal=fngk.openTerminal(target,{newSession:!sessionId,sessionId,profile:scope.profile,owner:'atlas-user',purpose:'interactive'});
-      const onEvent=(event:TerminalInput|any)=>{if(event.type==='ready'&&terminal.sessionId)atlasUserTerminals.set(terminal.sessionId,{deviceId:scope.deviceId,profile:scope.profile,owner:'atlas-user',purpose:'interactive'});if(socket.readyState===socket.OPEN)socket.send(JSON.stringify(event));if(event.type==='detached'&&socket.readyState===socket.OPEN)socket.close(1000)};
+      const onEvent=(event:TerminalInput|any)=>{if(event.type==='ready'&&terminal.sessionId)atlasUserTerminals.remember(terminal.sessionId,scope.deviceId,scope.profile);if(socket.readyState===socket.OPEN)socket.send(JSON.stringify(event));if(event.type==='detached'&&socket.readyState===socket.OPEN)socket.close(1000)};
       terminal.on('event',onEvent);terminal.once('error',(error)=>{if(socket.readyState===socket.OPEN)socket.send(JSON.stringify({type:'error',code:error.code??'terminal_unavailable',message:error.message}))});
       if(closed){terminal.close();return;}
       socket.on("message", (raw: RawData) => {
