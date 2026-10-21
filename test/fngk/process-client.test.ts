@@ -23,6 +23,11 @@ describe('FngkProcessClient', () => {
     expect(state.namespace?.devices).toEqual([expect.objectContaining({ id: 'device-1', name: 'kigathi', online: true })]);
   });
 
+  it('keeps the Signal error code FNGK reports instead of a generic failure', async () => {
+    const client = new FngkProcessClient({ binary: fixture, env: { FNGK_FIXTURE_MODE: 'feature-disabled' } });
+    await expect(client.namespace()).rejects.toMatchObject({ code: 'operator_terminal_disabled' });
+  });
+
   it('lists only safe local profile readiness metadata', async () => {
     const profiles = await new FngkProcessClient({ binary: fixture }).profiles();
     expect(profiles).toEqual({

@@ -12,7 +12,10 @@ if (args[0] === 'version') {
 } else if (args[0] === 'status' && args.includes('--json')) {
   if (mode === 'timeout') setTimeout(() => {}, 60_000);
   else if (mode === 'invalid') process.stdout.write('not json\n');
-  else if (mode === 'secret-error') {
+  else if (mode === 'feature-disabled') {
+    process.stderr.write('fngk: operator_terminal_disabled\n');
+    process.exit(1);
+  } else if (mode === 'secret-error') {
     process.stderr.write('Authorization: Bearer operator-secret Cookie: session=browser-secret ticket=terminal-secret\n');
     process.exit(9);
   } else {

@@ -122,7 +122,13 @@ function processError(error: unknown): {
             ? 409
             : error.code === "timeout"
               ? 504
-              : 502;
+              : error.code === "target_not_found"
+                ? 404
+                : error.code === "device_offline"
+                  ? 409
+                  : error.code.endsWith("_disabled")
+                    ? 503
+                    : 502;
     return {
       statusCode,
       body: { error: error.code, message: error.message, ...extra },

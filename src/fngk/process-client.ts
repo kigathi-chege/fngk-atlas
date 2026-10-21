@@ -45,6 +45,9 @@ export class FngkProcessError extends Error {
   }
 }
 
+/** FNGK reports Signal API failures as `fngk: <code>: <message>`; keep the code. */
+function reportedCode(stderr:string):string|undefined{return /^fngk: ([a-z][a-z0-9_]{2,63})(?::|\s*$)/m.exec(stderr)?.[1]}
+
 export class FngkProcessClient {
   #profileProvider:()=>string|undefined=()=>undefined;
   setProfileProvider(provider:()=>string|undefined){this.#profileProvider=provider;}
@@ -86,7 +89,7 @@ export class FngkProcessClient {
         const normalized = stderr.toLowerCase();
         const failure = normalized.includes('authentication_required') || normalized.includes('authentication required') ? 'authentication_required'
           : normalized.includes('daemon') && (normalized.includes('unavailable') || normalized.includes('not running')) ? 'daemon_unavailable'
-            : 'process_failed';
+            : reportedCode(stderr) ?? 'process_failed';
         finish(new FngkProcessError(failure, stderr || `FNGK exited with code ${code}.`, code));
       });
       if(input!==undefined){child.stdin!.end(input);}
