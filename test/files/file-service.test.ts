@@ -78,7 +78,9 @@ describe('logical filesystem', () => {
     expect(await search('foo', { wholeWord: true, caseSensitive: true, include: ['*.ts'], exclude: ['node_modules'] })).toEqual(['/src/a.ts:1:7']);
     expect(await search('foo', { wholeWord: true, caseSensitive: false, include: ['src/**'], exclude: ['node_modules'] })).toEqual(['/src/a.ts:1:7', '/src/a.ts:2:16', '/src/b.js:1:1']);
     expect(await search(String.raw`foo\w+`, { regex: true, caseSensitive: true, exclude: ['node_modules'] })).toEqual(['/src/a.ts:2:7']);
-    expect((await files.search({ contextId: 'host', path: '/' }, 'foo', { mode: 'content', filesOnly: true, caseSensitive: true })).matches.map(match => match.path).sort()).toEqual(['/node_modules/c.ts', '/src/a.ts', '/src/b.js']);
+    // node_modules is pruned by default; an empty prune list searches it.
+    expect((await files.search({ contextId: 'host', path: '/' }, 'foo', { mode: 'content', filesOnly: true, caseSensitive: true })).matches.map(match => match.path).sort()).toEqual(['/src/a.ts', '/src/b.js']);
+    expect((await files.search({ contextId: 'host', path: '/' }, 'foo', { mode: 'content', filesOnly: true, caseSensitive: true, pruneNames: [] })).matches.map(match => match.path).sort()).toEqual(['/node_modules/c.ts', '/src/a.ts', '/src/b.js']);
   });
 
   it('returns metadata rather than loading files over the configured limit', async () => {

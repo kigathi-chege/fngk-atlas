@@ -127,12 +127,17 @@ describe('terminal-backed effective access', () => {
     expect(commands).toEqual([`mkdir -- '/tmp/atlas it'"'"'s safe'`]);
   });
 
-  it('bounds terminal content search before invoking grep', async () => {
+  it('bounds terminal content search by prunes and a time budget before invoking grep', async () => {
     const commands: string[] = [];
     const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.alloc(0), exitCode: 0 }; } };
-    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
-    await transport.search('/srv/atlas', 'needle', { mode: 'content', maxEntries: 12, maxDepth: 3, maxFileBytes: 2048 });
-    expect(commands[0]).toContain("find -H '/srv/atlas' -xdev -mindepth 1 -maxdepth 3 -type f -size -2048c -print0 | head -z -n 12 | xargs -0 -r sh -c");
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote-bounds', deviceId: 'device-1', executor });
+    const result = await transport.search('/srv/atlas', 'needle', { mode: 'content', maxDepth: 3, maxFileBytes: 2048, budgetMs: 4_000 });
+    expect(result).toMatchObject({ matches: [], truncated: false });
+    expect(commands[0]).toContain("find -H '/srv/atlas' -mindepth 1 -maxdepth 3 \\( -name 'node_modules' -o -name '.git'");
+    expect(commands[0]).toContain(`"$@" \\) -prune -o -type f -size -2048c -print0`);
+    expect(commands[0]).toContain('atlas_budget 4 find');
+    expect(commands[0]).toContain('atlas_budget 6 xargs -0 -r sh -c');
+    expect(commands[0]).not.toContain('-xdev');
     expect(commands[0]).not.toContain('grep -R');
   });
 
@@ -201,8 +206,8 @@ describe('terminal-backed effective access', () => {
       await transport.move(at('fresh.txt'), at('moved.txt'));
       await transport.atomicWrite(at('moved.txt'), Buffer.from('rewritten'), 0o644);
       expect(await readFile(at('moved.txt'), 'utf8')).toBe('rewritten');
-      expect(await transport.search(root, 'moved', { mode: 'name' })).toEqual([{ path: at('moved.txt'), type: 'file' }]);
-      expect(await transport.search(root, 'greeting', { mode: 'content' })).toMatchObject([{ path: at('kept.txt'), line: 1 }]);
+      expect((await transport.search(root, 'moved', { mode: 'name' })).matches).toEqual([{ path: at('moved.txt'), type: 'file' }]);
+      expect((await transport.search(root, 'greeting', { mode: 'content' })).matches).toMatchObject([{ path: at('kept.txt'), line: 1 }]);
       await expect(transport.search(at('missing'), 'x', { mode: 'name' })).rejects.toMatchObject({ code: 'path_not_found' });
       const { restorePath } = await transport.trash(at('moved.txt'));
       expect(await readdir(root)).not.toContain('moved.txt');
@@ -337,9 +342,9 @@ describe('terminal-backed effective access', () => {
     const commands: string[] = [];
     const output = Buffer.from('/srv/app/src/a.ts\x003:  const fooBar = foo;\n/srv/app/src/b.js\x001:foo\n').toString('base64');
     const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.from(output), exitCode: 0 }; } };
-    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
-    const matches = await transport.search('/srv/app', 'foo', { mode: 'content', wholeWord: true, caseSensitive: false, include: ['*.ts'], exclude: ['node_modules', 'dist/**'] });
-    expect(commands[0]).toContain(`\\( -name 'node_modules' -o -path '/srv/app/dist/*' \\) -prune -o -type f \\( -name '*.ts' \\)`);
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote-posix', deviceId: 'device-1', executor });
+    const { matches } = await transport.search('/srv/app', 'foo', { mode: 'content', wholeWord: true, caseSensitive: false, include: ['*.ts'], exclude: ['node_modules', 'dist/**'], pruneNames: [] });
+    expect(commands[0]).toContain(`\\( -name 'node_modules' -o -path '/srv/app/dist/*' "$@" \\) -prune -o -type f \\( -name '*.ts' \\)`);
     expect(commands[0]).not.toContain('--include');
     expect(commands[0]).toContain(`grep -ZInH -m 8 -F -i -w -e '"'"'foo'"'"' "$@"`);
     // b.js is dropped by the exact glob check; fooBar is not a whole word.
@@ -348,14 +353,18 @@ describe('terminal-backed effective access', () => {
     expect(commands[1]).toContain(`-E -e '"'"'foo[0-9]+'"'"'`);
   });
 
-  it('uses bounded structured NUL records for terminal name search', async () => {
+  it('matches names inside find and caps matches, not visited entries', async () => {
     const commands: string[] = [];
-    const encoded = Buffer.from('/srv/atlas/name:with\nnewline\0d\0').toString('base64');
+    const encoded = Buffer.from('d/srv/atlas/name:with\nnewline\0\nf/srv/atlas/x/name.txt\0\nT\0\n').toString('base64');
     const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.from(encoded), exitCode: 0 }; } };
-    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
-    await expect(transport.search('/srv/atlas', 'name', { mode: 'name', maxEntries: 12 })).resolves.toEqual([{ path: '/srv/atlas/name:with\nnewline', type: 'directory' }]);
-    expect(commands[0]).toContain('-printf');
-    expect(commands[0]).toContain('head -z -n 24');
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote-name', deviceId: 'device-1', executor });
+    const result = await transport.search('/srv/atlas', 'name', { mode: 'name', limit: 10 });
+    expect(result.matches).toEqual([{ path: '/srv/atlas/x/name.txt', type: 'file' }, { path: '/srv/atlas/name:with\nnewline', type: 'directory' }]);
+    expect(result).toMatchObject({ truncated: true, reason: 'time' });
+    expect(commands[0]).toContain(`-iname '*name*'`);
+    expect(commands[0]).toContain('| head -n 500 |');
+    expect(commands[0]).not.toContain('head -z');
+    expect(commands[0]).not.toContain('-xdev');
     expect(commands[0]).not.toContain('pipefail');
   });
 
