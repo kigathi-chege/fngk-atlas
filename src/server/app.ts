@@ -1794,25 +1794,36 @@ export async function createApp(
       limit?: string;
       maxEntries?: string;
       maxDepth?: string;
+      budgetMs?: string;
     };
-    if (!query.query?.trim()) return { matches: [], route: null };
+    if (!query.query?.trim()) return { matches: [], truncated: false, elapsedMs: 0, root: query.path ?? "/", route: null };
     const contextId = query.contextId ?? "local";
     try {
-      const value = await withScopedFiles(contextId, query, request, reply, service=>service.search({ contextId, path: query.path ?? "/" }, query.query!, {
-        mode: query.mode ?? "all",
-        limit: Number(query.limit) || 200,
-        maxEntries: Number(query.maxEntries) || 5_000,
-        maxDepth: Number(query.maxDepth) || 12,
-        signal: requestSignal(request, reply),
-      }));
+      const value = await withScopedFiles(contextId, query, request, reply, async service => {
+        // `~` searches the context's home directory, falling back to `/`.
+        const root = query.path === "~" ? await service.home({ contextId }).catch(() => "/") : query.path ?? "/";
+        return await service.search({ contextId, path: root }, query.query!, {
+          mode: query.mode ?? "all",
+          limit: Number(query.limit) || 200,
+          ...(Number(query.maxEntries) ? { maxEntries: Number(query.maxEntries) } : {}),
+          maxDepth: Number(query.maxDepth) || 32,
+          ...(Number(query.budgetMs) ? { budgetMs: Number(query.budgetMs) } : {}),
+          signal: requestSignal(request, reply),
+        });
+      });
       return {
-        ...value,
+        matches: value.matches,
+        truncated: value.truncated,
+        reason: value.reason ?? null,
+        examined: value.examined ?? null,
+        elapsedMs: value.elapsedMs,
+        root: value.root,
         route: routeEvidence(value.route),
         operation: operationEvidence("file.search", contextId, value.route, {
-          path: query.path ?? "/",
-          query: query.query,
+          path: value.root,
           mode: query.mode ?? "all",
           matches: value.matches.length,
+          truncated: value.truncated,
         }),
       };
     } catch (error) {

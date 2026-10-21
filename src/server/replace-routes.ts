@@ -39,10 +39,10 @@ export function registerReplaceRoutes(app: FastifyInstance, deps: ReplaceRouteDe
     try {
       const query = flags(body); compileQuery(query);
       const limit = Math.min(2_000, Math.max(1, Number(body.limit) || 1_000));
-      const value = await deps.withScopedFiles(contextId, body as Record<string, unknown>, request, reply, service => service.search({ contextId, path: root(body.root) }, query.query, { mode: 'content', regex: query.regex, caseSensitive: query.caseSensitive, wholeWord: query.wholeWord, include: parseGlobs(body.include), exclude: parseGlobs(body.exclude), limit: Math.min(500, limit), maxMatchesPerFile: 100, maxEntries: 20_000, maxDepth: 32, maxFileBytes: REPLACE_LIMITS.fileBytes, signal: deps.requestSignal(request, reply) }));
+      const value = await deps.withScopedFiles(contextId, body as Record<string, unknown>, request, reply, service => service.search({ contextId, path: root(body.root) }, query.query, { mode: 'content', regex: query.regex, caseSensitive: query.caseSensitive, wholeWord: query.wholeWord, include: parseGlobs(body.include), exclude: parseGlobs(body.exclude), limit: Math.min(500, limit), maxMatchesPerFile: 100, maxDepth: 32, maxFileBytes: REPLACE_LIMITS.fileBytes, signal: deps.requestSignal(request, reply) }));
       const files = new Map<string, Array<{ line: number; column: number; length: number; preview: string }>>();
       for (const match of value.matches) if (match.type === 'file' && match.line) { const list = files.get(match.path) ?? []; list.push({ line: match.line, column: match.column ?? 1, length: match.length ?? 0, preview: match.preview ?? '' }); files.set(match.path, list); }
-      return { files: [...files].map(([filePath, matches]) => ({ path: filePath, matches })), matches: value.matches.length, truncated: value.matches.length >= Math.min(500, limit), route: deps.routeEvidence(value.route) };
+      return { files: [...files].map(([filePath, matches]) => ({ path: filePath, matches })), matches: value.matches.length, truncated: value.truncated || value.matches.length >= Math.min(500, limit), reason: value.reason ?? (value.matches.length >= Math.min(500, limit) ? 'limit' : null), elapsedMs: value.elapsedMs, root: value.root, route: deps.routeEvidence(value.route) };
     } catch (error) { return fail(reply, error); }
   });
 
@@ -54,7 +54,7 @@ export function registerReplaceRoutes(app: FastifyInstance, deps: ReplaceRouteDe
       const query = flags(body); compileQuery(query);
       const signal = deps.requestSignal(request, reply);
       return await deps.withScopedFiles(contextId, body as Record<string, unknown>, request, reply, async service => {
-        const found = await service.search({ contextId, path: root(body.root) }, query.query, { mode: 'content', filesOnly: true, regex: query.regex, caseSensitive: query.caseSensitive, wholeWord: query.wholeWord, include: parseGlobs(body.include), exclude: parseGlobs(body.exclude), limit: 5_000, maxEntries: 20_000, maxDepth: 32, maxFileBytes: REPLACE_LIMITS.fileBytes, signal });
+        const found = await service.search({ contextId, path: root(body.root) }, query.query, { mode: 'content', filesOnly: true, regex: query.regex, caseSensitive: query.caseSensitive, wholeWord: query.wholeWord, include: parseGlobs(body.include), exclude: parseGlobs(body.exclude), limit: 5_000, maxDepth: 32, maxFileBytes: REPLACE_LIMITS.fileBytes, signal });
         const candidates = [...new Set(found.matches.filter(match => match.type === 'file').map(match => match.path))].sort();
         const files: Array<{ path: string; fingerprint: string; bytes: number; hunks: ReturnType<typeof computeHunks>; truncated: boolean }> = [], skipped: Array<{ path: string; reason: string; message?: string }> = [];
         for (const filePath of candidates.slice(REPLACE_LIMITS.files)) skipped.push({ path: filePath, reason: 'file_limit' });
@@ -68,7 +68,7 @@ export function registerReplaceRoutes(app: FastifyInstance, deps: ReplaceRouteDe
             if (hunks.length) files.push({ path: filePath, fingerprint: value.fingerprint, bytes: value.bytes, hunks: hunks.slice(0, REPLACE_LIMITS.hunksPerFile), truncated: hunks.length > REPLACE_LIMITS.hunksPerFile });
           } catch (error) { if ((error as { code?: string }).code === 'cancelled') throw error; skipped.push({ path: filePath, reason: 'unreadable', message: (error as Error).message }); }
         }
-        return { files, skipped, totalHunks: files.reduce((total, file) => total + file.hunks.length, 0), limits: REPLACE_LIMITS, route: deps.routeEvidence(found.route) };
+        return { files, skipped, totalHunks: files.reduce((total, file) => total + file.hunks.length, 0), limits: REPLACE_LIMITS, truncated: found.truncated, reason: found.reason ?? null, route: deps.routeEvidence(found.route) };
       });
     } catch (error) { return fail(reply, error); }
   });
