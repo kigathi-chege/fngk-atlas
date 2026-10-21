@@ -7,6 +7,8 @@ import type { FileSearchMatch, FileSearchOptions, FileStat, FileTransport, SafeW
 import { VERSION_SLOTS, parseVersionMeta, validSlot, versionKey, type FileVersion, type VersionStore } from '../files/versions.js';
 import { compileQuery, grepArguments, lineMatches, pathFilter } from '../files/text-query.js';
 import { posixQuote } from './posix.js';
+import { DEFAULT_PRUNE_NAMES, NETWORK_FS_TYPES, PSEUDO_FS_TYPES, budgetFor, escapeGlob, isPathQuery, pseudoRootsUnder, rankNameMatches, type FileSearchResult, type SearchStopReason } from '../files/name-search.js';
+import { remoteSearchLane } from './search-lane.js';
 
 export interface TerminalFileTransportOptions { id: string; contextId: string; deviceId: string; identity?: string; privilege?: AccessRoute['privilege']; executor: CommandExecutor; onUnavailable?:(error:unknown)=>void }
 
@@ -35,6 +37,67 @@ export function findTest(root: string, glob: string): string {
   return `-path ${posixQuote(`${root.replace(/\/$/, '')}/${value.replace(/^\.\//, '').replace(/^\*\*\//, '*/').replace(/\*\*/g, '*')}`)}`;
 }
 
+export interface RemoteFindPlan { root: string; maxDepth: number; pruneNames: string[]; prunePaths?: string[]; include: string[]; exclude: string[]; seconds: number }
+const CONTENT_TIME_MARK = 'ATLAS_TIME', FILES_TIME_MARK = 'ATLAS_TIME';
+// Runs "$@" for at most $1 seconds: timeout(1) where it works (coreutils and
+// modern busybox), otherwise a watchdog subshell. stdin goes through fd 6 because dash gives
+// a background command /dev/null even with an explicit `<&0`.
+const BUDGET_FUNCTION = `atlas_budget() { atlas_s=$1; shift; if command -v timeout >/dev/null 2>&1 && timeout 1 true >/dev/null 2>&1; then timeout "$atlas_s" "$@"; return; fi; exec 6<&0; "$@" <&6 6<&- & atlas_p=$!; exec 6<&-; ( trap 'kill "$atlas_w" 2>/dev/null; exit 0' TERM; sleep "$atlas_s" & atlas_w=$!; wait "$atlas_w"; kill -TERM "$atlas_p" 2>/dev/null ) & atlas_k=$!; wait "$atlas_p"; atlas_r=$?; kill "$atlas_k" 2>/dev/null; wait "$atlas_k" 2>/dev/null; return "$atlas_r"; }`;
+// Emits a marker when a budgeted command was stopped by its timer.
+const MARK_FUNCTION = `atlas_mark() { case "$1" in 124|137|143) printf "$2";; esac; }`;
+const MOUNT_TYPES = [...PSEUDO_FS_TYPES, ...NETWORK_FS_TYPES].map(type => type.replace(/\./g, '\\.')).join('|');
+/**
+ * Adds `-o -path <mount>` to "$@" for every pseudo or network filesystem
+ * mounted below the root. Mount points with escaped characters are skipped.
+ * IFS is set to a newline without putting a newline in the command line.
+ */
+function mountPrunes(root: string): string {
+  const pattern = root === '/' ? '/?*' : `${posixQuote(root.replace(/\/+$/, ''))}/?*`;
+  return `set --; IFS=$(printf '\\n.'); IFS=\${IFS%.}; for atlas_m in $(awk ${posixQuote(`$3 ~ /^(${MOUNT_TYPES})$/ && $2 !~ /\\\\/ { print $2 }`)} /proc/mounts 2>/dev/null); do case "$atlas_m" in ${pattern}) set -- "$@" -o -path "$atlas_m";; esac; done; unset IFS`;
+}
+/** Pseudo roots under the root, pruned directory names, user excludes, then the mounts in "$@". */
+export function pruneGroup(plan: Pick<RemoteFindPlan, 'root' | 'pruneNames' | 'prunePaths' | 'exclude'>): string {
+  const paths = [...new Set([...pseudoRootsUnder(plan.root), ...(plan.prunePaths ?? []).filter(value => value.startsWith('/') && value !== plan.root)])];
+  const tests = [...paths.map(value => `-path ${posixQuote(value)}`), ...plan.pruneNames.map(name => `-name ${posixQuote(name)}`), ...plan.exclude.map(glob => findTest(plan.root, glob))];
+  // No file name contains '/', so this never matches; it keeps the group valid.
+  if (!tests.length) tests.push(`-name '/'`);
+  return `\\( ${tests.join(' -o ')} "$@" \\) -prune -o `;
+}
+/** The find test for a name query: `-iname` on the name, or `-ipath` when the query contains '/'. */
+export function nameQueryTest(query: string): string {
+  const value = query.trim(), glob = posixQuote(`*${escapeGlob(value)}*`);
+  return isPathQuery(value) ? `-ipath ${glob}` : `-iname ${glob}`;
+}
+/**
+ * Name search in one isolated subshell. find does the matching, `head` caps
+ * the matches (not the entries visited), and the whole walk is bounded by the
+ * time budget. Records are `<type><path>\0\n`; `T\0\n` means the budget ran out.
+ * GNU find prints with -printf; busybox find falls back to -exec printf.
+ */
+export function remoteNameSearchCommand(plan: RemoteFindPlan, query: string, cap: number): string {
+  const root = posixQuote(plan.root), start = `find -H ${root} -mindepth 1 -maxdepth ${plan.maxDepth} ${pruneGroup(plan)}`, match = nameQueryTest(query);
+  const gnu = `${start}${match} \\( -type d -o -type f -o -type l \\) -printf '%y%p\\0\\n'`;
+  // busybox runs no `-exec … +` inside parentheses, so the branches stay ungrouped.
+  const portable = `${start}${match} -type d -exec printf 'd%s\\000\\n' {} + -o ${match} \\( -type f -o -type l \\) -exec printf 'f%s\\000\\n' {} +`;
+  return isolated(`set -f; ${BUDGET_FUNCTION}; ${MARK_FUNCTION}; ${mountPrunes(plan.root)}; { if find ${root} -maxdepth 0 -printf '' >/dev/null 2>&1; then atlas_budget ${plan.seconds} ${gnu}; else atlas_budget ${plan.seconds} ${portable}; fi 2>/dev/null; atlas_mark "$?" 'T\\000\\n'; } | head -n ${cap} | base64 | tr -d '\\n'`);
+}
+/**
+ * Content search: budgeted find feeds budgeted xargs/grep. The find status is
+ * carried out of the pipeline on fd 5 so a timeout marker is written only
+ * after grep has finished, never interleaved with its output. GNU grep prints
+ * `path\0line:text` with -Z; busybox grep has no -Z, so a per-file loop
+ * prints the same records. Files-only records are `path\0\n` either way.
+ */
+export function remoteContentSearchCommand(plan: RemoteFindPlan, grep: string, options: { maxFileBytes: number; filesOnly: boolean; cap: number; perFile?: number }): string {
+  const includeTest = plan.include.length ? ` \\( ${plan.include.map(glob => findTest(plan.root, glob)).join(' -o ')} \\)` : '';
+  const candidates = `find -H ${posixQuote(plan.root)} -mindepth 1 -maxdepth ${plan.maxDepth} ${pruneGroup(plan)}-type f${includeTest} -size -${options.maxFileBytes}c -print0`;
+  const ok = 'status=$?; [ "$status" -eq 0 ] || [ "$status" -eq 1 ]', perFile = options.perFile ?? 8;
+  const [gnu, portable] = options.filesOnly
+    ? [`grep -lZI ${grep} "$@" 2>/dev/null | xargs -0 -r printf '%s\\000\\n'; true`, `for f do if grep -q ${grep} "$f" 2>/dev/null; then printf '%s\\000\\n' "$f"; fi; done; true`]
+    : [`grep -ZInH -m ${perFile} ${grep} "$@" 2>/dev/null; ${ok}`, `for f do grep -n -m ${perFile} ${grep} "$f" 2>/dev/null | while IFS= read -r l; do printf '%s\\000%s\\n' "$f" "$l"; done; done; true`];
+  const mark = options.filesOnly ? `'${FILES_TIME_MARK}\\000\\n'` : `'\\000${CONTENT_TIME_MARK}\\n'`;
+  return isolated(`set -f; ${BUDGET_FUNCTION}; ${MARK_FUNCTION}; ${mountPrunes(plan.root)}; if printf 'x\\n' | grep -Z x >/dev/null 2>&1; then atlas_g=${posixQuote(gnu)}; else atlas_g=${posixQuote(portable)}; fi; { atlas_fs=$( { { atlas_budget ${plan.seconds} ${candidates} 2>/dev/null; printf '%s' "$?" >&5; } | atlas_budget ${plan.seconds + 2} xargs -0 -r sh -c "$atlas_g" sh >&4; } 5>&1 ); atlas_xs=$?; atlas_mark "$atlas_fs" ${mark}; atlas_mark "$atlas_xs" ${mark}; } 4>&1 | head -n ${options.cap} | base64 | tr -d '\\n'`);
+}
 interface SafeWriteScript { path: string; staging: string; suffix: string; expected: string; fingerprint: string; mode: string; keep: boolean; key: string }
 /** One subshell: resolve, verify, rotate versions, then replace. Exit 73 on a changed file. */
 export function safeWriteScript(input: SafeWriteScript): string {
@@ -147,25 +210,43 @@ export class TerminalFileTransport implements FileTransport {
       return Buffer.from(output.toString('utf8').trim(), 'base64');
     },
   };
-  async search(logicalPath: string, query: string, options: FileSearchOptions = {}): Promise<FileSearchMatch[]> {
+  async home(options: { signal?: AbortSignal } = {}): Promise<string> { const value = (await this.#run(`printf '%s' "\${HOME:-/}"`, options)).toString('utf8').trim(); return value.startsWith('/') ? value : '/'; }
+  async search(logicalPath: string, query: string, options: FileSearchOptions = {}): Promise<FileSearchResult> {
     if(options.signal?.aborted)throw Object.assign(new Error('Filesystem search was cancelled.'),{code:'cancelled'});
-    const limit=Math.min(options.filesOnly?5_000:500,Math.max(1,options.limit??200)),mode=options.mode??'all',root=posixQuote(logicalPath),maxDepth=Math.min(32,Math.max(0,options.maxDepth??12)),maxEntries=Math.min(20_000,Math.max(1,options.maxEntries??5_000)),maxFileBytes=Math.min(2*1024*1024,Math.max(1,options.maxFileBytes??1024*1024)),perFile=Math.min(500,Math.max(1,options.maxMatchesPerFile??8));
+    const mode=options.mode??'all',kind=mode==='name'?'name':options.filesOnly?'files':'content';
+    // One search per Device and kind at a time; see SearchLane.
+    return await remoteSearchLane.run(`${this.contextId}\u0000${kind}`,()=>this.#search(logicalPath,query,options),options.signal);
+  }
+  async #search(logicalPath: string, query: string, options: FileSearchOptions): Promise<FileSearchResult> {
+    const started=Date.now(),mode=options.mode??'all',budgetMs=budgetFor(options),seconds=Math.max(1,Math.ceil(budgetMs/1000));
+    const limit=Math.min(options.filesOnly?5_000:500,Math.max(1,options.limit??200)),maxDepth=Math.min(64,Math.max(0,options.maxDepth??32)),maxFileBytes=Math.min(2*1024*1024,Math.max(1,options.maxFileBytes??1024*1024)),perFile=Math.min(500,Math.max(1,options.maxMatchesPerFile??8));
     const include=options.include??[],exclude=options.exclude??[],accept=pathFilter(include,exclude),relative=(value:string)=>path.posix.relative(logicalPath,value);
-    // Prefilter in find (POSIX -name/-path, no grep --include), then apply
-    // the exact glob semantics to the results in JS.
-    const prune=exclude.length?`\\( ${exclude.map(glob=>findTest(logicalPath,glob)).join(' -o ')} \\) -prune -o `:'',includeTest=include.length?` \\( ${include.map(glob=>findTest(logicalPath,glob)).join(' -o ')} \\)`:'';
-    const run=async(command:string)=>{const result=await this.executor.execute(onlyIf(readableDirectory(logicalPath),isolated(command)),{signal:options.signal,timeoutMs:options.filesOnly?30_000:10_000});if(result.exitCode===MISSING_STATUS)throw Object.assign(new Error('The path does not exist or is not readable on the Device.'),{code:'path_not_found',exitCode:result.exitCode});if(result.exitCode!==0)throw Object.assign(new Error(`Remote command failed with exit code ${result.exitCode}.`),{code:'remote_command_failed',exitCode:result.exitCode});return Buffer.from(result.output.toString('utf8').trim(),'base64').toString('utf8')};
-    const matches:FileSearchMatch[]=[];
-    if(mode!=='content'&&!options.filesOnly){const text=await run(`find -H ${root} -xdev -mindepth 1 -maxdepth ${maxDepth} ${prune}\\( -type d -o -type f \\) -printf '%p\\0%y\\0' | head -z -n ${maxEntries*2} | base64 | tr -d '\\n'`),fields=text.split('\0');fields.pop();for(let index=0;index+1<fields.length&&matches.length<limit;index+=2){const [value,kind]=fields.slice(index,index+2),type=kind==='d'?'directory' as const:'file' as const;if(!accept(relative(value),type))continue;if(path.posix.basename(value).toLocaleLowerCase().includes(query.toLocaleLowerCase()))matches.push({path:value,type});}}
-    if(mode==='name'||matches.length>=limit)return matches;
+    const plan:RemoteFindPlan={root:logicalPath,maxDepth,pruneNames:options.pruneNames??[...DEFAULT_PRUNE_NAMES],prunePaths:options.prunePaths,exclude,include,seconds};
+    const run=async(command:string,timeoutMs:number)=>{const result=await this.executor.execute(onlyIf(readableDirectory(logicalPath),command),{timeoutMs});if(result.exitCode===MISSING_STATUS)throw Object.assign(new Error('The path does not exist or is not readable on the Device.'),{code:'path_not_found',exitCode:result.exitCode});if(result.exitCode!==0)throw Object.assign(new Error(`Remote command failed with exit code ${result.exitCode}.`),{code:'remote_command_failed',exitCode:result.exitCode});return Buffer.from(result.output.toString('utf8').trim(),'base64').toString('utf8')};
+    const finish=(matches:FileSearchMatch[],reason?:SearchStopReason):FileSearchResult=>({matches,truncated:Boolean(reason),...(reason?{reason}:{}),elapsedMs:Date.now()-started});
+    if(mode!=='content'&&!options.filesOnly){
+      const cap=Math.min(5_000,Math.max(500,limit*4)),text=await run(remoteNameSearchCommand(plan,query,cap),(seconds+10)*1000),records=text.split('\0\n');records.pop();
+      let timedOut=false;const found:FileSearchMatch[]=[];
+      for(const record of records){if(record==='T'){timedOut=true;continue}const kind=record[0],value=record.slice(1),type=kind==='d'?'directory' as const:'file' as const;if(!value.startsWith('/')||!accept(relative(value),type))continue;found.push({path:value,type})}
+      const ranked=rankNameMatches(query,found),reason:SearchStopReason|undefined=records.filter(record=>record!=='T').length>=cap||ranked.length>limit?'limit':timedOut?'time':undefined;
+      if(mode==='name'||ranked.length>=limit)return finish(ranked.slice(0,limit),reason);
+      const content=await this.#content(plan,query,options,{limit:limit-ranked.length,maxFileBytes,perFile,accept,relative,run});
+      return finish([...ranked,...content.matches],reason??content.reason);
+    }
+    const content=await this.#content(plan,query,options,{limit,maxFileBytes,perFile,accept,relative,run});
+    return finish(content.matches,content.reason);
+  }
+  async #content(plan:RemoteFindPlan,query:string,options:FileSearchOptions,input:{limit:number;maxFileBytes:number;perFile:number;accept:ReturnType<typeof pathFilter>;relative:(value:string)=>string;run:(command:string,timeoutMs:number)=>Promise<string>}):Promise<{matches:FileSearchMatch[];reason?:SearchStopReason}>{
+    const {limit,maxFileBytes,perFile,accept,relative,run}=input,matches:FileSearchMatch[]=[],timeoutMs=(plan.seconds+15)*1000;
     const textQuery={query,regex:options.regex,wholeWord:options.wholeWord,caseSensitive:options.caseSensitive??true},expression=options.regex||options.wholeWord||options.caseSensitive===false?compileQuery(textQuery):undefined;
-    const grep=grepArguments(textQuery).map((arg,index,all)=>index===all.length-1?posixQuote(arg):arg).join(' '),candidates=`find -H ${root} -xdev -mindepth 1 -maxdepth ${maxDepth} ${prune}-type f${includeTest} -size -${maxFileBytes}c -print0 | head -z -n ${maxEntries}`;
-    if(options.filesOnly){const script=`grep -lZI ${grep} "$@" 2>/dev/null; status=$?; [ "$status" -eq 0 ] || [ "$status" -eq 1 ]`,text=await run(`${candidates} | xargs -0 -r sh -c ${posixQuote(script)} sh | head -z -n ${limit} | base64 | tr -d '\\n'`);for(const value of text.split('\0'))if(value&&accept(relative(value)))matches.push({path:value,type:'file'});return matches;}
-    const script=`grep -ZInH -m ${perFile} ${grep} "$@" 2>/dev/null; status=$?; [ "$status" -eq 0 ] || [ "$status" -eq 1 ]`,text=await run(`${candidates} | xargs -0 -r sh -c ${posixQuote(script)} sh | head -n ${limit*4} | base64 | tr -d '\\n'`);let cursor=0;
-    while(cursor<text.length&&matches.length<limit){const nul=text.indexOf('\0',cursor);if(nul<0)break;const value=text.slice(cursor,nul),end=text.indexOf('\n',nul+1),body=text.slice(nul+1,end<0?text.length:end),colon=body.indexOf(':');cursor=end<0?text.length:end+1;if(colon<=0||!accept(relative(value)))continue;const line=Number(body.slice(0,colon)),content=body.slice(colon+1);
+    const grep=grepArguments(textQuery).map((arg,index,all)=>index===all.length-1?posixQuote(arg):arg).join(' ');
+    if(options.filesOnly){const text=await run(remoteContentSearchCommand(plan,grep,{maxFileBytes,filesOnly:true,cap:limit}),timeoutMs);let timedOut=false,count=0;for(const value of text.split('\0\n')){if(!value)continue;if(value===FILES_TIME_MARK){timedOut=true;continue}count++;if(accept(relative(value)))matches.push({path:value,type:'file'})}return {matches,reason:count>=limit?'limit':timedOut?'time':undefined}}
+    const text=await run(remoteContentSearchCommand(plan,grep,{maxFileBytes,filesOnly:false,cap:limit*4,perFile}),timeoutMs);
+    let cursor=0,timedOut=false,lines=0;
+    while(cursor<text.length){const nul=text.indexOf('\0',cursor);if(nul<0)break;const value=text.slice(cursor,nul),end=text.indexOf('\n',nul+1),body=text.slice(nul+1,end<0?text.length:end),colon=body.indexOf(':');cursor=end<0?text.length:end+1;if(!value&&body===CONTENT_TIME_MARK){timedOut=true;continue}lines++;if(matches.length>=limit||colon<=0||!accept(relative(value)))continue;const line=Number(body.slice(0,colon)),content=body.slice(colon+1);
       if(!expression){const column=content.indexOf(query);matches.push({path:value,type:'file',line,column:column<0?1:column+1,length:query.length,preview:content.trim().slice(0,240)});continue;}
       for(const hit of lineMatches(content,expression,perFile)){matches.push({path:value,type:'file',line,column:hit.column,length:hit.length,preview:content.trim().slice(0,240)});if(matches.length>=limit)break;}}
-    return matches;
+    return {matches,reason:matches.length>=limit||lines>=limit*4?'limit':timedOut?'time':undefined};
   }
   async createFile(logicalPath:string,content=Buffer.alloc(0)){if(!content.length){await this.#run(unlessExists(logicalPath,isolated(`umask 077; set -C; : > ${posixQuote(logicalPath)}`)));return;}const suffix=randomUUID(),temporary=`${logicalPath}.atlas-${suffix}.tmp`,encoded=`${temporary}.b64`;try{await this.#run(isolated(`umask 077; set -C; : > ${posixQuote(encoded)}`));const base64=content.toString('base64');for(let offset=0;offset<base64.length;offset+=12_000)await this.#run(`printf '%s' ${posixQuote(base64.slice(offset,offset+12_000))} >> ${posixQuote(encoded)}`);await this.#run(unlessExists(logicalPath,isolated(`base64 -d ${posixQuote(encoded)} > ${posixQuote(temporary)} && chmod 600 ${posixQuote(temporary)} && ln -- ${posixQuote(temporary)} ${posixQuote(logicalPath)} && rm -f ${posixQuote(temporary)} ${posixQuote(encoded)}`)));}catch(error){await this.executor.execute(`rm -f ${posixQuote(temporary)} ${posixQuote(encoded)}`).catch(()=>{});throw error;}}
   async createDirectory(logicalPath:string){await this.#run(`mkdir -- ${posixQuote(logicalPath)}`);}

@@ -1,6 +1,7 @@
 import type { AccessRoute } from '../domain/access.js';
 import type { TransportEntry } from './direct.js';
 import type { VersionStore } from '../files/versions.js';
+import type { FileSearchResult } from '../files/name-search.js';
 
 export interface FileStat { size: number; mode: number }
 export interface FileSearchMatch { path: string; type: 'file' | 'directory'; line?: number; column?: number; length?: number; preview?: string }
@@ -12,6 +13,12 @@ export interface FileSearchOptions {
   include?: string[]; exclude?: string[];
   /** Content mode: return each matching file once, without lines. */
   filesOnly?: boolean; maxMatchesPerFile?: number;
+  /** Wall-clock budget; a search that runs out returns what it found, marked truncated. */
+  budgetMs?: number;
+  /** Directory names skipped below the root. Defaults to DEFAULT_PRUNE_NAMES. */
+  pruneNames?: string[];
+  /** Extra absolute context paths never entered, on top of the pseudo filesystems. */
+  prunePaths?: string[];
 }
 export interface SafeWriteOptions {
   /** sha256 the file must still have, checked immediately before the replace. */
@@ -30,7 +37,10 @@ export interface FileTransport extends AccessRoute {
   /** Fingerprint-guarded write through symlinks, preserving mode and hardlinks, with version rotation. */
   safeWrite?(path: string, content: Buffer, options?: SafeWriteOptions): Promise<void>;
   readonly versions?: VersionStore;
-  search?(path: string, query: string, options?: FileSearchOptions): Promise<FileSearchMatch[]>;
+  /** Adapters may return bare matches; FileService treats those as complete. */
+  search?(path: string, query: string, options?: FileSearchOptions): Promise<FileSearchMatch[] | FileSearchResult>;
+  /** The context user's home directory as a context path. */
+  home?(options?: { signal?: AbortSignal }): Promise<string>;
   createFile?(path: string, content?: Buffer): Promise<void>;
   createDirectory?(path: string): Promise<void>;
   move?(path: string, destination: string): Promise<void>;

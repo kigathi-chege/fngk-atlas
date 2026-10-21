@@ -4,6 +4,7 @@ import type { AccessTarget } from '../domain/access.js';
 import { OperationResolver } from '../domain/access.js';
 import type { TransportEntry } from '../transports/direct.js';
 import type { FileSearchOptions, FileTransport } from '../transports/file-transport.js';
+import type { FileSearchResult } from './name-search.js';
 
 export class FileConflictError extends Error { readonly code = 'file_conflict'; }
 export interface FilePage { items: TransportEntry[]; nextCursor: string | null; route: FileTransport }
@@ -136,7 +137,27 @@ export class FileService {
     return { ...written, restoredSlot: slot, restoredFingerprint: version.fingerprint };
   }
   #protect(value:string){const normalized=this.#target({contextId:'validation',path:value}).path;if(normalized==='/'||normalized.trim()===''||normalized==='/.atlas-trash'||normalized.startsWith('/.atlas-trash/'))throw Object.assign(new Error('The context root and recovery vault cannot be changed.'),{code:'protected_path'});return normalized;}
-  async search(target:Required<Pick<AccessTarget,'contextId'|'path'>>,query:string,options:FileSearchOptions={}){target=this.#target(target);if(options.signal?.aborted)throw Object.assign(new Error('Filesystem search was cancelled.'),{code:'cancelled'});if(!query.trim())return {matches:[],route:this.#routes(target,'search')[0]};const errors:unknown[]=[];for(const route of this.#routes(target,'search'))try{if(!route.search)continue;return {matches:await route.search(target.path,query,{...options,limit:Math.min(500,Math.max(1,options.limit??200)),maxEntries:Math.min(20_000,Math.max(1,options.maxEntries??5_000)),maxDepth:Math.min(32,Math.max(0,options.maxDepth??12))}),route};}catch(error){if((error as {code?:string}).code==='cancelled')throw error;errors.push(error)}throw this.#unavailable('search',errors)}
+  /** Home directory of the first route that knows it; `/` otherwise. */
+  async home(target:Pick<AccessTarget,'contextId'>,options:{signal?:AbortSignal}={}):Promise<string>{
+    for(const route of this.#routes({contextId:target.contextId,path:'/'},'search'))try{if(!route.home)continue;const value=await route.home(options);if(value.startsWith('/')&&!value.includes('\0'))return path.posix.normalize(value)}catch(error){if(isCancelled(error,options.signal))throw error}
+    return '/';
+  }
+  /**
+   * Every route reports the same shape: matches plus whether the search
+   * stopped early and why. Adapters that return bare matches are complete.
+   */
+  async search(target:Required<Pick<AccessTarget,'contextId'|'path'>>,query:string,options:FileSearchOptions={}):Promise<FileSearchResult&{route:FileTransport;root:string}>{
+    target=this.#target(target);if(options.signal?.aborted)throw Object.assign(new Error('Filesystem search was cancelled.'),{code:'cancelled'});
+    if(!query.trim())return {matches:[],truncated:false,elapsedMs:0,route:this.#routes(target,'search')[0],root:target.path};
+    const errors:unknown[]=[],started=Date.now();
+    for(const route of this.#routes(target,'search'))try{
+      if(!route.search)continue;
+      const value=await route.search(target.path,query,{...options,limit:Math.min(options.filesOnly?5_000:500,Math.max(1,options.limit??200)),...(options.maxEntries!==undefined?{maxEntries:Math.min(1_000_000,Math.max(1,options.maxEntries))}:{}),maxDepth:Math.min(64,Math.max(0,options.maxDepth??32))});
+      const result:FileSearchResult=Array.isArray(value)?{matches:value,truncated:false,elapsedMs:Date.now()-started}:value;
+      return {...result,route,root:target.path};
+    }catch(error){if(isCancelled(error,options.signal))throw error;errors.push(error)}
+    throw this.#unavailable('search',errors)
+  }
   async createFile(target:Required<Pick<AccessTarget,'contextId'|'path'>>,content=Buffer.alloc(0)){target=this.#target(target);target={...target,path:this.#protect(target.path)};const errors:unknown[]=[];for(const route of this.#routes(target,'create'))try{if(!route.createFile)continue;await route.createFile(target.path,content);return {path:target.path,bytes:content.length,fingerprint:fingerprint(content),route};}catch(error){if(['EEXIST','file_conflict'].includes((error as {code?:string}).code??''))throw new FileConflictError('A file already exists at this path.');errors.push(error)}throw this.#unavailable('create',errors)}
   async createDirectory(target:Required<Pick<AccessTarget,'contextId'|'path'>>){target=this.#target(target);target={...target,path:this.#protect(target.path)};const errors:unknown[]=[];for(const route of this.#routes(target,'create'))try{if(!route.createDirectory)continue;await route.createDirectory(target.path);return {path:target.path,route};}catch(error){errors.push(error)}throw this.#unavailable('create',errors)}
   async move(target:Required<Pick<AccessTarget,'contextId'|'path'>>,destination:string){target=this.#target(target);target={...target,path:this.#protect(target.path)};destination=this.#protect(destination);const errors:unknown[]=[];for(const route of this.#routes(target,'move'))try{if(!route.move)continue;await route.move(target.path,destination);return {path:target.path,destination,route};}catch(error){if((error as {code?:string}).code==='file_conflict')throw error;errors.push(error)}throw this.#unavailable('move',errors)}
