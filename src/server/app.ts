@@ -261,6 +261,7 @@ export async function createApp(
   const lifecycle = new DeviceLifecycleService({
     profiles: () => fngk.profiles(),
     contexts: (profile) => contexts.contexts({profile}),
+    remote: (deviceId, profile) => fngk.deviceLifecycle(deviceId, { profile }),
   });
   const portStore = new PortShareStore(databaseFile);
   const portSharing = new PortSharingService(portStore,fngk,{diagnostics,executorFor:(contextId)=>contexts.commandExecutor(contextId)});

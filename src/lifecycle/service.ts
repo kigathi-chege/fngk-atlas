@@ -31,9 +31,13 @@ export type DeviceReadiness = {
 
 export type DeviceLifecycleCapabilities = Record<'disconnect'|'retire'|'delete', {available:boolean;reason?:string}>;
 
+export type RemoteLifecycleInspection = { state: string; terminal?: string; daemon?: string; activeAgentVersion?: string; paired?: boolean };
+
 type LifecycleSource = {
   profiles: () => Promise<{ profiles: SafeLifecycleProfile[] }>;
   contexts: (profile?: string) => Promise<{ contexts: Array<{ id: string; kind?: string; online?: boolean }> }>;
+  /** fngk devices ID lifecycle --json: what the Device's own agent reports. */
+  remote?: (deviceId: string, profile: string) => Promise<RemoteLifecycleInspection>;
 };
 
 const usable = (profile: SafeLifecycleProfile) => profile.operatorAuthorized;
@@ -64,11 +68,21 @@ export class DeviceLifecycleService {
 
     if (!profile.operatorAuthorized) return this.result(contextId, 'needs-login', selection, profiles, profile, 'operator_authorization_required', 'Authorize the selected FNGK profile before managing this Device.');
 
+    if (this.source.remote) {
+      try {
+        const remote = await this.source.remote(contextId.slice('device:'.length), profile.name);
+        if (remote.state === 'offline') return this.result(contextId, 'offline', selection, profiles, profile, 'device_offline', 'This Device is offline. Reconnect it before continuing.');
+        if (remote.state === 'ready' && remote.terminal === 'available') return this.result(contextId, 'ready', selection, profiles, profile, 'remote_ready', `The Device agent${remote.activeAgentVersion ? ` ${remote.activeAgentVersion}` : ''} is ready (daemon ${remote.daemon ?? 'unknown'}).`);
+        return this.result(contextId, 'inspection-unavailable', selection, profiles, profile, 'remote_not_ready', `The Device agent reported ${remote.state} with terminal ${remote.terminal ?? 'unknown'}.`);
+      } catch (error) {
+        return this.result(contextId, 'inspection-unavailable', selection, profiles, profile, 'remote_inspection_failed', `The Device did not answer a lifecycle inspection: ${(error as Error).message}`);
+      }
+    }
     return this.result(contextId, 'inspection-unavailable', selection, profiles, profile, 'remote_inspection_unavailable', 'This Device is online. Local profile authorization is available, but this Atlas bridge cannot yet verify the remote daemon or update readiness. Local pairing and daemon state describe this computer, not the selected Device.');
   }
 
   private result(contextId: string, state: DeviceReadinessState, profileSelection: DeviceReadiness['profileSelection'], profiles: SafeLifecycleProfile[], profile: SafeLifecycleProfile | undefined, code: string, message: string): DeviceReadiness {
-    const disconnect=state==='inspection-unavailable'&&Boolean(profile)?{available:true}:{available:false,reason:'Connect an online Device with an authorized profile before releasing its local Atlas route.'};
+    const disconnect=(state==='inspection-unavailable'||state==='ready')&&Boolean(profile)?{available:true}:{available:false,reason:'Connect an online Device with an authorized profile before releasing its local Atlas route.'};
     const unavailable={available:false,reason:'This FNGK control-plane operation is not available to Atlas yet. Atlas will not emulate it with a shell command.'};
     return { protocolVersion: 'atlas.device-lifecycle.v1', contextId, state, profileSelection, profiles: profiles.map((value) => ({ ...value })), ...(profile ? { profile: { ...profile } } : {}), diagnostics: [{ code, message }], capabilities:{disconnect,retire:unavailable,delete:unavailable} };
   }
