@@ -1,5 +1,6 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
+import { isDesktopApp, startDesktopEvents } from './lib/desktop-events.js';
 import './theme.css';
 import './styles.css';
 import './enhancements.css';
@@ -9,3 +10,4 @@ import './workspace.css';
 import './components/ui/form-controls.css';
 
 mount(App, { target: document.getElementById('app')! });
+if (isDesktopApp()) startDesktopEvents();
