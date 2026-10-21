@@ -127,7 +127,7 @@
   .sp-search-error{color:var(--atlas-danger)}
   .sp-search-results{flex:1;min-height:0;overflow:auto;padding:2px 0 12px}
   .sp-result-file ul{list-style:none;margin:0;padding:0}
-  .sp-file-head{display:flex;align-items:center;gap:4px;padding:2px 8px 2px 4px;position:sticky;top:0;background:var(--atlas-surface-1)}
+  .sp-file-head{display:flex;align-items:center;gap:4px;padding:2px 8px 2px 4px;position:sticky;top:0;z-index:1;background:var(--atlas-surface-1);box-shadow:0 1px 0 var(--atlas-border)}
   .sp-file-head .sp-twisty{border:0;background:transparent;padding:2px;color:var(--atlas-muted);display:grid;place-items:center}
   .sp-file-head input,.sp-result-file li input{margin:0;accent-color:var(--atlas-accent)}
   .sp-file-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;font-weight:550}
