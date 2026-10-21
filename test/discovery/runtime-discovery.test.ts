@@ -78,4 +78,14 @@ describe("runtime census", () => {
     );
     expect(JSON.stringify(entities)).not.toContain("super-secret");
   });
+
+  it("reports an unreachable Device instead of an empty machine", async () => {
+    const executor = { execute: async () => { throw Object.assign(new Error("Terminal command timed out."), { code: "timeout" }); } };
+    await expect(new RuntimeDiscovery(executor).scan("device:d1", "ports")).rejects.toMatchObject({ code: "timeout" });
+  });
+
+  it("treats a missing tool as no results", async () => {
+    const executor = { execute: async () => ({ output: Buffer.from("sh: docker: not found"), exitCode: 127 }) };
+    await expect(new RuntimeDiscovery(executor).scan("device:d1", "ports")).resolves.toEqual([]);
+  });
 });

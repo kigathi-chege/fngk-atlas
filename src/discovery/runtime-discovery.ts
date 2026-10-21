@@ -23,16 +23,14 @@ export class RuntimeDiscovery {
         throw Object.assign(new Error("Discovery cancelled."), {
           code: "cancelled",
         });
-      try {
-        const result = await this.executor.execute(command, {
-          timeoutMs: 10_000,
-          signal,
-        });
-        return result.exitCode === 0 ? result.output.toString("utf8") : "";
-      } catch (error) {
-        if (signal?.aborted) throw error;
-        return "";
-      }
+      // A missing tool exits non-zero and yields nothing; a transport failure
+      // (timeout, closed terminal) throws, so an unreachable Device is reported
+      // instead of looking like a machine with no processes or ports.
+      const result = await this.executor.execute(command, {
+        timeoutMs: 10_000,
+        signal,
+      });
+      return result.exitCode === 0 ? result.output.toString("utf8") : "";
     };
     const workingDirectories = new Map<number, string>(),
       systemdUnits = new Map<number, string>();

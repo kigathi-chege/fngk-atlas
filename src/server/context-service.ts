@@ -91,7 +91,9 @@ export class EffectiveContextService {
   }
   async commandExecutor(contextId:string,profile=this.selectedProfile()):Promise<CommandExecutor>{
     const route=await this.route(contextId,profile);
-    if(route instanceof TerminalFileTransport)return route.executor;
+    // A transport failure (timeout, closed terminal) means the cached route is
+    // dead; drop it so the next caller opens a fresh terminal.
+    if(route instanceof TerminalFileTransport)return{execute:async(command,options)=>{try{return await route.executor.execute(command,options)}catch(error){if((error as {code?:string}).code!=='cancelled')route.onUnavailable?.(error);throw error}}};
     if(route instanceof DirectTransport)return new DirectCommandExecutor();
     throw Object.assign(new Error('This context has no command route.'),{code:'route_unavailable'});
   }
