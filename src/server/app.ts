@@ -49,6 +49,8 @@ import { PortShareStore } from "../ports/store.js";
 import { PortSharingService } from "../ports/service.js";
 import { FngkHeadHandoffService } from "../fngk-head/handoff-service.js";
 import { BootstrapService } from "../onboarding/service.js";
+import { desktopEnvironment, FngkProvisioner, type DesktopFngkEnvironment } from "../onboarding/provisioner.js";
+import { registerDesktopRoutes } from "./desktop-routes.js";
 import { AuthFlow } from "../onboarding/auth-flow.js";
 import { createLocalFngkLoginLauncher, FngkBrowserAuthorizationRuntime } from "../onboarding/fngk-auth.js";
 import { DeviceLifecycleService } from "../lifecycle/service.js";
@@ -93,6 +95,8 @@ interface CreateAppOptions {
   deviceAdapters?: RegisteredDeviceAdapter[];
   worldRefreshMode?: 'inline'|'worker';
   capability?: string;
+  desktop?: DesktopFngkEnvironment;
+  fngkProvisioner?: FngkProvisioner;
 }
 
 function processError(error: unknown): {
@@ -183,7 +187,13 @@ export async function createApp(
     path.join(root, ".atlas", "atlas.db");
   const store = new Store(databaseFile);
   const fngk = options.fngk ?? new FngkProcessClient();
-  const bootstrap = new BootstrapService(fngk);
+  const desktop = options.desktop ?? desktopEnvironment();
+  const fngkProvisioner = options.fngkProvisioner ?? new FngkProvisioner(desktop);
+  const bootstrap = new BootstrapService({
+    probe: (profile, signal) => fngk.probe(profile, signal),
+    install: (profile, signal) => fngk.install(profile, signal),
+    installBinary: (scope, emit, signal) => fngkProvisioner.installBinary(scope, emit, signal),
+  });
   const browserAuthorizations = new Map<string, AuthFlow>();
   const profileScope=createProfileScope();
   fngk.setProfileProvider?.(profileScope.current);
@@ -655,6 +665,7 @@ export async function createApp(
     try { for await (const event of bootstrap.converge(profile, requestSignal(request))) events.push(event); return { snapshot: bootstrap.snapshot(), events }; }
     catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
   });
+  registerDesktopRoutes(app, { bootstrap, provisioner: fngkProvisioner, environment: desktop, profile: () => profileScope.current() ?? "local", processError, signal: requestSignal });
   app.post("/api/onboarding/login/begin", async (request, reply) => {
     const body = request.body as { profile?: unknown; origin?: unknown } | undefined;
     if (typeof body?.origin !== "string") return reply.code(400).send({ error: "authorization_origin_invalid", message: "A secure Signal origin is required." });
