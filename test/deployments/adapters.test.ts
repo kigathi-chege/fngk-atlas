@@ -43,4 +43,16 @@ describe('deployment adapter registry',()=>{
     expect(supervisor.manifest.roles.every(role=>role.runtime.manager==='supervisor')).toBe(true);
     expect(supervisor.matches.map(item=>item.id)).toEqual(expect.arrayContaining(['supervisor','cron']));
   });
+
+  it('picks a runtime manager the Device has when the project declares none', () => {
+    const files = { 'package.json': JSON.stringify({ name: 'app', scripts: { start: 'node server.js' } }), 'package-lock.json': '{}' };
+    const withPm2 = interpretDeploymentProject({ files, environment: 'production', availableManagers: ['pm2', 'docker'] });
+    expect(withPm2.manifest.roles[0].runtime.manager).toBe('pm2');
+    expect(withPm2.warnings.join(' ')).not.toMatch(/has no/);
+    const none = interpretDeploymentProject({ files, environment: 'production', availableManagers: [] });
+    expect(none.manifest.roles[0].runtime.manager).toBe('systemd');
+    expect(none.warnings.join(' ')).toMatch(/has no systemd runtime manager \(found: none\)/);
+    expect(interpretDeploymentProject({ files: { ...files, 'ecosystem.config.cjs': 'module.exports={}' }, environment: 'production', availableManagers: ['systemd'] }).manifest.roles[0].runtime.manager).toBe('pm2');
+  });
 });
+

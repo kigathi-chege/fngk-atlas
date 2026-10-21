@@ -52,6 +52,7 @@ import { BootstrapService } from "../onboarding/service.js";
 import { AuthFlow } from "../onboarding/auth-flow.js";
 import { createLocalFngkLoginLauncher, FngkBrowserAuthorizationRuntime } from "../onboarding/fngk-auth.js";
 import { DeviceLifecycleService } from "../lifecycle/service.js";
+import { availableRuntimeManagers } from "../deployments/runtime-managers.js";
 import { DeviceSessionManager, type DeviceSessionLease } from "../device-sessions/manager.js";
 import type { DeviceScope, DeviceSessionSnapshot } from "../device-sessions/types.js";
 import { FilesystemCache } from "../device-sessions/filesystem-cache.js";
@@ -929,7 +930,8 @@ export async function createApp(
         }
         return collected;
       });
-      return interpretDeploymentProject({ files, environment });
+      const availableManagers = await availableRuntimeManagers(await contexts.commandExecutor(contextId), requestSignal(request, reply)).catch(() => undefined);
+      return interpretDeploymentProject({ files, environment, ...(availableManagers ? { availableManagers } : {}) });
     } catch (error) {
       const result = processError(error);
       return reply
@@ -1070,6 +1072,7 @@ export async function createApp(
     }
   });
   app.post("/api/deployments",async(request,reply)=>{const body=request.body as any,contextId=String(body?.contextId??'');if(!contextId.startsWith('device:'))return reply.code(400).send({error:'device_context_required'});if(body?.confirm!==true)return reply.code(409).send({error:'confirmation_required'});const{contextId:_contextId,confirm:_confirm,profile,...input}=body;try{return reply.code(201).send(await fngk.createDeployment(contextId.slice(7),input,{profile:String(profile??'')||undefined,signal:requestSignal(request)}))}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
+  app.post("/api/deployments/:id/revisions",async(request,reply)=>{const body=request.body as any;if(body?.confirm!==true)return reply.code(409).send({error:'confirmation_required'});const{contextId:_contextId,confirm:_confirm,profile,...input}=body;try{return reply.code(201).send(await fngk.reviseDeployment(decodeURIComponent((request.params as any).id),input,{profile:String(profile??'')||undefined,signal:requestSignal(request)}))}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
   app.get("/api/deployment-secrets/key",async(request,reply)=>{const contextId=String((request.query as any).contextId??'');if(!contextId.startsWith('device:'))return reply.code(400).send({error:'device_context_required'});try{return await fngk.deploymentSecretKey(contextId.slice(7),{profile:String((request.query as any).profile??'')||undefined,signal:requestSignal(request)})}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
   app.post("/api/deployment-sources/snapshot",async(request,reply)=>{const body=request.body as any,contextId=String(body?.contextId??''),sourcePath=String(body?.path??'');if(!contextId.startsWith('device:'))return reply.code(400).send({error:'device_context_required'});if(!sourcePath.startsWith('/')||sourcePath==='/')return reply.code(400).send({error:'invalid_source_path'});try{return reply.code(201).send(await fngk.snapshotDeploymentSource(contextId.slice(7),sourcePath,{profile:String(body?.profile??'')||undefined,signal:requestSignal(request)}))}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
   app.post("/api/deployment-secrets",async(request,reply)=>{const body=request.body as any,contextId=String(body?.contextId??'');if(!contextId.startsWith('device:'))return reply.code(400).send({error:'device_context_required'});if(body?.confirm!==true)return reply.code(409).send({error:'confirmation_required'});const envelope=body?.secretEnvelope;if(!envelope||!['ephemeralPublicKey','salt','nonce','ciphertext'].every(key=>typeof envelope[key]==='string'&&envelope[key].length>0))return reply.code(400).send({error:'invalid_secret_envelope'});try{return reply.code(201).send(await fngk.storeDeploymentSecret(contextId.slice(7),envelope,{profile:String(body?.profile??'')||undefined,signal:requestSignal(request)}))}catch(error){const result=processError(error);return reply.code(result.statusCode).send(result.body)}});
