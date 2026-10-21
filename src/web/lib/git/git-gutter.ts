@@ -64,6 +64,10 @@ export function gitGutter(contextId: string, file: string, options: { debounceMs
     async load() {
       const generation = ++this.generation;
       try {
+        // Ask the (soft) discovery probe first, so files outside a repository never request HEAD.
+        const folder = file.slice(0, file.lastIndexOf('/')) || '/';
+        if (!(await gitStatusStore.discover(contextId, folder))) { this.base = null; this.compute(); return; }
+        if (this.destroyed || generation !== this.generation) return;
         const value = await gitGet<{ exists: boolean; binary: boolean; tooLarge: boolean; text: string }>('show', { contextId, file, ref: 'HEAD' });
         if (this.destroyed || generation !== this.generation) return;
         if (value.binary || value.tooLarge) this.base = null;

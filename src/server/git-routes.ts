@@ -119,9 +119,20 @@ export function registerGitRoutes(app: FastifyInstance, dependencies: GitRouteDe
     } });
   };
 
-  route('GET', '/api/git/repository', async ({ service }, input, signal) => {
-    const repository = await service.discover(folder(input), { signal });
-    return { repository: repository ? publicRepository(repository) : null };
+  // A probe: views ask it about folders that may not exist, may not be
+  // repositories, or may sit on a Device without git. It answers 200 either
+  // way so background decoration never reads as a failure.
+  app.get('/api/git/repository', async (request, reply) => {
+    const input = request.query as Record<string, unknown>;
+    let access: Access | undefined;
+    try {
+      access = await acquire(input, request, reply);
+      const repository = await access.service.discover(folder(input), { signal: signalFor(request, reply) });
+      return reply.send({ repository: repository ? publicRepository(repository) : null });
+    } catch (error) {
+      const value = error as { code?: string; message?: string };
+      return reply.send({ repository: null, unavailable: { code: typeof value.code === 'string' ? value.code : 'git_unavailable', message: redact(value.message ?? 'Git is unavailable here.') } });
+    } finally { access?.release(); }
   });
   route('GET', '/api/git/status', async ({ service }, input, signal) => {
     const repository = await service.discover(folder(input), { signal });

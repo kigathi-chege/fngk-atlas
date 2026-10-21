@@ -32,6 +32,11 @@ describe('git routes', () => {
     const response = await app.inject({ method: 'GET', url: '/api/git/status?contextId=local&root=/' });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ repository: null });
+    // The discovery probe never fails, even for a folder that does not exist.
+    const probe = await app.inject({ method: 'GET', url: '/api/git/repository?contextId=local&root=/missing/folder' });
+    expect(probe.statusCode).toBe(200);
+    expect(probe.json()).toMatchObject({ repository: null, unavailable: { code: 'path_not_found' } });
+    expect((await app.inject({ method: 'GET', url: '/api/git/repository?contextId=local&root=/repo' })).json()).toEqual({ repository: { root: '/repo', bare: false } });
   });
 
   it('stages and commits through logical paths, asking for an identity first', async () => {

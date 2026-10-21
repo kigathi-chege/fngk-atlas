@@ -74,8 +74,12 @@ export class GitStatusStore {
     const id = key(contextId, folder);
     let pending = this.#discovered.get(id);
     if (!pending) {
-      pending = gitGet<{ repository: { root: string; bare: boolean } | null }>('repository', { contextId, root: folder })
-        .then(value => value.repository && !value.repository.bare ? value.repository.root : null)
+      pending = gitGet<{ repository: { root: string; bare: boolean } | null; unavailable?: { code: string } }>('repository', { contextId, root: folder })
+        .then(value => {
+          // "Not a repository" is stable; a transport or tooling problem is worth asking again later.
+          if (value.unavailable) setTimeout(() => { if (this.#discovered.get(id) === pending) this.#discovered.delete(id); }, 30_000);
+          return value.repository && !value.repository.bare ? value.repository.root : null;
+        })
         .catch(() => { this.#discovered.delete(id); return null; });
       this.#discovered.set(id, pending);
       void pending.then(root => { if (root) this.noteRepository(contextId, root); });
