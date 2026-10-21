@@ -1,0 +1,304 @@
+# Atlas desktop release: build, sign, attest, attach to the GitHub Release and
+# publish to https://downloads.signol.org/atlas/ (latest.json last).
+#
+# Linux (x64 + arm64, AppImage + deb) always builds. macOS and Windows are
+# written out but skipped until enabled with the repository variables
+# ENABLE_MACOS=true / ENABLE_WINDOWS=true (and their signing secrets exist).
+# See docs/release-and-signing.md for every secret and variable.
+name: Release desktop
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing Atlas tag to build (for example v0.2.0)
+        required: true
+        type: string
+      fngk_version:
+        description: FNGK release tag to bundle (default desktop/fngk-release.json)
+        required: false
+        type: string
+      publish:
+        description: Publish to downloads.signol.org after building
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-desktop-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: "${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}"
+  RUST_VERSION: "1.99.1"
+  NODE_VERSION: "24"
+  DOWNLOADS_BASE: https://downloads.signol.org/atlas
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, arch: x64, platform: linux-x86_64 }
+          - { runner: ubuntu-22.04-arm, arch: arm64, platform: linux-aarch64 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - name: Resolve versions
+        id: version
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::Atlas tag must look like v0.2.0 (got $TAG)"; exit 1; }
+          echo "atlas=${TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Require the updater signing key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo "::error::Missing repository secret TAURI_SIGNING_PRIVATE_KEY"; exit 1; }
+      - name: Install Tauri build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential curl file libssl-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev \
+            patchelf squashfs-tools libfuse2 xdg-utils
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: desktop/src-tauri
+      - run: npm ci
+      - name: Fetch and verify the tagged FNGK release
+        env:
+          GH_TOKEN: ${{ secrets.FNGK_RELEASE_TOKEN || github.token }}
+          FNGK_VERIFY_ATTESTATION: "1"
+          FNGK_VERSION: ${{ inputs.fngk_version }}
+        run: bash scripts/fetch-fngk-release.sh
+      - name: Build AppImage and deb
+        env:
+          ATLAS_RELEASE: "1"
+          ATLAS_VERSION: ${{ steps.version.outputs.atlas }}
+          FNGK_ARTIFACT_DIR: output/fngk-release
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: npm run desktop:build -- --bundles appimage,deb
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          test ! -e desktop/runtime/fngk-manifest-dev.pub || { echo "::error::A dev FNGK manifest key was staged into a release build"; exit 1; }
+          mkdir -p dist
+          bundle=desktop/src-tauri/target/release/bundle
+          cp "$bundle"/appimage/*.AppImage "$bundle"/appimage/*.AppImage.sig "$bundle"/deb/*.deb dist/
+          ls -la dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: atlas-${{ matrix.platform }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    # Skipped cleanly until the owner sets ENABLE_MACOS=true and the Apple secrets.
+    if: vars.ENABLE_MACOS == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: macos-14, arch: aarch64, platform: darwin-aarch64, target: aarch64-apple-darwin }
+          # macos-13 is retired on GitHub-hosted runners; macos-15-intel is the x64 image.
+          - { runner: macos-15-intel, arch: x64, platform: darwin-x86_64, target: x86_64-apple-darwin }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - name: Resolve versions
+        id: version
+        run: echo "atlas=${TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Require Apple and updater signing secrets
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          missing=()
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_P8 TAURI_SIGNING_PRIVATE_KEY; do
+            [[ -n "${!name}" ]] || missing+=("$name")
+          done
+          if ((${#missing[@]})); then echo "::error::ENABLE_MACOS is true but these secrets are missing: ${missing[*]}"; exit 1; fi
+      - name: Write the App Store Connect API key
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          install -m 700 -d "$RUNNER_TEMP/apple"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/apple/AuthKey_${APPLE_API_KEY}.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/apple/AuthKey_${APPLE_API_KEY}.p8" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target "${{ matrix.target }}"
+          rustup default "$RUST_VERSION"
+      - run: npm ci
+      - name: Fetch and verify the tagged FNGK release
+        env:
+          GH_TOKEN: ${{ secrets.FNGK_RELEASE_TOKEN || github.token }}
+          FNGK_VERIFY_ATTESTATION: "1"
+          FNGK_VERSION: ${{ inputs.fngk_version }}
+        run: bash scripts/fetch-fngk-release.sh
+      - name: Build, sign and notarize the app and dmg
+        # The Tauri CLI imports APPLE_CERTIFICATE into a temporary keychain, signs
+        # with APPLE_SIGNING_IDENTITY and notarizes with the App Store Connect key.
+        env:
+          ATLAS_RELEASE: "1"
+          ATLAS_VERSION: ${{ steps.version.outputs.atlas }}
+          FNGK_ARTIFACT_DIR: output/fngk-release
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: npm run desktop:build -- --bundles app,dmg
+      - name: Collect artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.atlas }}
+        run: |
+          set -euo pipefail
+          test ! -e desktop/runtime/fngk-manifest-dev.pub || { echo "::error::A dev FNGK manifest key was staged into a release build"; exit 1; }
+          mkdir -p dist
+          bundle=desktop/src-tauri/target/release/bundle
+          cp "$bundle"/dmg/*.dmg dist/
+          cp "$bundle/macos/Atlas.app.tar.gz" "dist/Atlas_${VERSION}_${{ matrix.arch }}.app.tar.gz"
+          cp "$bundle/macos/Atlas.app.tar.gz.sig" "dist/Atlas_${VERSION}_${{ matrix.arch }}.app.tar.gz.sig"
+          ls -la dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: atlas-${{ matrix.platform }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: Windows x64 (not yet supported)
+    # Skeleton only. Enable with ENABLE_WINDOWS=true once FNGK ships Windows
+    # archives and a signing route is chosen (Azure Trusted Signing or an
+    # OV/EV certificate; see docs/release-and-signing.md).
+    if: vars.ENABLE_WINDOWS == 'true'
+    runs-on: windows-2022
+    steps:
+      - name: Windows release is not implemented yet
+        shell: bash
+        run: |
+          echo "::error::ENABLE_WINDOWS is true, but the Windows job is a skeleton: FNGK has no Windows build and no signing route is configured."
+          exit 1
+
+  release:
+    name: Checksums, attestations, latest.json, GitHub Release
+    needs: [linux, macos, windows]
+    if: >-
+      always() && needs.linux.result == 'success' &&
+      (needs.macos.result == 'success' || needs.macos.result == 'skipped') &&
+      (needs.windows.result == 'success' || needs.windows.result == 'skipped')
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.atlas }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Resolve versions
+        id: version
+        run: echo "atlas=${TAG#v}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: atlas-*
+          path: dist
+          merge-multiple: true
+      - name: Write SHA256SUMS
+        working-directory: dist
+        run: sha256sum -- * | tee SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.dmg
+            dist/*.app.tar.gz
+      - name: Assemble latest.json
+        env:
+          VERSION: ${{ steps.version.outputs.atlas }}
+          ATLAS_REQUIRED_PLATFORMS: ${{ needs.macos.result == 'success' && 'linux-x86_64,linux-aarch64,darwin-aarch64,darwin-x86_64' || 'linux-x86_64,linux-aarch64' }}
+        run: |
+          node scripts/assemble-latest-json.mjs dist "$VERSION" "$DOWNLOADS_BASE" "See https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          cat dist/latest.json
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: ${{ env.TAG }}
+          files: dist/*
+          generate_release_notes: true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: atlas-release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish to downloads.signol.org/atlas
+    needs: release
+    if: always() && needs.release.result == 'success' && (github.event_name == 'push' || inputs.publish)
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: atlas-release
+          path: dist
+      - name: Upload atlas/<version>/ then atlas/latest.json
+        # Same VPS and SSH secrets as the Signal deploy; the path is a repository variable.
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          DOWNLOADS_PATH: ${{ vars.DOWNLOADS_PATH }}
+        run: |
+          set -euo pipefail
+          mkdir -p staging
+          find dist -maxdepth 1 -type f ! -name latest.json -exec cp {} staging/ \;
+          cp dist/latest.json staging/latest.json
+          bash scripts/publish-downloads.sh atlas "$VERSION" staging dist/latest.json
