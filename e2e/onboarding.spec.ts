@@ -64,3 +64,18 @@ test("uses a self-hosted Signal only from the advanced option", async ({ page })
   await setup.getByRole("button", { name: "Sign in to Signal" }).click();
   await expect(setup.getByRole("alert")).toHaveText("Use the HTTPS address of your Signal.");
 });
+
+test("installs FNGK when this machine has none, then moves on to sign-in", async ({ page }) => {
+  let installed = false, installBody: unknown;
+  await page.route("**/api/onboarding/status", async route => {
+    const response = await route.fetch(), value = await response.json();
+    await route.fulfill({ response, json: installed ? value : { ...value, state: "install-choice" } });
+  });
+  await page.route("**/api/onboarding/install", async route => { installBody = route.request().postDataJSON(); installed = true; await route.fulfill({ json: { snapshot: {}, events: [] } }); });
+  await page.goto("/");
+  const setup = page.getByRole("complementary", { name: "FNGK setup" });
+  await expect(setup.getByText("signed desktop installer")).toHaveCount(0);
+  await setup.getByRole("button", { name: "Install FNGK" }).click();
+  expect(installBody).toEqual({ scope: "user", confirm: true });
+  await expect(setup.getByRole("button", { name: "Sign in to Signal" })).toBeVisible();
+});

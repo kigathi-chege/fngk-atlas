@@ -26,8 +26,10 @@
   const cancel=async()=>{stopPolling();const current=signIn;signIn=null;phase='idle';if(current)await api(`/api/onboarding/signin/${encodeURIComponent(current.id)}/cancel`,{method:'POST',body:'{}'}).catch(()=>{});atlasEvents.fail(eventId,{message:'Sign-in cancelled.'})};
   const copyLink=async()=>{if(!signIn)return;try{await navigator.clipboard.writeText(signIn.authorizationUrl);copied=true}catch{copied=false}};
   const pairFromDashboard=async()=>{loading=true;error='';try{await api('/api/onboarding/pair',{method:'POST',body:JSON.stringify({profile:signIn?.profile??status?.local?.profile,pairingUrl:pairingUrl.trim()})});await converge()}catch(cause){error=(cause as Error).message;loading=false}};
+  // Installs the bundled (or signed) FNGK into the user's bin, then continues to sign-in.
+  const install=async(update:boolean)=>{const id=`onboarding.install:${crypto.randomUUID()}`;atlasEvents.begin({id,type:'onboarding.install',title:update?'Update FNGK':'Install FNGK',contextId:'local',panelId:'atlas.onboarding'});loading=true;error='';try{await api(update?'/api/fngk/signed-update':'/api/onboarding/install',{method:'POST',body:JSON.stringify(update?{confirm:true}:{scope:'user',confirm:true})});atlasEvents.resolve(id,{message:update?'FNGK is up to date.':'FNGK is installed.'});await refresh()}catch(cause){error=(cause as Error).message;loading=false;atlasEvents.fail(id,{message:error})}};
   const skipDevice=async()=>{phase='idle';signIn=null;await refresh()};
-  onMount(()=>{const recover=()=>{dismissed=false;void refresh()};window.addEventListener('atlas:recover',recover);void refresh();return()=>{stopPolling();window.removeEventListener('atlas:recover',recover)}});
+  onMount(()=>{const recover=()=>{dismissed=false;void refresh()},returned=(event:Event)=>{const url=String((event as CustomEvent<{url?:string}>).detail?.url??'');if(url.startsWith('fngk-atlas://auth/')&&phase==='waiting')void poll()};window.addEventListener('atlas:recover',recover);window.addEventListener('atlas:deep-link',returned);void refresh();return()=>{stopPolling();window.removeEventListener('atlas:recover',recover);window.removeEventListener('atlas:deep-link',returned)}});
 </script>
 
 {#if !dismissed&&(presentation.kind!=='quiet'||phase!=='idle')}{#if loading && !status && !error}<aside class="desktop-onboarding" aria-label="Atlas connection"><FngkStatusCard {status}/></aside>
@@ -61,7 +63,8 @@
     {:else if status?.state==='login-choice'}
       <button onclick={begin} disabled={loading}>Sign in to Signal</button>
       <details class="advanced"><summary>Advanced: use a self-hosted Signal</summary><label>Signal address<AtlasInput bind:value={selfHosted} placeholder="https://signal.example.com" ariaLabel="Self-hosted Signal address"/></label><small>Leave empty to use {signalHost}.</small></details>
-    {:else if status?.state==='install-choice'||status?.state==='update-choice'}<p class="hint">The signed desktop installer will be available in the packaged Atlas companion. This web host will not replace a local executable automatically.</p>
+    {:else if status?.state==='install-choice'}<p class="hint">Atlas needs FNGK on this machine to reach your Devices.</p><button onclick={()=>install(false)} disabled={loading}>Install FNGK</button>
+    {:else if status?.state==='update-choice'}<p class="hint">A newer FNGK is required.</p><button onclick={()=>install(true)} disabled={loading}>Update FNGK</button>
     {:else}<button onclick={refresh} disabled={loading}>Try again</button>{/if}
   {/if}
   {#if error}<small role="alert">{error}</small>{/if}
