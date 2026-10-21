@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
-import { lstat, open, opendir, readFile } from 'node:fs/promises';
+import { lstat, open, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { Dir, Dirent, Stats } from 'node:fs';
+import type { Dirent, Stats } from 'node:fs';
 import type { FileSearchMatch, FileSearchOptions } from './file-transport.js';
 import { DEFAULT_PRUNE_NAMES, SEARCH_OPERATION_TIMEOUT_MS, budgetFor, nameMatches, prunedMounts, pseudoRootsUnder, rankNameMatches, type FileSearchResult, type SearchStopReason } from '../files/name-search.js';
 import { compileQuery, lineMatches, pathFilter } from '../files/text-query.js';
@@ -80,16 +80,13 @@ export async function directSearch(input: DirectSearchInput): Promise<FileSearch
     if (Date.now() >= deadline) { reason = 'time'; break; }
     const current = queue.shift()!;
     if (stalledDirectories.has(current.absolute)) continue;
-    let directory: Dir;
-    try { if (current.depth > 0) await input.contained?.(current.absolute); directory = await bounded(opendir(current.absolute, { bufferSize: 64 })); }
+    // One bounded call per directory: a stalled mount costs one timeout, not one per entry.
+    let entries: Dirent[];
+    try { if (current.depth > 0) await input.contained?.(current.absolute); entries = await bounded(readdir(current.absolute, { withFileTypes: true })); }
     catch (error) { if (error instanceof Stalled) { stalledDirectories.add(current.absolute); reason ??= 'stalled'; } continue; }
-    try {
-      for (;;) {
-        cancelled();
-        if (Date.now() >= deadline) { reason = 'time'; break walk; }
-        let entry: Dirent | null;
-        try { entry = await bounded(directory.read()); } catch (error) { if (error instanceof Stalled) { stalledDirectories.add(current.absolute); reason ??= 'stalled'; } break; }
-        if (!entry) break;
+    {
+      for (const [index, entry] of entries.entries()) {
+        if ((index & 255) === 0) { cancelled(); if (Date.now() >= deadline) { reason = 'time'; break walk; } }
         if (examined++ >= maxEntries) { reason = 'entries'; break walk; }
         const absolute = path.join(current.absolute, entry.name), logical = path.posix.join(current.logical, entry.name);
         let type = typeOf(entry), size: number | undefined;
@@ -104,6 +101,7 @@ export async function directSearch(input: DirectSearchInput): Promise<FileSearch
         if (size === undefined) { try { const metadata = await bounded(lstat(absolute)); if (!metadata.isFile()) continue; size = metadata.size; } catch { continue; } }
         // Zero-size files have no content, and pseudo files report zero while blocking on read.
         if (size === 0 || size > maxFileBytes) continue;
+        if (Date.now() >= deadline) { reason = 'time'; break walk; }
         let content: Buffer | undefined;
         try { content = await readRegular(absolute, maxFileBytes); } catch (error) { if (error instanceof Stalled) reason ??= 'stalled'; continue; }
         if (!content || content.includes(0)) continue;
@@ -115,7 +113,7 @@ export async function directSearch(input: DirectSearchInput): Promise<FileSearch
         }
         if (contentHits.length >= limit) { reason ??= 'limit'; if (!names || full()) break walk; }
       }
-    } finally { await directory.close().catch(() => {}); }
+    }
   }
   const ranked = rankNameMatches(query, nameHits);
   if (ranked.length > limit) reason ??= 'limit';
