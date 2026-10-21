@@ -11,7 +11,7 @@
   onMount(()=>{const show=()=>{open=true;void load()};window.addEventListener('atlas:open-about',show);return()=>window.removeEventListener('atlas:open-about',show)});
 </script>
 
-{#if open}<div class="about-backdrop"><section class="about-atlas" role="dialog" aria-modal="true" aria-label="About Atlas">
+{#if open}<div class="about-backdrop"><div class="about-atlas" role="dialog" aria-modal="true" aria-label="About Atlas">
   <header><h2>About Atlas</h2><button aria-label="Close About Atlas" onclick={()=>open=false}>×</button></header>
   {#if info}<dl>
     <dt>Atlas</dt><dd data-testid="about-atlas-version">{info.atlasVersion}{info.desktop?' (desktop)':''}</dd>
@@ -25,7 +25,7 @@
   {#if done}<p>{done}</p>{/if}
   {:else if !error}<p>Loading…</p>{/if}
   {#if error}<p role="alert" class="warn">{error}</p>{/if}
-</section></div>{/if}
+</div></div>{/if}
 
 <style>
   .about-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:#0008}
