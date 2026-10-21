@@ -1,6 +1,6 @@
 // Opening the Search panel can race its lazy mount, so the latest request is
 // kept until the panel takes it.
-export interface SearchRequest { replace?: boolean; query?: string; root?: string; contextId?: string }
+export interface SearchRequest { replace?: boolean; query?: string; root?: string; contextId?: string; /** Start the search right away. */ run?: boolean }
 let pending: SearchRequest | undefined;
 
 export function requestSearch(request: SearchRequest = {}) {
