@@ -93,6 +93,6 @@ export function gitGutter(contextId: string, file: string, options: { debounceMs
   });
   return [
     plugin,
-    gutter({ class: 'cm-git-gutter', markers: view => view.plugin(plugin)?.set ?? RangeSet.empty, initialSpacer: () => markers.added }),
+    gutter({ class: 'cm-git-gutter', markers: view => view.plugin(plugin)?.set ?? RangeSet.empty }),
   ];
 }

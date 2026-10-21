@@ -248,7 +248,7 @@
   .scm-error{margin:4px 8px;color:var(--atlas-danger);font-size:11px}
   .scm-body{flex:1;min-height:0;overflow:auto;padding-bottom:6px}
   .scm-group>header{display:flex;align-items:center;justify-content:space-between;padding:0 8px 0 4px;height:24px}
-  .scm-group>header .scm-actions{visibility:hidden}.scm-group>header:hover .scm-actions,.scm-group>header:focus-within .scm-actions{visibility:visible}
+  .scm-group>header .scm-actions{opacity:0}.scm-group>header:hover .scm-actions,.scm-group>header:focus-within .scm-actions{opacity:1}
   .scm-toggle{border:0;background:transparent;color:var(--atlas-text-soft);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.04em;padding:0 2px}
   .scm-toggle b{margin-left:4px;padding:0 5px;border-radius:8px;background:var(--atlas-surface-3);color:var(--atlas-text);font-size:10px}
   ul{list-style:none;margin:0;padding:0}
@@ -256,7 +256,7 @@
   .scm-row:hover{background:var(--atlas-hover)}
   .scm-file{flex:1;min-width:0;justify-content:flex-start;gap:6px;border:0;background:transparent;padding:0;color:var(--git-tone,var(--atlas-text))}
   .scm-name{white-space:nowrap}.scm-dir{color:var(--atlas-muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .scm-row .scm-actions{display:none}.scm-row:hover .scm-actions,.scm-row:focus-within .scm-actions{display:flex}
+  .scm-row .scm-actions{opacity:0}.scm-row:hover .scm-actions,.scm-row:focus-within .scm-actions{opacity:1}
   .scm-actions button{border:0;background:transparent;padding:2px;min-height:20px;color:var(--atlas-text-soft)}.scm-actions button:hover{color:var(--atlas-text);background:var(--atlas-surface-3)}
   .scm-letter{width:12px;text-align:center;font:600 11px ui-monospace,monospace;color:var(--git-tone)}
   .scm-clean{padding:4px 20px;color:var(--atlas-muted)}
