@@ -130,7 +130,7 @@ function processError(error: unknown): {
   const value = error as { code?: string; message?: string };
   const code = value.code ?? "internal_error";
   const statusCode =
-    code === "context_not_found"
+    code === "context_not_found" || code === "path_not_found"
       ? 404
       : code === "device_offline" ||
           code === "route_unavailable" ||

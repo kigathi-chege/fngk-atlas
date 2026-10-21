@@ -28,7 +28,9 @@ export class FileService {
     return routes;
   }
   #unavailable(operation: string, errors: unknown[]): Error {
-    return Object.assign(new Error(`Every available route failed to ${operation} this path.`), { code: 'route_unavailable', causes: errors.map(error => ({ code: (error as { code?: string }).code, message: (error as Error).message })) });
+    const causes = errors.map(error => ({ code: (error as { code?: string }).code, message: (error as Error).message }));
+    if (causes.length && causes.every(cause => cause.code === 'path_not_found')) return Object.assign(new Error('The path does not exist or is not readable on the Device.'), { code: 'path_not_found', causes });
+    return Object.assign(new Error(`Every available route failed to ${operation} this path.`), { code: 'route_unavailable', causes });
   }
   #target(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>): Required<Pick<AccessTarget, 'contextId' | 'path'>> {
     if (typeof target.path !== 'string' || !target.path.startsWith('/') || target.path.includes('\0')) throw Object.assign(new Error('Path must be an absolute, NUL-free context path.'), { code: 'invalid_path' });

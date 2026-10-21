@@ -1,9 +1,12 @@
 import { once } from 'node:events';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { FngkProcessClient } from '../../src/fngk/process-client.js';
-import { FngkTerminalCommandExecutor, type CommandExecutor } from '../../src/transports/terminal-command.js';
+import { FngkTerminalCommandExecutor, type CommandExecutor, type CommandResult } from '../../src/transports/terminal-command.js';
 import { TerminalFileTransport } from '../../src/transports/terminal-file.js';
 import { FileService } from '../../src/files/file-service.js';
 
@@ -22,6 +25,20 @@ describe('terminal-backed effective access', () => {
     const controller = new AbortController(); controller.abort();
     class Session extends EventEmitter { sendCommand() { throw new Error('a cancelled request must not reach the terminal'); } interrupt() {} }
     await expect(new FngkTerminalCommandExecutor(new Session() as any).execute('printf payload', { signal: controller.signal })).rejects.toMatchObject({ code: 'cancelled' });
+  });
+
+  it('reports the framed command status, not the always-successful wrapper line', async () => {
+    class Session extends EventEmitter {
+      sendCommand(command: string, requestId: string) {
+        const frame = command.match(/__ATLAS_BEGIN_([A-Za-z0-9_]+)__/)![1];
+        queueMicrotask(() => {
+          this.emit('event', { type: 'output', protocolVersion: 'fngk.terminal.v1', bodyBase64: Buffer.from(`\n__ATLAS_BEGIN_${frame}__\nln: exists\n__ATLAS_END_${frame}__:1\n`).toString('base64') });
+          this.emit('event', { type: 'command_state', protocolVersion: 'fngk.terminal.v1', requestId, status: 'succeeded', exitCode: 0 });
+        });
+        return true;
+      }
+    }
+    await expect(new FngkTerminalCommandExecutor(new Session() as any).execute('ln a b')).resolves.toEqual({ output: Buffer.from('ln: exists'), exitCode: 1 });
   });
 
   it('surfaces a matching FNGK protocol error without interrupting the shared terminal', async () => {
@@ -79,8 +96,8 @@ describe('terminal-backed effective access', () => {
     const executor: CommandExecutor = { execute: async command => {
       commands.push(command);
       if (command.startsWith('stat ')) return { output: Buffer.from('5 644\n'), exitCode: 0 };
-      if (command.startsWith('base64 ')) return { output: Buffer.from(Buffer.from('hello').toString('base64')), exitCode: 0 };
-      if (command.startsWith('find ')) return { output: Buffer.from(Buffer.from(['a.txt', 'f', '5', '1789200000', '644', ''].join('\0')).toString('base64')), exitCode: 0 };
+      if (/(^|then )base64 /.test(command)) return { output: Buffer.from(Buffer.from('hello').toString('base64')), exitCode: 0 };
+      if (/(^|then )find /.test(command)) return { output: Buffer.from(Buffer.from(['a.txt', 'f', '5', '1789200000', '644', ''].join('\0')).toString('base64')), exitCode: 0 };
       return { output: Buffer.alloc(0), exitCode: 0 };
     } };
     const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', identity: 'root', privilege: 'root', executor });
@@ -125,6 +142,67 @@ describe('terminal-backed effective access', () => {
     expect(commands.join('\n')).not.toContain('mv -f');
   });
 
+  // Mirrors the Device agent: one long-lived shell, each command wrapped as
+  // `{ cmd\n}; printf <marker> $?`. Catches bashisms and leaked shell state.
+  class PersistentShell implements CommandExecutor {
+    readonly child: ChildProcessWithoutNullStreams;
+    #buffer = '';
+    #waiting?: (value: CommandResult) => void;
+    constructor(shell: string, cwd: string, env: NodeJS.ProcessEnv) {
+      this.child = spawn(shell, [], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      this.child.stdout.on('data', chunk => { this.#buffer += chunk.toString('utf8'); this.#drain(); });
+    }
+    #drain() {
+      const end = this.#buffer.indexOf('\u001f'), start = this.#buffer.lastIndexOf('\u001e', end);
+      if (end < 0 || start < 0 || !this.#waiting) return;
+      const output = this.#buffer.slice(0, start), exitCode = Number(this.#buffer.slice(start + 1, end));
+      this.#buffer = this.#buffer.slice(end + 1);
+      const resolve = this.#waiting; this.#waiting = undefined;
+      resolve({ output: Buffer.from(output), exitCode });
+    }
+    async execute(command: string): Promise<CommandResult> {
+      if (this.child.exitCode !== null) throw new Error('shell exited');
+      return await new Promise<CommandResult>((resolve, reject) => {
+        this.#waiting = resolve;
+        this.child.once('exit', () => reject(new Error('shell exited')));
+        this.child.stdin.write(`{ ${command}\n}; printf '\\036%s\\037' "$?"\n`);
+      });
+    }
+  }
+
+  for (const shell of ['bash', 'dash']) it(`runs every file operation in one persistent ${shell} without breaking it`, async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'atlas-terminal-file-')), state = await mkdtemp(path.join(tmpdir(), 'atlas-terminal-state-'));
+    const sh = new PersistentShell(shell, root, { ...process.env, XDG_STATE_HOME: state });
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor: sh });
+    const at = (name: string) => path.join(root, name);
+    try {
+      await writeFile(at('kept.txt'), 'original greeting');
+      expect((await transport.list(root)).map(entry => entry.name)).toEqual(['kept.txt']);
+      expect((await transport.read(at('kept.txt'))).toString()).toBe('original greeting');
+      await expect(transport.list(at('missing'))).rejects.toMatchObject({ code: 'path_not_found' });
+      await expect(transport.read(at('missing.txt'))).rejects.toMatchObject({ code: 'path_not_found' });
+      await transport.createFile(at('fresh.txt'), Buffer.from('fresh'));
+      await transport.createFile(at('empty.txt'));
+      await expect(transport.createFile(at('kept.txt'), Buffer.from('clobbered'))).rejects.toMatchObject({ code: 'file_conflict' });
+      await expect(transport.createFile(at('kept.txt'))).rejects.toMatchObject({ code: 'file_conflict' });
+      await expect(transport.move(at('fresh.txt'), at('kept.txt'))).rejects.toMatchObject({ code: 'file_conflict' });
+      expect(await readFile(at('kept.txt'), 'utf8')).toBe('original greeting');
+      await transport.move(at('fresh.txt'), at('moved.txt'));
+      await transport.atomicWrite(at('moved.txt'), Buffer.from('rewritten'), 0o644);
+      expect(await readFile(at('moved.txt'), 'utf8')).toBe('rewritten');
+      expect(await transport.search(root, 'moved', { mode: 'name' })).toEqual([{ path: at('moved.txt'), type: 'file' }]);
+      expect(await transport.search(root, 'greeting', { mode: 'content' })).toMatchObject([{ path: at('kept.txt'), line: 1 }]);
+      await expect(transport.search(at('missing'), 'x', { mode: 'name' })).rejects.toMatchObject({ code: 'path_not_found' });
+      const { restorePath } = await transport.trash(at('moved.txt'));
+      expect(await readdir(root)).not.toContain('moved.txt');
+      await transport.restore(restorePath);
+      expect((await readdir(root)).sort()).toEqual(['empty.txt', 'kept.txt', 'moved.txt']);
+      const flags = await sh.execute('printf %s "$-"');
+      expect(flags.exitCode).toBe(0);
+      expect(flags.output.toString()).not.toMatch(/[eu]/);
+    } finally { sh.child.kill(); await rm(root, { recursive: true, force: true }); await rm(state, { recursive: true, force: true }); }
+  });
+
   it('uses bounded structured NUL records for terminal name search', async () => {
     const commands: string[] = [];
     const encoded = Buffer.from('/srv/atlas/name:with\nnewline\0d\0').toString('base64');
@@ -133,7 +211,7 @@ describe('terminal-backed effective access', () => {
     await expect(transport.search('/srv/atlas', 'name', { mode: 'name', maxEntries: 12 })).resolves.toEqual([{ path: '/srv/atlas/name:with\nnewline', type: 'directory' }]);
     expect(commands[0]).toContain('-printf');
     expect(commands[0]).toContain('head -z -n 24');
-    expect(commands[0]).toContain('pipefail');
+    expect(commands[0]).not.toContain('pipefail');
   });
 
   it('moves remote paths into a private recoverable vault and restores them', async () => {

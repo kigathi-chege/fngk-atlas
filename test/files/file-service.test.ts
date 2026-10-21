@@ -138,4 +138,12 @@ describe('logical filesystem', () => {
     const terminal = { ...base, id: 'terminal', kind: 'terminal' as const, list: (value: string) => direct.list(value), stat: (value: string) => direct.stat(value), read: (value: string) => direct.read(value), atomicWrite: (value: string, content: Buffer, mode?: number) => direct.atomicWrite(value, content, mode) } as FileTransport;
     expect(await new FileService([adapter, terminal]).list({ contextId: 'remote', path: '/' })).toMatchObject({ route: { kind: 'terminal' }, items: [expect.objectContaining({ name: 'visible.txt' })] });
   });
+
+  it('reports a missing path as not found only when every route agrees', async () => {
+    const base = { contextId: 'remote', deviceId: 'device-1', effectiveIdentity: 'remote', privilege: 'user' as const, observedAt: new Date().toISOString(), available: true, operations: ['list', 'stat', 'read', 'write'] as const, stat: async () => ({ size: 0, mode: 0o644 }), read: async () => Buffer.alloc(0), atomicWrite: async () => {} };
+    const missing = (id: string) => ({ ...base, id, kind: 'terminal' as const, list: async () => { throw Object.assign(new Error('missing'), { code: 'path_not_found' }); } }) as FileTransport;
+    const broken = { ...base, id: 'adapter', kind: 'adapter' as const, list: async () => { throw Object.assign(new Error('adapter down'), { code: 'adapter_failed' }); } } as FileTransport;
+    await expect(new FileService([missing('a'), missing('b')]).list({ contextId: 'remote', path: '/gone' })).rejects.toMatchObject({ code: 'path_not_found' });
+    await expect(new FileService([broken, missing('b')]).list({ contextId: 'remote', path: '/gone' })).rejects.toMatchObject({ code: 'route_unavailable' });
+  });
 });

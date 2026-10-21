@@ -24,7 +24,10 @@ export class FngkTerminalCommandExecutor implements CommandExecutor {
           const start = all.lastIndexOf(begin), finishAt = all.indexOf(end, Math.max(0, start));
           if (start < 0 || finishAt < 0) return;
           const output = Buffer.from(all.slice(start + begin.length, finishAt));
-          const exitCode = Number(completion.exitCode ?? all.slice(finishAt + end.length).match(/^(-?\d+)/)?.[1] ?? 1);
+          // The frame carries the wrapped command's own status. Signal's exitCode
+          // is the whole line's, which ends in printf and is therefore always 0.
+          const framed = all.slice(finishAt + end.length).match(/^(-?\d+)/)?.[1];
+          const exitCode = Number(framed ?? completion.exitCode ?? 1);
           finish(undefined, { output, exitCode });
         }
       };
