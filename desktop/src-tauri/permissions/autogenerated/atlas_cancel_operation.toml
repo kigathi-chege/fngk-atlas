@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-atlas-cancel-operation"
+description = "Enables the atlas_cancel_operation command without any pre-configured scope."
+commands.allow = ["atlas_cancel_operation"]
+
+[[permission]]
+identifier = "deny-atlas-cancel-operation"
+description = "Denies the atlas_cancel_operation command without any pre-configured scope."
+commands.deny = ["atlas_cancel_operation"]
