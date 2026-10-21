@@ -31,7 +31,8 @@ pub fn handle(app: &AppHandle, url: &str) {
     let Some(loopback) = app.try_state::<Loopback>().map(|state| state.inner().clone()) else { return };
     let url = url.to_string();
     std::thread::spawn(move || match loopback.post_json("/api/desktop/deep-link", &serde_json::json!({ "url": url })) {
-        Ok(status) if (200..300).contains(&status) => {}
+        // Log without the query: it may carry a sign-in state.
+        Ok(status) if (200..300).contains(&status) => eprintln!("atlas-deep-link: forwarded {} to the web UI", url.split('?').next().unwrap_or_default()),
         Ok(status) => eprintln!("atlas-deep-link: Atlas rejected the deep link ({status})."),
         Err(error) => eprintln!("atlas-deep-link: could not forward the deep link: {error}"),
     });
