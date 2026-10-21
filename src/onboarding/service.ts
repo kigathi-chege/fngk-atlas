@@ -85,7 +85,12 @@ export class BootstrapService {
     const result = await this.runtime.installBinary(scope, event => events.push(redactedProgress(event)), signal);
     for (const event of events) yield event;
     if (result.state === "recoverable-error") throw onboardingError(result.message, result.errorCode ?? "installation_failed");
-    yield* this.converge(this.#profile, signal);
+    // Converge only once the binary is in place, and only when a paired profile
+    // is waiting for its daemon; an unpaired install stops at sign-in.
+    const snapshot = await this.check(this.#profile, signal);
+    if (snapshot.state === "install-choice") throw onboardingError("FNGK is still unavailable after installation.", "installation_failed");
+    if (snapshot.state === "daemon-install-choice") { yield* this.converge(this.#profile, signal); return; }
+    yield this.#progress("complete", 100, snapshot.local.message, snapshot.state);
   }
 
   async *converge(profile = this.#profile, signal?: AbortSignal): AsyncIterable<BootstrapProgress> {

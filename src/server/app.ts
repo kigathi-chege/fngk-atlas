@@ -53,6 +53,8 @@ import { createFngkLoginLauncher, SignInService } from "../onboarding/signin.js"
 import { registerOnboardingRoutes } from "../onboarding/routes.js";
 import { createSystemBrowserOpener, type BrowserOpener } from "../onboarding/browser.js";
 import { defaultSignalUrl } from "../onboarding/signal-url.js";
+import { desktopEnvironment, FngkProvisioner, type DesktopFngkEnvironment } from "../onboarding/provisioner.js";
+import { registerDesktopRoutes } from "./desktop-routes.js";
 import { DeviceLifecycleService } from "../lifecycle/service.js";
 import { availableRuntimeManagers } from "../deployments/runtime-managers.js";
 import { DeviceSessionManager, type DeviceSessionLease } from "../device-sessions/manager.js";
@@ -99,6 +101,8 @@ interface CreateAppOptions {
   capability?: string;
   signIn?: SignInService;
   openBrowser?: BrowserOpener;
+  desktop?: DesktopFngkEnvironment;
+  fngkProvisioner?: FngkProvisioner;
 }
 
 function processError(error: unknown): {
@@ -189,7 +193,13 @@ export async function createApp(
     path.join(root, ".atlas", "atlas.db");
   const store = new Store(databaseFile);
   const fngk = options.fngk ?? new FngkProcessClient();
-  const bootstrap = new BootstrapService(fngk);
+  const desktop = options.desktop ?? desktopEnvironment();
+  const fngkProvisioner = options.fngkProvisioner ?? new FngkProvisioner(desktop);
+  const bootstrap = new BootstrapService({
+    probe: (profile, signal) => fngk.probe(profile, signal),
+    install: (profile, signal) => fngk.install(profile, signal),
+    installBinary: (scope, emit, signal) => fngkProvisioner.installBinary(scope, emit, signal),
+  });
   const signIn = options.signIn ?? new SignInService(createFngkLoginLauncher(fngk.binary, fngk.env));
   const profileScope=createProfileScope();
   fngk.setProfileProvider?.(profileScope.current);
@@ -652,6 +662,7 @@ export async function createApp(
       return await guardedToolExecutor(request, reply).execute({ toolId: decodeURIComponent(String((request.params as { id?: string }).id ?? '')), input: body.input, scope: body.scope, signal: requestSignal(request, reply) });
     } catch (error) { const result = processError(error); return reply.code(result.statusCode).send(result.body); }
   });
+  registerDesktopRoutes(app, { bootstrap, provisioner: fngkProvisioner, environment: desktop, profile: () => profileScope.current() ?? "local", processError, signal: requestSignal });
   // Desktop: Signal returns through the fngk-atlas: deep link and the server
   // opens the browser; a loopback web build returns to its own page.
   const desktopLoopback = Boolean(launchCapability) && ['127.0.0.1', 'localhost', '::1'].includes(callbackHost);

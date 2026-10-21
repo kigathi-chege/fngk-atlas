@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 
 #[derive(Debug)]
 pub struct InstallReceipt {
+    #[allow(dead_code)]
     pub installed_path: PathBuf,
     pub backup_path: Option<PathBuf>,
 }
