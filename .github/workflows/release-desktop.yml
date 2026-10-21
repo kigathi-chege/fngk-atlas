@@ -245,7 +245,10 @@ jobs:
       - name: Write SHA256SUMS
         working-directory: dist
         run: sha256sum -- * | tee SHA256SUMS
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      # Attestations need a public repo or a paid plan; the signed latest.json
+      # and SHA256SUMS still authenticate the release without them.
+      - continue-on-error: true
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/*.AppImage
