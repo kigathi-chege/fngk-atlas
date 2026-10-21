@@ -40,7 +40,9 @@ interface SafeWriteScript { path: string; staging: string; suffix: string; expec
 export function safeWriteScript(input: SafeWriteScript): string {
   const rotate = Array.from({ length: VERSION_SLOTS - 1 }, (_, index) => VERSION_SLOTS - 1 - index).map(slot => `if [ -f "$vdir/${slot}" ]; then mv -f -- "$vdir/${slot}" "$vdir/${slot + 1}" || fail 1; mv -f -- "$vdir/${slot}.meta" "$vdir/${slot + 1}.meta" 2>/dev/null || rm -f -- "$vdir/${slot + 1}.meta"; fi`).join('; ');
   return isolated([
-    'umask 077', SHA_FUNCTION,
+    // A shared shell may carry noclobber or errexit from elsewhere; this
+    // subshell must not depend on them.
+    'set +C +e', 'umask 077', SHA_FUNCTION,
     `target=${posixQuote(input.path)}; enc=${input.staging}; expected=${posixQuote(input.expected)}; incoming=${posixQuote(input.fingerprint)}; tmp=; current=`,
     `fail() { rm -f -- "$enc"; [ -z "$tmp" ] || rm -f -- "$tmp"; exit "$1"; }`,
     // Write through symlinks to the file they resolve to.
@@ -165,7 +167,7 @@ export class TerminalFileTransport implements FileTransport {
       for(const hit of lineMatches(content,expression,perFile)){matches.push({path:value,type:'file',line,column:hit.column,length:hit.length,preview:content.trim().slice(0,240)});if(matches.length>=limit)break;}}
     return matches;
   }
-  async createFile(logicalPath:string,content=Buffer.alloc(0)){if(!content.length){await this.#run(unlessExists(logicalPath,`umask 077; set -C; : > ${posixQuote(logicalPath)}`));return;}const suffix=randomUUID(),temporary=`${logicalPath}.atlas-${suffix}.tmp`,encoded=`${temporary}.b64`;try{await this.#run(`umask 077; set -C; : > ${posixQuote(encoded)}`);const base64=content.toString('base64');for(let offset=0;offset<base64.length;offset+=12_000)await this.#run(`printf '%s' ${posixQuote(base64.slice(offset,offset+12_000))} >> ${posixQuote(encoded)}`);await this.#run(unlessExists(logicalPath,`base64 -d ${posixQuote(encoded)} > ${posixQuote(temporary)} && chmod 600 ${posixQuote(temporary)} && ln -- ${posixQuote(temporary)} ${posixQuote(logicalPath)} && rm -f ${posixQuote(temporary)} ${posixQuote(encoded)}`));}catch(error){await this.executor.execute(`rm -f ${posixQuote(temporary)} ${posixQuote(encoded)}`).catch(()=>{});throw error;}}
+  async createFile(logicalPath:string,content=Buffer.alloc(0)){if(!content.length){await this.#run(unlessExists(logicalPath,isolated(`umask 077; set -C; : > ${posixQuote(logicalPath)}`)));return;}const suffix=randomUUID(),temporary=`${logicalPath}.atlas-${suffix}.tmp`,encoded=`${temporary}.b64`;try{await this.#run(isolated(`umask 077; set -C; : > ${posixQuote(encoded)}`));const base64=content.toString('base64');for(let offset=0;offset<base64.length;offset+=12_000)await this.#run(`printf '%s' ${posixQuote(base64.slice(offset,offset+12_000))} >> ${posixQuote(encoded)}`);await this.#run(unlessExists(logicalPath,isolated(`base64 -d ${posixQuote(encoded)} > ${posixQuote(temporary)} && chmod 600 ${posixQuote(temporary)} && ln -- ${posixQuote(temporary)} ${posixQuote(logicalPath)} && rm -f ${posixQuote(temporary)} ${posixQuote(encoded)}`)));}catch(error){await this.executor.execute(`rm -f ${posixQuote(temporary)} ${posixQuote(encoded)}`).catch(()=>{});throw error;}}
   async createDirectory(logicalPath:string){await this.#run(`mkdir -- ${posixQuote(logicalPath)}`);}
   async move(logicalPath:string,destination:string){await this.#run(unlessExists(destination,`mv -- ${posixQuote(logicalPath)} ${posixQuote(destination)}`));}
   async trash(logicalPath:string):Promise<{restorePath:string}>{

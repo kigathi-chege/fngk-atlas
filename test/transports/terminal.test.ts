@@ -225,6 +225,10 @@ describe('terminal-backed effective access', () => {
     const at = (name: string) => path.join(root, name);
     try {
       const before = await shellState(sh);
+      // Creating files must not leak noclobber or umask into the shared shell.
+      await transport.createFile(at('created-empty.txt')); await transport.createFile(at('created.txt'), Buffer.from('x'));
+      expect(await shellState(sh)).toBe(before);
+      await sh.execute('set -C');
       await writeFile(at('a.txt'), 'v0'); await chmod(at('a.txt'), 0o751);
       let fingerprint = sha('v0');
       for (const next of ['v1', 'v2', 'v3', 'v4']) { const saved = await files.write({ contextId: 'remote', path: at('a.txt') }, Buffer.from(next), fingerprint); fingerprint = saved.fingerprint; }
@@ -271,8 +275,10 @@ describe('terminal-backed effective access', () => {
       const leftovers = (await readdir(root, { recursive: true })).filter(name => String(name).includes('.atlas-'));
       expect(leftovers).toEqual([]);
       expect(await readdir(path.join(state, 'fngk-atlas', 'staging'))).toEqual([]);
+      // Every write above ran under a noclobber shell set by someone else.
+      await sh.execute('set +C');
       expect(await shellState(sh)).toBe(before);
-      expect(before).not.toMatch(/^[^|]*[eu]/);
+      expect(before).not.toMatch(/^[^|]*[euC]/);
     } finally { sh.child.kill(); await rm(root, { recursive: true, force: true }); await rm(state, { recursive: true, force: true }); }
   });
 
