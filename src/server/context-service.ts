@@ -104,5 +104,5 @@ export class EffectiveContextService {
     if(route.executor instanceof FngkTerminalCommandExecutor)stop?route.executor.session.stop('atlas-release'):route.executor.session.detach('atlas-release');
     this.#remote.delete(key);return true;
   }
-  close():void{for(const route of this.#remote.values())if(route.executor instanceof FngkTerminalCommandExecutor)route.executor.session.detach('atlas-shutdown');this.#remote.clear();this.#adapters.clear();this.#contextSnapshots.clear()}
+  close():void{for(const route of this.#remote.values())if(route.executor instanceof FngkTerminalCommandExecutor)route.executor.session.stop('atlas-shutdown');this.#remote.clear();this.#adapters.clear();this.#contextSnapshots.clear()}
 }
