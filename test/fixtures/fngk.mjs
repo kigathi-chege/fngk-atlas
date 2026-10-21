@@ -79,6 +79,9 @@ if (args[0] === 'version') {
     } else if (message.type === 'mode') {
       collaborationMode = message.mode;
       process.stdout.write(JSON.stringify({ type: 'collaboration', protocolVersion: 'fngk.terminal.v1', eventType: 'mode', mode: message.mode, requestId: message.requestId }) + '\n');
+    } else if (message.type === 'stop') {
+      process.stdout.write(JSON.stringify({ type: 'exit', protocolVersion: 'fngk.terminal.v1', requestId: message.requestId, exitCode: 0 }) + '\n');
+      process.exit(0);
     } else if (message.type === 'detach') {
       process.stdout.write(JSON.stringify({ type: 'detached', protocolVersion: 'fngk.terminal.v1', requestId: message.requestId }) + '\n');
       process.exit(0);

@@ -16,6 +16,13 @@ class FakeTerminalSession extends EventEmitter {
   sessionId?: string;
   closeReasons: string[] = [];
   modes: string[] = [];
+  stops: string[] = [];
+
+  stop(reason = 'stopped'): boolean {
+    if (this.closed) return false;
+    this.stops.push(reason);
+    return this.close(reason);
+  }
 
   setMode(mode: string, requestId?: string): boolean {
     if (this.closed) return false;
@@ -154,6 +161,7 @@ describe('DeviceSessionManager', () => {
     await new Promise(resolve => setTimeout(resolve, 40));
 
     expect(connection.sessions[0].closed).toBe(true);
+    expect(connection.sessions[0].stops).toEqual(['atlas-device-session:idle_ttl']);
     expect(manager.snapshot(scope)).toBeUndefined();
   });
 

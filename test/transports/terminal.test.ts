@@ -129,7 +129,7 @@ describe('terminal-backed effective access', () => {
     const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.alloc(0), exitCode: 0 }; } };
     const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
     await transport.search('/srv/atlas', 'needle', { mode: 'content', maxEntries: 12, maxDepth: 3, maxFileBytes: 2048 });
-    expect(commands[0]).toContain("find '/srv/atlas' -xdev -mindepth 1 -maxdepth 3 -type f -size -2048c -print0 | head -z -n 12 | xargs -0 -r sh -c");
+    expect(commands[0]).toContain("find -H '/srv/atlas' -xdev -mindepth 1 -maxdepth 3 -type f -size -2048c -print0 | head -z -n 12 | xargs -0 -r sh -c");
     expect(commands[0]).not.toContain('grep -R');
   });
 
@@ -178,6 +178,14 @@ describe('terminal-backed effective access', () => {
     try {
       await writeFile(at('kept.txt'), 'original greeting');
       expect((await transport.list(root)).map(entry => entry.name)).toEqual(['kept.txt']);
+      const fifo = await mkdtemp(path.join(tmpdir(), 'atlas-terminal-fifo-'));
+      try {
+        await sh.execute(`mkfifo ${fifo}/pipe`);
+        expect(await transport.list(fifo)).toMatchObject([{ name: 'pipe', type: 'other' }]);
+        await sh.execute(`ln -s ${fifo} ${root}/linked`);
+        expect(await transport.list(at('linked'))).toMatchObject([{ name: 'pipe', path: path.join(at('linked'), 'pipe') }]);
+        await sh.execute(`rm ${root}/linked`);
+      } finally { await rm(fifo, { recursive: true, force: true }); }
       expect((await transport.read(at('kept.txt'))).toString()).toBe('original greeting');
       await expect(transport.list(at('missing'))).rejects.toMatchObject({ code: 'path_not_found' });
       await expect(transport.read(at('missing.txt'))).rejects.toMatchObject({ code: 'path_not_found' });

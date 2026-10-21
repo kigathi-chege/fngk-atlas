@@ -1,4 +1,4 @@
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { FngkTerminalCommandExecutor, type CommandExecutor, type CommandResult } from '../transports/terminal-command.js';
 import type { TerminalEvent } from '../fngk/protocol.js';
@@ -217,15 +217,20 @@ export class DeviceSessionManager extends EventEmitter {
     }
   }
 
-  async close(): Promise<void> {
+  async close(timeoutMs = 3_000): Promise<void> {
+    const exits: Promise<unknown>[] = [];
     for (const entry of this.#entries.values()) {
       if (entry.idleTimer) clearTimeout(entry.idleTimer);
       for (const cancellation of entry.cancellations.values()) cancellation.abort();
       for (const stream of [...entry.streams]) stream.close('manager_closed');
+      const terminal = entry.terminal;
+      if (terminal && !terminal.closed) exits.push(once(terminal, 'close'));
       this.#closeTerminal(entry, 'manager_closed');
       this.#transition(entry, 'closed', 'manager_closed');
     }
     this.#entries.clear();
+    // Let each fngk process deliver its stop to Signal before the caller exits.
+    if (exits.length) await Promise.race([Promise.allSettled(exits), new Promise(resolve => setTimeout(resolve, timeoutMs).unref())]);
   }
 
   #entry(scope: Readonly<DeviceScope>, key: string): Entry {
@@ -350,7 +355,10 @@ export class DeviceSessionManager extends EventEmitter {
   }
 
   #terminate(terminal: TerminalSession, reason: string): void {
-    const closable = terminal as TerminalSession & { close?: (requestId?: string) => boolean };
+    // Device Sessions are always opened fresh and never reattached, so a
+    // detached one would stay live on the Device as an orphaned shell.
+    const closable = terminal as TerminalSession & { close?: (requestId?: string) => boolean; stop?: (requestId?: string) => boolean };
+    if (typeof closable.stop === 'function' && closable.stop(`atlas-device-session:${reason}`)) return;
     if (typeof closable.close === 'function') closable.close(`atlas-device-session:${reason}`);
     else closable.detach(`atlas-device-session:${reason}`);
   }
