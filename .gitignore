@@ -11,3 +11,4 @@ output/
 desktop/runtime/
 desktop/src-tauri/gen/
 desktop/src-tauri/target/
+desktop/src-tauri/tauri.generated.conf.json
