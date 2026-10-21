@@ -1,6 +1,6 @@
 <script lang="ts">
   import {onMount} from 'svelte';import type {AtlasPanelDescriptor} from '../lib/panel-registry.js';import {chooseContext,type WorkbenchState} from '../lib/workbench-state.js';import {loadContextCatalog} from '../lib/context-catalog.js';
-  import Search from '@lucide/svelte/icons/search';import FileSearch from '@lucide/svelte/icons/file-search';import {requestSearch} from '../lib/search-requests.js';import FolderOpen from '@lucide/svelte/icons/folder-open';import SquareTerminal from '@lucide/svelte/icons/square-terminal';import Command from '@lucide/svelte/icons/command';import RefreshCw from '@lucide/svelte/icons/refresh-cw';import Settings2 from '@lucide/svelte/icons/settings-2';import BookOpen from '@lucide/svelte/icons/book-open';import Network from '@lucide/svelte/icons/network';import Bot from '@lucide/svelte/icons/bot';import Activity from '@lucide/svelte/icons/activity';
+  import Search from '@lucide/svelte/icons/search';import FileSearch from '@lucide/svelte/icons/file-search';import {requestSearch} from '../lib/search-requests.js';import FolderOpen from '@lucide/svelte/icons/folder-open';import SquareTerminal from '@lucide/svelte/icons/square-terminal';import Command from '@lucide/svelte/icons/command';import RefreshCw from '@lucide/svelte/icons/refresh-cw';import Settings2 from '@lucide/svelte/icons/settings-2';import BookOpen from '@lucide/svelte/icons/book-open';import Network from '@lucide/svelte/icons/network';import Bot from '@lucide/svelte/icons/bot';import Activity from '@lucide/svelte/icons/activity';import GitBranch from '@lucide/svelte/icons/git-branch';
   let minimizedNavigator=false;
   const restoreNavigator=()=>{(document.querySelector('.root-dock') as any)?.__atlasRestorePanel?.('atlas.devices')};
   export let state:WorkbenchState;let selected=state.snapshot().contextId;let loading=false;
@@ -22,6 +22,7 @@
   <div class="activity-rail-bottom">
     <button title="Search" aria-label="Search" onclick={()=>window.dispatchEvent(new Event('atlas:focus-search'))}><Search size={17}/></button>
     <button title="Search and replace in files (Ctrl+Shift+F)" aria-label="Search in files" onclick={()=>requestSearch({})}><FileSearch size={17}/></button>
+    <button title="Source Control" aria-label="Open Source Control" onclick={()=>window.dispatchEvent(new CustomEvent('atlas:open-source-control',{detail:{contextId:selected}}))}><GitBranch size={17}/></button>
     <button title="Open filesystem" aria-label="Open filesystem" onclick={()=>window.dispatchEvent(new CustomEvent('atlas:open-root',{detail:{contextId:selected,path:'/'}}))}><FolderOpen size={17}/></button>
     <button title="Open terminal" aria-label="Open terminal" onclick={()=>window.dispatchEvent(new Event('atlas:open-terminal'))}><SquareTerminal size={17}/></button>
     <button title="Open command palette" aria-label="Open command palette" onclick={()=>window.dispatchEvent(new Event('atlas:shortcuts'))}><Command size={17}/></button>
