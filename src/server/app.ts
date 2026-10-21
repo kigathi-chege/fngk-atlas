@@ -63,6 +63,7 @@ import { AtlasToolExecutor } from '../agent-tools/executor.js';
 import { GrantStore } from '../agent-tools/grants.js';
 import { HttpCalculatorConversationGateway, type CalculatorConversationGateway } from '../intelligence/conversation-gateway.js';
 import { CalculatorConnectionService } from '../integrations/calculator-connection.js';
+import { registerGitRoutes } from './git-routes.js';
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -546,6 +547,7 @@ export async function createApp(
     try { return await operation(scopedFileService(scope, lease)); }
     finally { if (mutation) filesystemCache.invalidate(scope); lease.release(); }
   };
+  registerGitRoutes(app, { local: contexts.direct, remote: async (contextId, claims, request, reply) => { const scope = await scopeForContext(contextId, profileScope.current(), request, reply, claims), lease = await deviceSessions.acquire(scope); return { executor: lease.commandExecutor(scope), openTerminal: signal => fngk.openTerminal(`device:${scope.deviceId}`, { newSession: true, profile: scope.profile, signal, owner: 'atlas-internal', purpose: 'device-session' }), release: () => lease.release(), invalidate: () => filesystemCache.invalidate(scope) }; } });
   const agentTools = new AtlasToolRegistry();
   const toolGrants = new GrantStore(databaseFile);
   const guardedToolExecutor = (request: { raw: NodeJS.EventEmitter }, reply: { raw: NodeJS.EventEmitter & { writableEnded?: boolean } }) => new AtlasToolExecutor({

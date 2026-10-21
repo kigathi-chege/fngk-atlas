@@ -83,7 +83,7 @@ export function streamed(root: string, body: string): string {
     `t=$(mktemp 2>/dev/null) || exit ${GIT_STATUS.tempUnavailable};`,
     `{ ${body}; } < /dev/null > "$t" 2>&1 & p=$!;`,
     // Follow the log while git runs. `tail -f --pid` is GNU-only, so poll.
-    `o=0; while :; do if kill -0 "$p" 2>/dev/null; then r=1; else r=0; fi; n=$(wc -c < "$t"); if [ "$n" -gt "$o" ]; then tail -c "+$((o + 1))" "$t" | head -c "$((n - o))" | tr '\\r' '\\n'; o=$n; fi; [ "$r" = 1 ] || break; sleep 1; done;`,
+    `o=0; while :; do if kill -0 "$p" 2>/dev/null; then r=1; else r=0; fi; n=$(wc -c < "$t"); if [ "$n" -gt "$o" ]; then tail -c "+$((o + 1))" "$t" | head -c "$((n - o))" | tr '\\r' '\\n'; o=$n; fi; [ "$r" = 1 ] || break; sleep 0.25 2>/dev/null || sleep 1; done;`,
     'wait "$p"; s=$?; rm -f -- "$t"; exit "$s"',
     ')',
   ].join(' ');

@@ -95,7 +95,7 @@ export class TerminalLongOperationRunner implements LongOperationRunner {
     const requestId = randomUUID(), frame = requestId.replaceAll('-', '_');
     const begin = `__ATLAS_BEGIN_${frame}__\n`, end = `\n__ATLAS_END_${frame}__:`;
     return await new Promise<LongOperationResult>((resolve, reject) => {
-      let buffer = '', started = false, emitted = 0, output = '', settled = false, completed = false;
+      let buffer = '', pendingCr = '', started = false, emitted = 0, output = '', settled = false, completed = false;
       const finish = (error?: Error, exitCode?: number) => {
         if (settled) return; settled = true; clearTimeout(timer);
         terminal.off('event', receive); terminal.off('close', closed); options.signal?.removeEventListener('abort', cancel);
@@ -124,7 +124,10 @@ export class TerminalLongOperationRunner implements LongOperationRunner {
       const receive = (event: TerminalEvent) => {
         if (event.type === 'error' && event.requestId === requestId) { finish(failure(typeof event.code === 'string' ? event.code : 'terminal_command_failed', typeof event.message === 'string' ? event.message : 'The Device rejected the git operation.')); return; }
         if ((event.type === 'output' || event.type === 'replay') && typeof event.bodyBase64 === 'string') {
-          buffer += Buffer.from(event.bodyBase64, 'base64').toString('utf8').replace(/\r\n?/g, '\n');
+          // A CRLF can be split across chunks; hold a trailing CR until the next one.
+          const raw = pendingCr + Buffer.from(event.bodyBase64, 'base64').toString('utf8');
+          pendingCr = raw.endsWith('\r') ? '\r' : '';
+          buffer += (pendingCr ? raw.slice(0, -1) : raw).replace(/\r\n?/g, '\n');
           drain();
         }
         if (event.type === 'command_state' && event.requestId === requestId && (event.status === 'succeeded' || event.status === 'failed')) completed = true;
