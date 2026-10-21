@@ -22,7 +22,10 @@
   const send = (value: Record<string, unknown>) => terminalReady && socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify(value));
   const encoded = (value: string) => { const bytes = new TextEncoder().encode(value); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary); };
 
-  async function refreshSessions() { if (!target.startsWith('device:')) return; try { const value=await api<any>(`/api/fngk/sessions?deviceId=${encodeURIComponent(target.slice(7))}${params.profile?`&profile=${encodeURIComponent(params.profile)}`:''}`);sessions=value.sessions??[]; } catch {} }
+  async function refreshSessions() { if (!target.startsWith('device:')) return; try { const value=await api<any>(`/api/fngk/sessions?deviceId=${encodeURIComponent(target.slice(7))}${params.profile?`&profile=${encodeURIComponent(params.profile)}`:''}`);const listed=value.sessions??[];
+      // The namespace can lag behind a just-opened session; never tell the user
+      // they have no terminals while this panel is attached to one.
+      sessions=sessionId&&!listed.some((item:{id:string})=>item.id===sessionId)?[{id:sessionId,status:'live'},...listed]:listed; } catch {} }
   function scheduleReconnect() {
     if (disposed || retries >= 6) return;
     clearTimeout(reconnectTimer);

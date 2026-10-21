@@ -124,3 +124,6 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .terminal-panel .terminal-body{overflow:hidden}.terminal-panel .terminal{height:100%;min-height:0;overflow:hidden}.terminal-panel .terminal .xterm{height:100%}
 /* Permanent Dockview regions render their controls inside the panel header. */
 .atlas-dock .dv-groupview.atlas-integrated-panel-group>.dv-tabs-and-actions-container{display:none!important}
+/* Collapsed Dockview sidebar columns: a 36px strip; content stays mounted but hidden. */
+.dv-groupview[data-atlas-collapsed]{overflow:hidden}
+.dv-groupview[data-atlas-collapsed]>*{visibility:hidden}
