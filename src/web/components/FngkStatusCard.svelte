@@ -1,6 +1,6 @@
 <script lang="ts">
   export let status: any;
-  const labels:Record<string,string>={checking:'Checking FNGK',ready:'FNGK ready','install-choice':'Install FNGK','update-choice':'Update FNGK','daemon-install-choice':'Start FNGK daemon','login-choice':'Sign in to FNGK','recoverable-error':'FNGK needs attention'};
+  const labels:Record<string,string>={checking:'Checking FNGK',ready:'FNGK ready','install-choice':'Install FNGK','update-choice':'Update FNGK','daemon-install-choice':'Start FNGK daemon','login-choice':'Sign in to Signal','recoverable-error':'FNGK needs attention'};
 </script>
 
 <section class:ready={status?.state==='ready'} class="fngk-status-card" aria-label="FNGK local runtime status">

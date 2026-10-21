@@ -12,6 +12,6 @@ describe('shared form control migration', () => {
     expect(filesystem).toContain("import AtlasInput from './ui/AtlasInput.svelte'");
     expect(filesystem.match(/<AtlasInput/g)?.length).toBeGreaterThanOrEqual(3);
     expect(onboarding).toContain("import AtlasInput from './ui/AtlasInput.svelte'");
-    expect(onboarding).toContain('<AtlasInput bind:value={origin}');
+    expect(onboarding).toContain('<AtlasInput bind:value={selfHosted}');
   });
 });

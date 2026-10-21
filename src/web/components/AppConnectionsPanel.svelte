@@ -9,9 +9,22 @@
   async function refresh(){try{const value=await api<any>('/api/app-connections/status');configured=value.configured;connection=value.connection}catch(error){message=(error as Error).message}}
   async function connect(){const eventId=`app.connection:calculator:${Date.now()}`;atlasEvents.begin({id:eventId,type:'app.connection',title:'Connect Calculator',panelId:'atlas.app-connections'});busy=true;message='Opening Calculator authorization…';try{const value=await api<any>('/api/app-connections/connect',{method:'POST',body:JSON.stringify({origin})});await openAuthorizationUrl(value.authorizationUrl);message='Approve the connection in Calculator, then return here.';window.clearInterval(pollTimer);pollTimer=window.setInterval(async()=>{await refresh();if(configured){window.clearInterval(pollTimer);pollTimer=undefined;message='Calculator connected.';atlasEvents.resolve(eventId,{message});window.dispatchEvent(new Event('atlas:open-agent-chat'))}},1200)}catch(error){message=(error as Error).message;atlasEvents.fail(eventId,{message})}finally{busy=false}}
   async function disconnect(){const eventId=`app.connection:calculator:disconnect:${Date.now()}`;atlasEvents.begin({id:eventId,type:'app.connection',title:'Disconnect Calculator',panelId:'atlas.app-connections'});busy=true;try{await api('/api/app-connections',{method:'DELETE'});await refresh();message='Calculator disconnected from this Atlas installation.';atlasEvents.resolve(eventId,{message})}catch(error){message=(error as Error).message;atlasEvents.fail(eventId,{message})}finally{busy=false}}
-  onMount(()=>{void refresh();return()=>window.clearInterval(pollTimer)});
+  // Signal sign-in for this machine's FNGK profile (credential-free status).
+  let signal:any=null,signalBusy=false;
+  async function refreshSignal(){try{signal=(await api<any>('/api/onboarding/status')).local}catch{signal=null}}
+  async function signOut(){if(!window.confirm('Sign out of Signal on this machine? This Device stays paired; Atlas will ask you to sign in again.'))return;signalBusy=true;try{await api('/api/onboarding/signout',{method:'POST',body:JSON.stringify({profile:signal?.profile,confirm:true})});await refreshSignal();window.dispatchEvent(new Event('atlas:recover'))}catch(error){message=(error as Error).message}finally{signalBusy=false}}
+  onMount(()=>{void refresh();void refreshSignal();return()=>window.clearInterval(pollTimer)});
 </script>
 <section class="panel app-connections" aria-label="App connections">
+  <div class="connection signal-account" aria-label="Signal account">
+    {#if signal?.operatorAuthorized||signal?.authenticated}
+      <strong>Signal</strong><span>{signal?.account?`Signed in as ${signal.account}`:'Signed in'}{signal?.profile?` · profile ${signal.profile}`:''}</span>
+      <small>{signal?.devicePaired?'This machine is a paired Device.':'This machine is not a Device.'}</small>
+      <button onclick={signOut} disabled={signalBusy}>Sign out</button>
+    {:else}
+      <strong>Signal</strong><span>Not signed in</span><button onclick={()=>window.dispatchEvent(new Event('atlas:recover'))}>Sign in to Signal</button>
+    {/if}
+  </div>
   <header><strong>App connections</strong><small>{configured?'Connected':'Not connected'}</small></header>
   <p>Connect Atlas to Calculator using your Calculator sign-in. Atlas stores the resulting revocable credential locally; it never asks for a copied token.</p>
   {#if configured}
