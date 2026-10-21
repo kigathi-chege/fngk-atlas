@@ -97,6 +97,11 @@ describe('FngkProcessClient', () => {
     expect(value).toMatchObject({input:{port:8080,protocol:'http',path:'/'},argv:['processes','process-1','probe','--json','--profile','work']});
   });
 
+  it('reports the connection id of a published managed process',async()=>{
+    const value:any=await new FngkProcessClient({binary:fixture}).managedProcessOperation('process-1','publish',{port:8080});
+    expect(value).toMatchObject({connectionId:'connection-1',hostname:'preview.test',url:'https://preview.test'});
+  });
+
   it('uses the retained deployment protocol for plans, releases, events, and rollback',async()=>{
     const client=new FngkProcessClient({binary:fixture});
     const created:any=await client.createDeployment('device-1',{name:'web',repositoryPath:'/srv/web',environment:'production',commitSha:'a'.repeat(40),manifest:{version:'fngk.project.v1'}},{profile:'work'});
