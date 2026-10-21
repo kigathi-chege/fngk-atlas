@@ -481,6 +481,9 @@ describe("Atlas FNGK-native server", () => {
     while (!messages.some((message) => message.type === "ready"))
       await once(socket, "message");
     expect(messages).toContainEqual(expect.objectContaining({ type: 'ready', sessionId: expect.any(String) }));
+    socket.send(JSON.stringify({ type: "mode", requestId: "mode-1", mode: "queue" }));
+    while (!messages.some((message) => message.type === "collaboration"))
+      await once(socket, "message");
     socket.send(
       JSON.stringify({
         type: "command",

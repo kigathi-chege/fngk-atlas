@@ -9,6 +9,14 @@ import { FileService } from '../../src/files/file-service.js';
 
 const fixture = path.resolve('test/fixtures/fngk.mjs');
 
+// Signal only runs commands on queue-mode sessions; real callers switch first.
+async function queueReady(terminal: ReturnType<FngkProcessClient['openTerminal']>) {
+  await once(terminal, 'ready');
+  const changed = once(terminal, 'collaboration');
+  terminal.setMode('queue', 'test-queue-mode');
+  await changed;
+}
+
 describe('terminal-backed effective access', () => {
   it('does not send a command after its lease-owned request was already aborted', async () => {
     const controller = new AbortController(); controller.abort();
@@ -36,7 +44,7 @@ describe('terminal-backed effective access', () => {
 
   it('extracts only framed output from a normal FNGK terminal command', async () => {
     const terminal = new FngkProcessClient({ binary: fixture }).openTerminal('device-1', { newSession: true });
-    await once(terminal, 'ready');
+    await queueReady(terminal);
     const result = await new FngkTerminalCommandExecutor(terminal).execute('printf payload');
     expect(result).toEqual({ output: Buffer.from('framed payload'), exitCode: 0 });
     terminal.detach('done'); await once(terminal, 'close');
@@ -44,7 +52,7 @@ describe('terminal-backed effective access', () => {
 
   it('extracts framed output from a real PTY CRLF stream', async () => {
     const terminal = new FngkProcessClient({ binary: fixture, env: { FNGK_FIXTURE_MODE: 'terminal-crlf' } }).openTerminal('device-1', { newSession: true });
-    await once(terminal, 'ready');
+    await queueReady(terminal);
     const result = await new FngkTerminalCommandExecutor(terminal).execute('printf payload');
     expect(result).toEqual({ output: Buffer.from('framed payload'), exitCode: 0 });
     terminal.detach('done'); await once(terminal, 'close');
@@ -52,7 +60,7 @@ describe('terminal-backed effective access', () => {
 
   it('waits for output that arrives after command completion', async () => {
     const terminal = new FngkProcessClient({ binary: fixture, env: { FNGK_FIXTURE_MODE: 'terminal-reordered' } }).openTerminal('device-1', { newSession: true });
-    await once(terminal, 'ready');
+    await queueReady(terminal);
     const result = await new FngkTerminalCommandExecutor(terminal).execute('printf payload');
     expect(result).toEqual({ output: Buffer.from('framed payload'), exitCode: 0 });
     terminal.detach('done'); await once(terminal, 'close');

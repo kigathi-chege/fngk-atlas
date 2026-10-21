@@ -62,6 +62,9 @@ describe('FngkProcessClient', () => {
     expect(ready).toMatchObject({ protocolVersion: 'fngk.terminal.v1', sessionId: 'session-1' });
     expect(ready.argv).toEqual(['device name; touch /tmp/nope', '--new', '--profile', 'work', '--stdio-json']);
 
+    const queued = once(terminal, 'collaboration');
+    terminal.setMode('queue', 'mode-1');
+    await queued;
     terminal.sendCommand('npm test', 'run-1');
     const [completed] = await once(terminal, 'command_state');
     expect(completed).toMatchObject({ requestId: 'run-1', status: 'succeeded', exitCode: 0 });

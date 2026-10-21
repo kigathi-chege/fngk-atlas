@@ -252,6 +252,8 @@ export class DeviceSessionManager extends EventEmitter {
     try {
       const terminal = await this.options.createSession(entry.scope, controller.signal);
       await this.#waitForReady(terminal);
+      try { await this.#enterQueueMode(terminal); }
+      catch (error) { this.#terminate(terminal, 'queue_unavailable'); throw error; }
       if (entry.state === 'revoked' || entry.state === 'closed') { this.#terminate(terminal, 'session_no_longer_needed'); return; }
       entry.terminal = terminal;
       entry.executor = new FngkTerminalCommandExecutor(terminal);
@@ -301,6 +303,29 @@ export class DeviceSessionManager extends EventEmitter {
       const failure = (error: unknown) => finish(error);
       const closed = () => finish(sessionError('terminal_closed', 'The Device Session terminal closed before becoming ready.'));
       terminal.once('ready', ready); terminal.once('error', failure); terminal.once('close', closed);
+    });
+  }
+
+  #enterQueueMode(terminal: TerminalSession, timeoutMs = 5_000): Promise<void> {
+    // Signal only runs `command` frames on sessions in queue mode, and new
+    // sessions start exclusive. Without this every command is rejected and the
+    // executor waits out its timeout (the empty remote filesystem tree).
+    return new Promise((resolve, reject) => {
+      const requestId = `atlas-device-session-mode-${randomUUID()}`;
+      let settled = false;
+      const finish = (error?: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        terminal.off('collaboration', changed); terminal.off('terminal_error', rejected); terminal.off('close', closed);
+        error ? reject(error) : resolve();
+      };
+      const changed = (event: TerminalEvent) => { if (event.eventType === 'mode' && event.mode === 'queue') finish(); };
+      const rejected = (event: TerminalEvent) => { if (event.requestId === requestId) finish(sessionError(typeof event.code === 'string' ? event.code : 'queue_unavailable', 'The Device Session could not enter command queue mode.')); };
+      const closed = () => finish(sessionError('terminal_closed', 'The Device Session terminal closed before entering command queue mode.'));
+      const timer = setTimeout(() => finish(sessionError('queue_unavailable', 'The Device did not confirm command queue mode.')), timeoutMs);
+      terminal.on('collaboration', changed); terminal.on('terminal_error', rejected); terminal.once('close', closed);
+      if (!terminal.setMode('queue', requestId)) finish(sessionError('terminal_closed', 'The Device Session terminal closed before entering command queue mode.'));
     });
   }
 

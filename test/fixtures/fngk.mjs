@@ -58,9 +58,13 @@ if (args[0] === 'version') {
 } else if (args.includes('--stdio-json')) {
   process.stdout.write(JSON.stringify({ type: 'ready', protocolVersion: 'fngk.terminal.v1', sessionId: 'session-1', argv: args }) + '\n');
   const lines = createInterface({ input: process.stdin });
+  // Signal starts sessions exclusive and rejects commands until queue mode is set.
+  let collaborationMode = 'exclusive';
   lines.on('line', line => {
     const message = JSON.parse(line);
-    if (message.type === 'command') {
+    if (message.type === 'command' && collaborationMode !== 'queue') {
+      process.stdout.write(JSON.stringify({ type: 'error', protocolVersion: 'fngk.terminal.v1', code: 'queue_unavailable', message: 'queue_unavailable', requestId: message.requestId }) + '\n');
+    } else if (message.type === 'command') {
       const frame = message.command.match(/__ATLAS_BEGIN_([A-Za-z0-9_]+)__/i)?.[1];
       const completed = () => process.stdout.write(JSON.stringify({ type: 'command_state', protocolVersion: 'fngk.terminal.v1', requestId: message.requestId, status: 'succeeded', exitCode: 0 }) + '\n');
       if (mode === 'terminal-reordered') completed();
@@ -73,6 +77,7 @@ if (args[0] === 'version') {
       }
       if (mode !== 'terminal-reordered') completed();
     } else if (message.type === 'mode') {
+      collaborationMode = message.mode;
       process.stdout.write(JSON.stringify({ type: 'collaboration', protocolVersion: 'fngk.terminal.v1', eventType: 'mode', mode: message.mode, requestId: message.requestId }) + '\n');
     } else if (message.type === 'detach') {
       process.stdout.write(JSON.stringify({ type: 'detached', protocolVersion: 'fngk.terminal.v1', requestId: message.requestId }) + '\n');
