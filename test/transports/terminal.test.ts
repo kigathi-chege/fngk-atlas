@@ -282,6 +282,28 @@ describe('terminal-backed effective access', () => {
     } finally { sh.child.kill(); await rm(root, { recursive: true, force: true }); await rm(state, { recursive: true, force: true }); }
   });
 
+  for (const shell of ['bash', 'dash']) it(`leaves umask, options and redirection behaviour of a persistent ${shell} untouched by createFile and writes`, async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'atlas-shell-state-')), state = await mkdtemp(path.join(tmpdir(), 'atlas-shell-state-xdg-'));
+    const sh = new PersistentShell(shell, root, { ...process.env, XDG_STATE_HOME: state });
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor: sh }), files = new FileService([transport]);
+    const snapshot = async () => (await sh.execute('umask; set -o | sort; printf "%s" "$-"')).output.toString();
+    try {
+      await sh.execute('umask 022');
+      const before = await snapshot();
+      await transport.createFile(path.join(root, 'empty.txt'));
+      await transport.createFile(path.join(root, 'full.txt'), Buffer.from('full'));
+      await transport.atomicWrite(path.join(root, 'full.txt'), Buffer.from('atomic'), 0o644);
+      await files.write({ contextId: 'remote', path: path.join(root, 'full.txt') }, Buffer.from('guarded'), sha('atomic'));
+      expect(await snapshot()).toBe(before);
+      // noclobber did not leak: overwriting an existing file still works, and
+      // a new file gets the shell's own umask, not 077.
+      expect((await sh.execute(`printf x > ${path.join(root, 'full.txt')}`)).exitCode).toBe(0);
+      expect(await readFile(path.join(root, 'full.txt'), 'utf8')).toBe('x');
+      await sh.execute(`printf y > ${path.join(root, 'plain.txt')}`);
+      expect((await stat(path.join(root, 'plain.txt'))).mode & 0o777).toBe(0o644);
+    } finally { sh.child.kill(); await rm(root, { recursive: true, force: true }); await rm(state, { recursive: true, force: true }); }
+  });
+
   it('keeps the same guarantees through the local DirectCommandExecutor', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'atlas-direct-exec-')), state = await mkdtemp(path.join(tmpdir(), 'atlas-direct-state-'));
     const previous = process.env.XDG_STATE_HOME; process.env.XDG_STATE_HOME = state;
