@@ -262,7 +262,7 @@ test("uses only canonical observatory APIs", async ({ page }) => {
     const timeline = route.request().url().includes("/timeline");
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(timeline ? { items: [] } : { entity: { id: "workload:web", contextId: "local", kind: "workload", namespace: "atlas.resolver.v2", label: "Web", attributes: { health: "healthy", phase: "running", purpose: "Serve the application" }, stale: false }, assertions: [], relatedEntities: [], views: [{ id: "web.specialist", title: "Web runtime", appliesTo: ["workload"], sections: [{ kind: "properties", title: "Framework", fields: ["purpose"] }] }] }) });
   });
-  await page.route("**/api/search?**", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ type: "function", entityId: "function:main", contextId: "local", label: "main", path: "src/main.ts", workloadId: "workload:web", source: "semantic graph" }] }) }));
+  await page.route("**/api/search?**", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ type: "function", entityId: "function:main", contextId: new URL(route.request().url()).searchParams.get("contextId") ?? "local", label: "main", path: "src/main.ts", workloadId: "workload:web", source: "semantic graph" }] }) }));
   await page.route("**/api/state?**", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ index: { id: "index:web", root: "/repo" }, indexes: [{ id: "index:web", root: "/repo" }], runs: [] }) }));
   await page.route("**/api/software/functions?**", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ id: "function:main", label: "main", qualifiedName: "main", path: "src/main.ts", line: 1, complexity: 2, coverage: { fraction: 1, stale: false }, crap: 2, stale: false }] }) }));
   await openWorkbench(page);
@@ -277,9 +277,13 @@ test("uses only canonical observatory APIs", async ({ page }) => {
   await expect(page.getByText("node", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Software", exact: true }).click();
   await expect(page.getByText("main", { exact: true }).first()).toBeVisible();
-  await page.getByLabel("Search selected context").fill("main");
-  await expect(page.locator(".search-results").getByText("main", { exact: true })).toBeVisible();
-  await page.locator('.context-sidebar').getByRole('button',{name:'Evidence'}).click();
+  await page.getByLabel("Search Atlas").fill("main");
+  await expect(page.getByRole("listbox", { name: "Unified search results" }).getByRole("option", { name: /main/ }).first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("navigation", { name: "Atlas views" }).getByRole("button", { name: "Evidence", exact: true }).click();
+  await page.getByRole("button", { name: "Command palette", exact: true }).click();
+  await page.getByLabel("Command search").fill("functions & coverage");
+  await page.keyboard.press("Enter");
   await page.getByRole("tab", { name: "Functions & coverage" }).click();
   await expect(page.locator(".metrics-table").getByText("main", { exact: true })).toBeVisible();
   expect(forbidden).toEqual([]);
@@ -352,8 +356,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
     page.locator('.tree-explorer .atlas-permanent-header').getByText("Filesystem", { exact: true }),
   ).toBeVisible();
   await page
-    .locator(".context-rail")
-    .getByRole("button", { name: "Atlas process host" })
+    .locator(".devices-panel").getByRole("button", { name: /Atlas process host/ })
     .click();
   await expect(
     page.getByRole("button", { name: /package\.json/ }),
@@ -448,20 +451,16 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
     page.locator(".tree-row", { hasText: "inline.ts" }),
   ).toBeVisible();
   await page
-    .locator(".context-rail")
-    .getByRole("button", { name: /kigathi/ })
+    .locator(".devices-panel").getByRole("button", { name: /kigathi/ })
     .click();
-  await page
-    .locator(".context-sidebar")
-    .getByRole("button", { name: "Open terminal", exact: true })
-    .click();
+  await page.getByRole("navigation", { name: "Atlas activity" }).getByRole("button", { name: "Open terminal" }).click();
   await expect(
     page.getByText("Terminal", { exact: true }).first(),
   ).toBeVisible();
   const visibleTerminal = page.locator(".terminal-panel:visible");
-  await expect(visibleTerminal.locator("header")).toContainText("Live");
-  const sessionRail = visibleTerminal.getByRole("navigation", {
-    name: "Terminal sessions",
+  await expect(visibleTerminal.locator("header").first()).toContainText("Live");
+  const sessionRail = visibleTerminal.getByRole("complementary", {
+    name: "Your terminal sessions",
   });
   await expect(sessionRail).toBeVisible();
   await expect(sessionRail.locator(".session-label").first()).toBeVisible();
@@ -471,7 +470,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
     ),
   ).toBe("auto");
   await expect(
-    visibleTerminal.getByRole("button", { name: "New terminal session" }),
+    visibleTerminal.getByRole("button", { name: "New terminal session" }).first(),
   ).toBeVisible();
   await page.evaluate(() => {
     window.dispatchEvent(new Event("atlas:focus-metrics"));
@@ -501,26 +500,26 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
   );
   await visibleTerminal
     .getByRole("button", { name: "New terminal session" })
+    .first()
     .click();
   await expect
     .poll(() => terminalSockets.filter((url) => url.includes("new=1")).length)
     .toBe(1);
   await expect(page.locator(".terminal-panel")).toHaveCount(1);
-  await page.getByRole('button',{name:'Minimize Operations dock'}).click();
-  await expect(page.locator('.atlas-tab[data-panel-id="atlas.operations"]')).toHaveCount(0);
-  await expect(page.getByRole('button',{name:'Restore Terminal'})).toBeVisible();
-  await page.getByRole('button',{name:'Restore Terminal'}).click();
+  const operationsHeight = () => page.evaluate(() => Math.round(document.querySelector('.atlas-tab[data-panel-id="atlas.operations"]')?.closest('.dv-groupview')?.getBoundingClientRect().height ?? -1));
+  await page.getByRole('button',{name:'Collapse Operations'}).click();
+  await expect.poll(operationsHeight).toBeLessThanOrEqual(40);
+  await expect(page.locator(".terminal-panel")).toHaveCount(1);
+  await page.getByRole('button',{name:'Collapse Operations'}).click();
+  await expect.poll(operationsHeight).toBeGreaterThan(120);
   await expect(page.locator('.atlas-tab[data-panel-id="atlas.operations"]')).toBeVisible();
   const separators = page.locator(".dv-sash");
   expect(await separators.count()).toBeGreaterThan(1);
   await page.reload();
   await expect(page.locator(".dv-dockview")).toHaveCount(1);
-  await expect(
-    page.getByText("Filesystem", { exact: true }).first(),
-  ).toBeVisible();
+  await expect(page.getByRole("region", { name: "Filesystem" })).toBeVisible();
   await page
-    .locator(".context-rail")
-    .getByRole("button", { name: "Atlas process host" })
+    .locator(".devices-panel").getByRole("button", { name: /Atlas process host/ })
     .click();
   await page.route("**/api/files/search?**", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 350));
@@ -533,8 +532,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
   });
   await page.getByLabel("Search filesystem").fill("stale");
   await page
-    .locator(".context-rail")
-    .getByRole("button", { name: /kigathi/ })
+    .locator(".devices-panel").getByRole("button", { name: /kigathi/ })
     .click();
   await page.waitForTimeout(600);
   await expect(page.getByText("/stale-file.txt", { exact: true })).toHaveCount(
@@ -559,13 +557,11 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
     });
   });
   await page
-    .locator(".context-rail")
-    .getByRole("button", { name: "Atlas process host" })
+    .locator(".devices-panel").getByRole("button", { name: /Atlas process host/ })
     .click();
   await page.getByLabel("Search Atlas").fill("stale");
   await page
-    .locator(".context-rail")
-    .getByRole("button", { name: /kigathi/ })
+    .locator(".devices-panel").getByRole("button", { name: /kigathi/ })
     .click();
   await page.waitForTimeout(600);
   await expect(
@@ -601,9 +597,7 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
     }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Open filesystem" }).click();
-  await expect(
-    page.getByText("Filesystem", { exact: true }).first(),
-  ).toBeVisible();
+  await expect(page.getByRole("region", { name: "Filesystem" })).toBeVisible();
   await page
     .locator(".tree-list")
     .click({ button: "right", position: { x: 240, y: 220 } });
@@ -641,8 +635,11 @@ test("renders contextual search and safe filesystem actions in the FNGK Atlas wo
       },
     ),
   ).toBe(true);
+  // Permanent sidebars have integrated headers instead of tabs; Dockview's
+  // native float remains available from a regular panel's tab menu.
+  await page.getByRole("button", { name: "Open Device Atlas" }).click();
   await page
-    .getByRole("tab", { name: "Filesystem", exact: true })
+    .getByRole("tab", { name: "Device Atlas", exact: true })
     .click({ button: "right" });
   await page.getByRole("menuitem", { name: "Float" }).click();
   await expect(
@@ -677,8 +674,7 @@ test("opens Device database and live-project workbenches without starting privil
 }) => {
   await openWorkbench(page);
   await page
-    .locator(".context-rail")
-    .getByRole("button", { name: /kigathi/ })
+    .locator(".devices-panel").getByRole("button", { name: /kigathi/ })
     .click({ button: "right" });
   await expect(
     page.getByRole("menuitem", { name: /Start dev run/ }),
@@ -688,9 +684,11 @@ test("opens Device database and live-project workbenches without starting privil
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await page
-    .locator(".context-rail")
-    .getByRole("button", { name: /kigathi/ })
+    .locator(".devices-panel").getByRole("button", { name: /kigathi/ })
     .click();
+  await page.getByRole("button", { name: "Command palette", exact: true }).click();
+  await page.getByLabel("Command search").fill("code mapping");
+  await page.keyboard.press("Enter");
   const sidebar = page.locator(".context-sidebar");
   await expect(sidebar.getByText('Choose the project Atlas should inspect',{exact:false})).toBeVisible();
   await sidebar.getByRole('button',{name:'Choose code mapping root'}).click();
@@ -701,7 +699,7 @@ test("opens Device database and live-project workbenches without starting privil
   await expect(
     page.getByRole("heading", { name: "Run on selected Device" }),
   ).toBeVisible();
-  await sidebar.getByRole("button", { name: "Data" }).click();
+  await page.locator(".device-details").getByRole("button", { name: "Data" }).click();
   await expect(page.locator(".native-database")).toBeVisible();
   await expect(page.getByText("Device PostgreSQL resources")).toBeVisible();
   await expect(page.getByText("DbGate")).toHaveCount(0);
@@ -802,8 +800,7 @@ test("reopens a retained deployment in its operational stage", async ({ page }) 
   );
   await openWorkbench(page);
   await page
-    .locator(".context-rail")
-    .getByRole("button", { name: /kigathi/ })
+    .locator(".devices-panel").getByRole("button", { name: /kigathi/ })
     .click({ button: "right" });
   await page
     .getByRole("menuitem", { name: /Open deployment workbench/ })
@@ -823,8 +820,7 @@ test("keeps the persistent shell polished and reachable at desktop and narrow wi
   await page.setViewportSize({ width: 1440, height: 900 });
   await openWorkbench(page);
   await page
-    .locator(".context-rail")
-    .getByRole("button", { name: "Atlas process host" })
+    .locator(".devices-panel").getByRole("button", { name: /Atlas process host/ })
     .click();
   const unified = page.getByLabel("Search Atlas");
   await expect(unified).toBeVisible();
@@ -842,7 +838,7 @@ test("keeps the persistent shell polished and reachable at desktop and narrow wi
   await page.keyboard.press("Escape");
   const geometry = await page.evaluate(() => {
     const left = document
-        .querySelector(".context-sidebar")
+        .querySelector(".devices-panel")
         ?.closest(".dv-groupview")
         ?.getBoundingClientRect(),
       right = document
@@ -913,7 +909,7 @@ test("keeps the persistent shell polished and reachable at desktop and narrow wi
       name: "Pinned, workspace, and minimized panels",
     }),
   ).toBeVisible();
-  await expect(page.locator(".context-sidebar")).toBeHidden();
+  await expect(page.locator(".devices-panel")).toBeHidden();
   await expect(page.locator(".tree-explorer")).toBeHidden();
   expect(
     await page
@@ -989,7 +985,7 @@ test("keeps sidebar widths and the center workspace when central tabs close", as
   await expect(page.getByRole("tab", { name: "Device Atlas" })).toBeVisible();
   const widths = await page.evaluate(() => ({
     left: document
-      .querySelector(".context-sidebar")
+      .querySelector(".devices-panel")
       ?.closest(".dv-groupview")
       ?.getBoundingClientRect().width,
     right: document
@@ -1016,7 +1012,7 @@ test("keeps sidebar widths and the center workspace when central tabs close", as
   ).toBeVisible();
   const after = await page.evaluate(() => ({
     left: document
-      .querySelector(".context-sidebar")
+      .querySelector(".devices-panel")
       ?.closest(".dv-groupview")
       ?.getBoundingClientRect().width,
     right: document
@@ -1060,7 +1056,7 @@ test('keeps Operations closed until requested and manages a verified HTTP share'
   await page.getByRole('button',{name:'Open Device Atlas'}).click();
   await expect(page.getByRole('tab',{name:'Device Atlas'})).toBeVisible();
   await expect(page.locator('.atlas-tab[data-panel-id="atlas.operations"]')).toHaveCount(0);
-  await page.locator('.context-sidebar').getByRole('button',{name:'Ports'}).click();
+  await page.locator('.device-details').getByRole('button',{name:'Ports'}).click();
   await expect(page.getByRole('tab',{name:'HTTP ports'})).toBeVisible();
   await expect(page.locator('.atlas-tab[data-panel-id="atlas.operations"]')).toHaveCount(0);
   expect(await page.evaluate(()=>document.querySelector('.atlas-tab[data-panel-id="atlas.ports"]')?.closest('.dv-groupview')===document.querySelector('.atlas-tab[data-panel-id="atlas.observatory"]')?.closest('.dv-groupview'))).toBe(true);
@@ -1072,5 +1068,5 @@ test('keeps Operations closed until requested and manages a verified HTTP share'
   await page.getByRole('button',{name:'Publish',exact:true}).click();
   await expect(page.getByText('https://fixture.hkmn.test/',{exact:true})).toBeVisible();
   await page.getByTitle('Stop public route').click();
-  await expect(page.getByText('Public route stopped')).toBeVisible();
+  await expect(page.locator('footer',{hasText:'Public route stopped'})).toBeVisible();
 });
