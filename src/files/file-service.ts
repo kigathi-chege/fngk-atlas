@@ -70,16 +70,70 @@ export class FileService {
     throw this.#unavailable('stat', errors);
   }
 
-  async write(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, content: Buffer, expectedFingerprint: string) {
+  async write(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, content: Buffer, expectedFingerprint: string, options: { keepVersions?: boolean; signal?: AbortSignal } = {}) {
     target = this.#target(target);
     const errors: unknown[] = [];
     for (const route of this.#routes(target, 'write')) try {
-      const current = await route.read(target.path), currentFingerprint = fingerprint(current);
-      if (currentFingerprint !== expectedFingerprint) throw new FileConflictError('The file changed after it was opened.');
-      const metadata = await route.stat(target.path); await route.atomicWrite(target.path, content, metadata.mode);
-      return { path: target.path, bytes: content.length, fingerprint: fingerprint(content), route };
-    } catch (error) { if (error instanceof FileConflictError) throw error; errors.push(error); }
+      if (route.safeWrite) {
+        // The fingerprint check and version rotation happen on the machine
+        // holding the file, in the same step as the replace.
+        await route.safeWrite(target.path, content, { expectedFingerprint, keepVersions: options.keepVersions !== false });
+      } else {
+        const current = await route.read(target.path), currentFingerprint = fingerprint(current);
+        if (currentFingerprint !== expectedFingerprint) throw new FileConflictError('The file changed after it was opened.');
+        const metadata = await route.stat(target.path); await route.atomicWrite(target.path, content, metadata.mode);
+      }
+      return { path: target.path, bytes: content.length, fingerprint: fingerprint(content), previousFingerprint: expectedFingerprint, versioned: Boolean(route.safeWrite && route.versions && options.keepVersions !== false), route };
+    } catch (error) {
+      if (error instanceof FileConflictError) throw error;
+      if ((error as { code?: string }).code === 'file_conflict') throw new FileConflictError('The file changed after it was opened.');
+      if (isCancelled(error, options.signal)) throw error;
+      errors.push(error);
+    }
     throw this.#unavailable('write', errors);
+  }
+
+  #versionRoutes(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>) { return this.#routes(target, 'write').filter(route => route.versions); }
+  /** Previous versions Atlas kept for this path, newest first. */
+  async versions(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, options: { signal?: AbortSignal } = {}) {
+    target = this.#target(target);
+    const errors: unknown[] = [];
+    for (const route of this.#versionRoutes(target)) try { return { path: target.path, versions: await route.versions!.list(target.path, options), route }; }
+    catch (error) { if (isCancelled(error, options.signal)) throw error; errors.push(error); }
+    if (!errors.length) throw Object.assign(new Error('No route keeps file versions for this path.'), { code: 'route_unavailable' });
+    throw this.#unavailable('list versions of', errors);
+  }
+  async readVersion(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, slot: number, options: { signal?: AbortSignal } = {}) {
+    target = this.#target(target);
+    const errors: unknown[] = [];
+    for (const route of this.#versionRoutes(target)) try {
+      const listed = (await route.versions!.list(target.path, options)).find(value => value.slot === slot);
+      if (!listed) throw Object.assign(new Error('No previous version exists in that slot.'), { code: 'path_not_found' });
+      const content = await route.versions!.read(target.path, slot, options), value = fingerprint(content);
+      if (value !== listed.fingerprint) throw Object.assign(new Error('The version changed while it was read.'), { code: 'file_conflict' });
+      return { path: target.path, slot, version: listed, content, binary: content.includes(0), fingerprint: value, route };
+    } catch (error) { if (['file_conflict', 'path_not_found'].includes((error as { code?: string }).code ?? '') || isCancelled(error, options.signal)) throw error; errors.push(error); }
+    throw this.#unavailable('read a version of', errors);
+  }
+  /**
+   * Restores a kept version through the safe write, so the content it
+   * replaces becomes the newest version in turn. `versionFingerprint` picks
+   * the version by content, which survives rotation by concurrent saves.
+   */
+  async restoreVersion(target: Required<Pick<AccessTarget, 'contextId' | 'path'>>, selector: { slot?: number; versionFingerprint?: string }, expectedFingerprint?: string, options: { signal?: AbortSignal } = {}) {
+    target = this.#target(target);
+    let slot = selector.slot;
+    if (selector.versionFingerprint) {
+      const listed = (await this.versions(target, options)).versions.find(value => value.fingerprint === selector.versionFingerprint);
+      if (!listed) throw Object.assign(new Error('That version is no longer kept.'), { code: 'path_not_found' });
+      slot = listed.slot;
+    }
+    if (!slot) throw Object.assign(new Error('A version slot or fingerprint is required.'), { code: 'invalid_version' });
+    const version = await this.readVersion(target, slot, options);
+    let expected = expectedFingerprint;
+    if (!expected) { const current = await this.read(target, options); if (!current.fingerprint) throw Object.assign(new Error('The current file is too large to restore over.'), { code: 'file_too_large' }); expected = current.fingerprint; }
+    const written = await this.write(target, version.content, expected, { signal: options.signal });
+    return { ...written, restoredSlot: slot, restoredFingerprint: version.fingerprint };
   }
   #protect(value:string){const normalized=this.#target({contextId:'validation',path:value}).path;if(normalized==='/'||normalized.trim()===''||normalized==='/.atlas-trash'||normalized.startsWith('/.atlas-trash/'))throw Object.assign(new Error('The context root and recovery vault cannot be changed.'),{code:'protected_path'});return normalized;}
   async search(target:Required<Pick<AccessTarget,'contextId'|'path'>>,query:string,options:FileSearchOptions={}){target=this.#target(target);if(options.signal?.aborted)throw Object.assign(new Error('Filesystem search was cancelled.'),{code:'cancelled'});if(!query.trim())return {matches:[],route:this.#routes(target,'search')[0]};const errors:unknown[]=[];for(const route of this.#routes(target,'search'))try{if(!route.search)continue;return {matches:await route.search(target.path,query,{...options,limit:Math.min(500,Math.max(1,options.limit??200)),maxEntries:Math.min(20_000,Math.max(1,options.maxEntries??5_000)),maxDepth:Math.min(32,Math.max(0,options.maxDepth??12))}),route};}catch(error){if((error as {code?:string}).code==='cancelled')throw error;errors.push(error)}throw this.#unavailable('search',errors)}

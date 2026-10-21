@@ -2,13 +2,16 @@ import { once } from 'node:events';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { FngkProcessClient } from '../../src/fngk/process-client.js';
 import { FngkTerminalCommandExecutor, type CommandExecutor, type CommandResult } from '../../src/transports/terminal-command.js';
 import { TerminalFileTransport } from '../../src/transports/terminal-file.js';
-import { FileService } from '../../src/files/file-service.js';
+import { FileConflictError, FileService } from '../../src/files/file-service.js';
+import { DirectCommandExecutor } from '../../src/transports/direct-command.js';
+import { versionKey } from '../../src/files/versions.js';
 
 const fixture = path.resolve('test/fixtures/fngk.mjs');
 
@@ -209,6 +212,140 @@ describe('terminal-backed effective access', () => {
       expect(flags.exitCode).toBe(0);
       expect(flags.output.toString()).not.toMatch(/[eu]/);
     } finally { sh.child.kill(); await rm(root, { recursive: true, force: true }); await rm(state, { recursive: true, force: true }); }
+  });
+
+  const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+  const shellState = async (sh: CommandExecutor) => (await sh.execute('printf "%s|%s|%s|%s|%s" "$-" "$(umask)" "$PWD" "${target-unset}${real-unset}${enc-unset}" "$(command -v atlas_sha || echo none)"')).output.toString();
+
+  for (const shell of ['bash', 'dash']) it(`saves safely through one persistent ${shell}: conflicts, symlinks, modes, hardlinks and versions`, async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'atlas-safe-save-')), state = await mkdtemp(path.join(tmpdir(), 'atlas-safe-state-'));
+    const sh = new PersistentShell(shell, root, { ...process.env, XDG_STATE_HOME: state });
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor: sh });
+    const files = new FileService([transport]);
+    const at = (name: string) => path.join(root, name);
+    try {
+      const before = await shellState(sh);
+      // Creating files must not leak noclobber or umask into the shared shell.
+      await transport.createFile(at('created-empty.txt')); await transport.createFile(at('created.txt'), Buffer.from('x'));
+      expect(await shellState(sh)).toBe(before);
+      await sh.execute('set -C');
+      await writeFile(at('a.txt'), 'v0'); await chmod(at('a.txt'), 0o751);
+      let fingerprint = sha('v0');
+      for (const next of ['v1', 'v2', 'v3', 'v4']) { const saved = await files.write({ contextId: 'remote', path: at('a.txt') }, Buffer.from(next), fingerprint); fingerprint = saved.fingerprint; }
+      expect(await readFile(at('a.txt'), 'utf8')).toBe('v4');
+      expect((await stat(at('a.txt'))).mode & 0o777).toBe(0o751);
+      // Only three previous versions are kept, newest first.
+      const versions = await transport.versions.list(at('a.txt'));
+      expect(versions.map(value => [value.slot, value.fingerprint, value.bytes])).toEqual([[1, sha('v3'), 2], [2, sha('v2'), 2], [3, sha('v1'), 2]]);
+      expect((await transport.versions.read(at('a.txt'), 3)).toString()).toBe('v1');
+      expect(await readdir(path.join(state, 'fngk-atlas', 'versions', versionKey(at('a.txt'))))).toEqual(['1', '1.meta', '2', '2.meta', '3', '3.meta', 'path.b64']);
+      // Restoring is itself a versioned, guarded write.
+      const restored = await files.restoreVersion({ contextId: 'remote', path: at('a.txt') }, { slot: 3 }, fingerprint);
+      expect(await readFile(at('a.txt'), 'utf8')).toBe('v1');
+      expect((await transport.versions.list(at('a.txt')))[0].fingerprint).toBe(sha('v4'));
+      fingerprint = restored.fingerprint;
+
+      // Someone else writes between open and save: the guarded replace refuses.
+      await writeFile(at('a.txt'), 'changed elsewhere');
+      await expect(files.write({ contextId: 'remote', path: at('a.txt') }, Buffer.from('mine'), fingerprint)).rejects.toBeInstanceOf(FileConflictError);
+      expect(await readFile(at('a.txt'), 'utf8')).toBe('changed elsewhere');
+      expect((await transport.versions.list(at('a.txt')))[0].fingerprint).toBe(sha('v4'));
+      // A deleted file is a conflict too, not a silent re-create.
+      await rm(at('a.txt'));
+      await expect(files.write({ contextId: 'remote', path: at('a.txt') }, Buffer.from('mine'), fingerprint)).rejects.toBeInstanceOf(FileConflictError);
+      await expect(stat(at('a.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+      // Symlinks are written through to the resolved file and stay links.
+      await mkdir(at('real')); await writeFile(at('real/target.txt'), 'linked'); await symlink('real/target.txt', at('link.txt'));
+      await files.write({ contextId: 'remote', path: at('link.txt') }, Buffer.from('through the link'), sha('linked'));
+      expect((await lstat(at('link.txt'))).isSymbolicLink()).toBe(true);
+      expect(await readFile(at('real/target.txt'), 'utf8')).toBe('through the link');
+      // Hardlinks keep sharing the inode.
+      await writeFile(at('hard-a.txt'), 'shared'); await link(at('hard-a.txt'), at('hard-b.txt'));
+      await files.write({ contextId: 'remote', path: at('hard-a.txt') }, Buffer.from('both see this'), sha('shared'));
+      expect(await readFile(at('hard-b.txt'), 'utf8')).toBe('both see this');
+      expect((await stat(at('hard-a.txt'))).ino).toBe((await stat(at('hard-b.txt'))).ino);
+      // A multi-chunk upload decodes intact.
+      const large = Buffer.from('x'.repeat(40_000) + 'end');
+      await writeFile(at('large.txt'), 'small');
+      await files.write({ contextId: 'remote', path: at('large.txt') }, large, sha('small'));
+      expect(await readFile(at('large.txt'))).toEqual(large);
+
+      // No temporaries or staging files are left behind, and the shell is unchanged.
+      const leftovers = (await readdir(root, { recursive: true })).filter(name => String(name).includes('.atlas-'));
+      expect(leftovers).toEqual([]);
+      expect(await readdir(path.join(state, 'fngk-atlas', 'staging'))).toEqual([]);
+      // Every write above ran under a noclobber shell set by someone else.
+      await sh.execute('set +C');
+      expect(await shellState(sh)).toBe(before);
+      expect(before).not.toMatch(/^[^|]*[euC]/);
+    } finally { sh.child.kill(); await rm(root, { recursive: true, force: true }); await rm(state, { recursive: true, force: true }); }
+  });
+
+  for (const shell of ['bash', 'dash']) it(`leaves umask, options and redirection behaviour of a persistent ${shell} untouched by createFile and writes`, async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'atlas-shell-state-')), state = await mkdtemp(path.join(tmpdir(), 'atlas-shell-state-xdg-'));
+    const sh = new PersistentShell(shell, root, { ...process.env, XDG_STATE_HOME: state });
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor: sh }), files = new FileService([transport]);
+    const snapshot = async () => (await sh.execute('umask; set -o | sort; printf "%s" "$-"')).output.toString();
+    try {
+      await sh.execute('umask 022');
+      const before = await snapshot();
+      await transport.createFile(path.join(root, 'empty.txt'));
+      await transport.createFile(path.join(root, 'full.txt'), Buffer.from('full'));
+      await transport.atomicWrite(path.join(root, 'full.txt'), Buffer.from('atomic'), 0o644);
+      await files.write({ contextId: 'remote', path: path.join(root, 'full.txt') }, Buffer.from('guarded'), sha('atomic'));
+      expect(await snapshot()).toBe(before);
+      // noclobber did not leak: overwriting an existing file still works, and
+      // a new file gets the shell's own umask, not 077.
+      expect((await sh.execute(`printf x > ${path.join(root, 'full.txt')}`)).exitCode).toBe(0);
+      expect(await readFile(path.join(root, 'full.txt'), 'utf8')).toBe('x');
+      await sh.execute(`printf y > ${path.join(root, 'plain.txt')}`);
+      expect((await stat(path.join(root, 'plain.txt'))).mode & 0o777).toBe(0o644);
+    } finally { sh.child.kill(); await rm(root, { recursive: true, force: true }); await rm(state, { recursive: true, force: true }); }
+  });
+
+  it('keeps the same guarantees through the local DirectCommandExecutor', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'atlas-direct-exec-')), state = await mkdtemp(path.join(tmpdir(), 'atlas-direct-state-'));
+    const previous = process.env.XDG_STATE_HOME; process.env.XDG_STATE_HOME = state;
+    try {
+      const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'local-shell', deviceId: 'local', executor: new DirectCommandExecutor() });
+      await writeFile(path.join(root, 'b.txt'), 'one'); await symlink('b.txt', path.join(root, 'b-link'));
+      await transport.safeWrite(path.join(root, 'b-link'), Buffer.from('two'), { expectedFingerprint: sha('one') });
+      await expect(transport.safeWrite(path.join(root, 'b-link'), Buffer.from('three'), { expectedFingerprint: sha('one') })).rejects.toMatchObject({ code: 'file_conflict' });
+      expect(await readFile(path.join(root, 'b.txt'), 'utf8')).toBe('two');
+      expect((await lstat(path.join(root, 'b-link'))).isSymbolicLink()).toBe(true);
+      expect((await transport.versions.list(path.join(root, 'b-link'))).map(value => value.fingerprint)).toEqual([sha('one')]);
+    } finally { if (previous === undefined) delete process.env.XDG_STATE_HOME; else process.env.XDG_STATE_HOME = previous; await rm(root, { recursive: true, force: true }); await rm(state, { recursive: true, force: true }); }
+  });
+
+  it('checks the fingerprint and rotates versions in the same command as the replace', async () => {
+    const commands: string[] = [];
+    const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.alloc(0), exitCode: command.includes('base64 -d') ? 73 : 0 }; } };
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
+    await expect(transport.safeWrite('/srv/a.txt', Buffer.from('x'), { expectedFingerprint: sha('y') })).rejects.toMatchObject({ code: 'file_conflict' });
+    const replace = commands.find(command => command.includes('base64 -d'))!;
+    expect(replace.indexOf(`[ "$current" = "$expected" ]`)).toBeGreaterThan(0);
+    expect(replace.indexOf(`[ "$current" = "$expected" ]`)).toBeLessThan(replace.indexOf('fngk-atlas/versions'));
+    expect(replace.indexOf('fngk-atlas/versions')).toBeLessThan(replace.indexOf('mv -f -- "$tmp" "$real"'));
+    expect(replace).toContain('readlink -f');
+    expect(replace).toContain('openssl dgst -sha256');
+    expect(replace.startsWith('( ')).toBe(true);
+    expect(commands.at(-1)).toMatch(/^\( rm -f -- /);
+  });
+
+  it('builds POSIX content search with flags, globs and columns', async () => {
+    const commands: string[] = [];
+    const output = Buffer.from('/srv/app/src/a.ts\x003:  const fooBar = foo;\n/srv/app/src/b.js\x001:foo\n').toString('base64');
+    const executor: CommandExecutor = { execute: async command => { commands.push(command); return { output: Buffer.from(output), exitCode: 0 }; } };
+    const transport = new TerminalFileTransport({ id: 'terminal', contextId: 'remote', deviceId: 'device-1', executor });
+    const matches = await transport.search('/srv/app', 'foo', { mode: 'content', wholeWord: true, caseSensitive: false, include: ['*.ts'], exclude: ['node_modules', 'dist/**'] });
+    expect(commands[0]).toContain(`\\( -name 'node_modules' -o -path '/srv/app/dist/*' \\) -prune -o -type f \\( -name '*.ts' \\)`);
+    expect(commands[0]).not.toContain('--include');
+    expect(commands[0]).toContain(`grep -ZInH -m 8 -F -i -w -e '"'"'foo'"'"' "$@"`);
+    // b.js is dropped by the exact glob check; fooBar is not a whole word.
+    expect(matches).toEqual([expect.objectContaining({ path: '/srv/app/src/a.ts', line: 3, column: 18, length: 3 })]);
+    await transport.search('/srv/app', String.raw`\bfoo\d+`, { mode: 'content', regex: true, caseSensitive: true });
+    expect(commands[1]).toContain(`-E -e '"'"'foo[0-9]+'"'"'`);
   });
 
   it('uses bounded structured NUL records for terminal name search', async () => {

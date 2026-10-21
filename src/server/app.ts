@@ -63,6 +63,7 @@ import { AtlasToolExecutor } from '../agent-tools/executor.js';
 import { GrantStore } from '../agent-tools/grants.js';
 import { HttpCalculatorConversationGateway, type CalculatorConversationGateway } from '../intelligence/conversation-gateway.js';
 import { CalculatorConnectionService } from '../integrations/calculator-connection.js';
+import { registerReplaceRoutes } from "./replace-routes.js";
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -1939,6 +1940,7 @@ export async function createApp(
       return reply.code(result.statusCode).send(result.body);
     }
   });
+  registerReplaceRoutes(app, { withScopedFiles, processError, requestSignal, routeEvidence, operationEvidence });
   app.get("/api/search", async (request) => {
     const query = request.query as {
         contextId?: string;
