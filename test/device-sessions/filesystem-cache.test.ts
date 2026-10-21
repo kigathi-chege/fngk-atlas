@@ -10,6 +10,7 @@ const scope = { profile: 'atlas', teamId: 'team-a', projectId: 'project-a', devi
 class ReadyTerminal extends EventEmitter {
   sessionId = 'session-a';
   close() { this.emit('close'); return true; }
+  setMode(mode: string) { queueMicrotask(() => this.emit('collaboration', { type: 'collaboration', eventType: 'mode', mode })); return true; }
 }
 
 function cacheWith(routes: Array<(scope: typeof scope) => FileTransport>) {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Atlas",
-  "version": "0.1.0",
+  "version": "../../package.json",
   "identifier": "app.signal.atlas",
   "build": {
     "beforeDevCommand": "npm run build",
@@ -33,6 +33,22 @@
       "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUyNjQzNDI4MDUxNTMwQkMKUldTOE1CVUZLRFJrNHZmSTdwRXhybHVBOGwxSXE4dG9JUVNjOUlIZFBhMnhJazVDaXZnT1pOZVkK",
+      "endpoints": [
+        "https://downloads.signol.org/atlas/latest.json"
+      ]
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "fngk-atlas"
+        ]
+      }
+    }
   }
 }

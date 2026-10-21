@@ -75,12 +75,31 @@ describe("Atlas FNGK-native server", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ local: { profile: "work" } });
   });
-  it("uses the FNGK JSON login protocol without returning an operator credential", async () => {
+  it("signs in and pairs through fngk login --pair without returning a credential", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fngk-atlas-signin-"));
+    const opened: string[] = [];
+    const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture, env: { FNGK_SIGNAL_URL: "http://signal.localhost" } }), dbPath: path.join(directory, "atlas.db"), openBrowser: async url => { opened.push(url); return true; } });
+    cleanups.push(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
+    expect((await app.inject({ method: "GET", url: "/api/onboarding/status" })).json()).toMatchObject({ signIn: { defaultSignalUrl: "http://signal.localhost", opensBrowser: true } });
+    const started = await app.inject({ method: "POST", url: "/api/onboarding/signin", payload: { profile: "local" } });
+    expect(started.statusCode).toBe(201);
+    expect(started.json()).toMatchObject({ profile: "local", signalUrl: "http://signal.localhost", authorizationUrl: "http://signal.localhost/cli-authorize?code=A1B2C3D4E5F6", userCode: "A1B2C3D4E5F6", pairing: true, browserOpened: true });
+    expect(opened).toEqual(["http://signal.localhost/cli-authorize?code=A1B2C3D4E5F6"]);
+    let view: any;
+    for (let attempt = 0; attempt < 50; attempt++) { view = (await app.inject({ method: "GET", url: `/api/onboarding/signin/${started.json().id}` })).json(); if (view.state === "complete") break; await new Promise(resolve => setTimeout(resolve, 20)); }
+    expect(view).toMatchObject({ state: "complete", account: "dev@signal.localhost", device: { state: "paired" } });
+    expect(JSON.stringify(view)).not.toMatch(/credential|secret/i);
+    expect((await app.inject({ method: "POST", url: `/api/onboarding/signin/${started.json().id}/open` })).json()).toMatchObject({ browserOpened: true });
+    expect(opened).toHaveLength(2);
+    expect((await app.inject({ method: "GET", url: "/api/onboarding/signin/unknown" })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/api/onboarding/signin", payload: { profile: "local", signalUrl: "http://evil.example" } })).json()).toMatchObject({ error: "signal_url_invalid" });
+  });
+  it("signs out only after confirmation and validates fallback pairing links", async () => {
     const app = await harness();
-    const started = await app.inject({ method: "POST", url: "/api/onboarding/login/begin", payload: { profile: "local", origin: "https://signal.example.test" } });
-    expect(started.statusCode).toBe(201); expect(started.json()).toMatchObject({ stateId: "fixture-login-state", authorizationUrl: "https://signal.example.test/authorize" });
-    const completed = await app.inject({ method: "POST", url: "/api/onboarding/login/complete", payload: { stateId: "fixture-login-state", origin: "https://signal.example.test", receivedAt: new Date().toISOString() } });
-    expect(completed.json()).toEqual({ profile: "local", authenticated: true }); expect(completed.body).not.toMatch(/credential|secret/i);
+    expect((await app.inject({ method: "POST", url: "/api/onboarding/signout", payload: { profile: "local" } })).statusCode).toBe(409);
+    expect((await app.inject({ method: "POST", url: "/api/onboarding/signout", payload: { profile: "local", confirm: true } })).json()).toEqual({ signedOut: true, profile: "local" });
+    expect((await app.inject({ method: "POST", url: "/api/onboarding/pair", payload: { profile: "local", pairingUrl: "https://evil.example/steal" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url: "/api/onboarding/pair", payload: { profile: "local", pairingUrl: "https://signal.example.test/device-pair/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG" } })).json()).toEqual({ paired: true, profile: "local" });
   });
   it('requires confirmation and retains correction provenance without rewriting evidence',async()=>{
     const app=await harness();
@@ -448,6 +467,8 @@ describe("Atlas FNGK-native server", () => {
 
   it("creates a retained v2 journey through FNGK rather than Atlas-local execution",async()=>{const app=await harness(),response=await app.inject({method:'POST',url:'/api/deployments',payload:{contextId:'device:device-1',confirm:true,profile:'work',protocolVersion:'fngk.deployment.v2',name:'web'}});expect(response.statusCode,response.body).toBe(201);expect(response.json()).toMatchObject({deployment:{id:'deployment-1'},release:{id:'release-1'},input:{protocolVersion:'fngk.deployment.v2',name:'web'},argv:['deployments','device-1','create','--json','--profile','work']})});
 
+  it("plans the next revision of an existing deployment through FNGK",async()=>{const app=await harness();expect((await app.inject({method:'POST',url:'/api/deployments/deployment-1/revisions',payload:{protocolVersion:'fngk.deployment.v2',name:'web'}})).statusCode).toBe(409);const response=await app.inject({method:'POST',url:'/api/deployments/deployment-1/revisions',payload:{contextId:'device:device-1',confirm:true,profile:'work',protocolVersion:'fngk.deployment.v2',name:'web'}});expect(response.statusCode,response.body).toBe(201);expect(response.json()).toMatchObject({input:{protocolVersion:'fngk.deployment.v2',name:'web'},argv:['deployments','deployment-1','revise','--json','--profile','work']})});
+
   it("brokers deployment secret envelopes to the selected Device",async()=>{
     const app=await harness(),contextId='device:device-1',envelope={ephemeralPublicKey:'key',salt:'salt',nonce:'nonce',ciphertext:'opaque'};
     const key=await app.inject({method:'GET',url:`/api/deployment-secrets/key?contextId=${encodeURIComponent(contextId)}&profile=work`});expect(key.statusCode,key.body).toBe(200);expect(key.json()).toMatchObject({credentialPublicKey:'device-public-key'});
@@ -469,6 +490,24 @@ describe("Atlas FNGK-native server", () => {
     expect(response.json()).toMatchObject({ error: 'context_not_found' });
   });
 
+  it("reattaches its own terminal after Atlas restarts", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fngk-atlas-server-"));
+    cleanups.push(async () => rm(directory, { recursive: true, force: true }));
+    const open = async (query: string) => {
+      const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture }), dbPath: path.join(directory, "atlas.db") });
+      const address = await app.listen({ host: "127.0.0.1", port: 0 });
+      const socket = new WebSocket(address.replace(/^http/, "ws") + `/api/fngk/terminals?target=device%3Adevice-1${query}`);
+      const [raw] = await once(socket, "message");
+      socket.close();
+      await app.close();
+      return JSON.parse(raw.toString());
+    };
+    const first = await open("");
+    expect(first).toMatchObject({ type: "ready", sessionId: expect.any(String) });
+    await expect(open(`&session=${first.sessionId}`)).resolves.toMatchObject({ type: "ready", sessionId: first.sessionId });
+    await expect(open("&session=someone-elses-session")).resolves.toMatchObject({ type: "error", code: "terminal_session_unavailable" });
+  });
+
   it("relays a terminal as WebSocket JSONL events", async () => {
     const app = await harness();
     const address = await app.listen({ host: "127.0.0.1", port: 0 });
@@ -481,6 +520,9 @@ describe("Atlas FNGK-native server", () => {
     while (!messages.some((message) => message.type === "ready"))
       await once(socket, "message");
     expect(messages).toContainEqual(expect.objectContaining({ type: 'ready', sessionId: expect.any(String) }));
+    socket.send(JSON.stringify({ type: "mode", requestId: "mode-1", mode: "queue" }));
+    while (!messages.some((message) => message.type === "collaboration"))
+      await once(socket, "message");
     socket.send(
       JSON.stringify({
         type: "command",

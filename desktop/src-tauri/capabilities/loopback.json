@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "loopback",
+  "description": "The main window loads Atlas from its own loopback server, so this is a remote capability for that origin only. It grants opening HTTPS links in the system browser and nothing else: no app commands, no filesystem, no core window APIs. Deep links and updates are handled natively.",
+  "windows": ["main"],
+  "remote": { "urls": ["http://127.0.0.1:*"] },
+  "permissions": [
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{"url": "https://*"}]
+    }
+  ]
+}

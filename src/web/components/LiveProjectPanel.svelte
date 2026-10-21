@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {contextDisplayName} from '../lib/device-directory.js';
   import {onMount} from 'svelte';import {api,atlasWebSocket} from '../lib/api.js';import {atlasEvents} from '../lib/atlas-events.js';import type {WorkbenchState} from '../lib/workbench-state.js';import DocumentationHelp from './DocumentationHelp.svelte';
   import Play from '@lucide/svelte/icons/play';import Square from '@lucide/svelte/icons/square';import ExternalLink from '@lucide/svelte/icons/external-link';import Stethoscope from '@lucide/svelte/icons/stethoscope';import RotateCw from '@lucide/svelte/icons/rotate-cw';import CirclePause from '@lucide/svelte/icons/circle-pause';import FolderOpen from '@lucide/svelte/icons/folder-open';
   export let params:Record<string,unknown>;export let state:WorkbenchState;
@@ -14,7 +15,7 @@
 </script>
 <DocumentationHelp topicId="live-projects" label="Live project documentation"/>
 <section class="panel live-project-panel">
-  <header><strong>Live project</strong><span>{current?.status??'idle'} · {contextId}</span><button title="Refresh sessions" onclick={load}><RotateCw size={13}/></button></header>
+  <header><strong>Live project</strong><span>{current?.status??'idle'} · {contextDisplayName(contextId)}</span><button title="Refresh sessions" onclick={load}><RotateCw size={13}/></button></header>
   {#if current?.url&&['running','starting'].includes(current.status)}
     <div class="live-toolbar"><b>{current.command}</b><span>{current.repositoryPath} · :{current.port}</span><a href={current.url} target="_blank" rel="noreferrer" title="Open public route"><ExternalLink size={13}/></a><button title="Run Playwright diagnostics" onclick={diagnose}><Stethoscope size={14}/></button><button title="Interrupt process" onclick={()=>action('interrupt')}><CirclePause size={13}/></button><button title="Restart project and route" onclick={()=>action('restart')}><RotateCw size={13}/></button><button title="Stop project and public route" onclick={stop}><Square size={12}/></button></div>
     <div class="live-content"><iframe title="Live project preview" src={current.url}></iframe><pre aria-label="Live project output">{current.output||'Waiting for output…'}</pre></div>
@@ -24,4 +25,4 @@
   {#if diagnostics}<section class="live-diagnostics"><b>{diagnostics.ok?'Reachable':'Needs attention'} · HTTP {diagnostics.status??'—'} · {diagnostics.durationMs} ms</b><span>{diagnostics.title}</span><span>{diagnostics.consoleErrors.length} console errors · {diagnostics.failedRequests.length} failed requests</span></section>{/if}
   <footer>{status||current?.error||'No project is running.'}</footer>
 </section>
-{#if confirmStart}<div class="atlas-dialog-backdrop"><div class="atlas-dialog" role="dialog" aria-modal="true"><h2>Start and publish project?</h2><p><code>{command}</code> will run on {contextId} from {repositoryPath}, and port {port} will receive a Signal public route.</p><div><button onclick={()=>confirmStart=false}>Cancel</button><button onclick={start}>Start</button></div></div></div>{/if}
+{#if confirmStart}<div class="atlas-dialog-backdrop"><div class="atlas-dialog" role="dialog" aria-modal="true"><h2>Start and publish project?</h2><p><code>{command}</code> will run on {contextDisplayName(contextId)} from {repositoryPath}, and port {port} will receive a Signal public route.</p><div><button onclick={()=>confirmStart=false}>Cancel</button><button onclick={start}>Start</button></div></div></div>{/if}

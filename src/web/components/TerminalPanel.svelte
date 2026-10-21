@@ -1,4 +1,6 @@
 <script lang="ts">
+  import {contextDisplayName} from '../lib/device-directory.js';
+  import DeviceChip from './DeviceChip.svelte';
   import { onMount } from 'svelte';
   import { Terminal } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
@@ -22,7 +24,10 @@
   const send = (value: Record<string, unknown>) => terminalReady && socket?.readyState === WebSocket.OPEN && socket.send(JSON.stringify(value));
   const encoded = (value: string) => { const bytes = new TextEncoder().encode(value); let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary); };
 
-  async function refreshSessions() { if (!target.startsWith('device:')) return; try { const value=await api<any>(`/api/fngk/sessions?deviceId=${encodeURIComponent(target.slice(7))}${params.profile?`&profile=${encodeURIComponent(params.profile)}`:''}`);sessions=value.sessions??[]; } catch {} }
+  async function refreshSessions() { if (!target.startsWith('device:')) return; try { const value=await api<any>(`/api/fngk/sessions?deviceId=${encodeURIComponent(target.slice(7))}${params.profile?`&profile=${encodeURIComponent(params.profile)}`:''}`);const listed=value.sessions??[];
+      // The namespace can lag behind a just-opened session; never tell the user
+      // they have no terminals while this panel is attached to one.
+      sessions=sessionId&&!listed.some((item:{id:string})=>item.id===sessionId)?[{id:sessionId,status:'live'},...listed]:listed; } catch {} }
   function scheduleReconnect() {
     if (disposed || retries >= 6) return;
     clearTimeout(reconnectTimer);
@@ -34,11 +39,11 @@
     if (socket && !force && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
     clearTimeout(reconnectTimer);
     const token = ++generation, eventId=`terminal.connect:${params.panelId??target}:${token}`;
-    atlasEvents.begin({id:eventId,type:'terminal.command',title:`Connecting to ${target}`,contextId:target,panelId:params.panelId});
+    atlasEvents.begin({id:eventId,type:'terminal.command',title:`Connecting to ${contextDisplayName(target)}`,contextId:target,panelId:params.panelId});
     socket?.close(1000);
     terminalReady = false;
     if(newSession||!restoreSessionId){sessionId = ''; streamId = '';terminal.reset();}approval = '';
-    terminal.writeln(`\x1b[38;2;211;250;114mFNGK Atlas\x1b[0m  attaching to ${target}…`);
+    terminal.writeln(`\x1b[38;2;211;250;114mFNGK Atlas\x1b[0m  attaching to ${contextDisplayName(target)}…`);
     status = retries ? 'Reconnecting…' : 'Connecting…';
     const query = new URLSearchParams({ target });
     if (params.profile) query.set('profile', params.profile);
@@ -98,6 +103,6 @@
 
 <DocumentationHelp topicId="terminals" label="Terminal documentation"/>
 <section class="panel terminal-panel">
-  <header><div class="terminal-target"><strong>{target || 'No remote Device selected'}</strong><small>Interactive terminal{#if sessionId} · Session {sessionId.slice(0, 8)}{/if}</small></div><span class:live={status.startsWith('Live')}>{status}</span><div>{#if approval}<button onclick={() => resolveApproval('approve')}>Approve</button><button onclick={() => resolveApproval('deny')}>Deny</button>{/if}<button title="New terminal session" aria-label="New terminal session" onclick={() => { retries = 0; connect(true, true); }}>New</button><button title="Reconnect terminal stream" aria-label="Reconnect terminal stream" onclick={() => { retries = 0; connect(true, false, sessionId); }}><RotateCw size={13}/></button><button title="Close terminal panel" onclick={() => window.dispatchEvent(new CustomEvent('atlas:close-terminal', { detail: { panelId: params.panelId } }))}><X size={13}/></button></div></header>
+  <header><div class="terminal-target"><strong>{#if target}<DeviceChip contextId={target}/>{:else}No remote Device selected{/if}</strong><small>Interactive terminal{#if sessionId} · Session {sessionId.slice(0, 8)}{/if}</small></div><span class:live={status.startsWith('Live')}>{status}</span><div>{#if approval}<button onclick={() => resolveApproval('approve')}>Approve</button><button onclick={() => resolveApproval('deny')}>Deny</button>{/if}<button title="New terminal session" aria-label="New terminal session" onclick={() => { retries = 0; connect(true, true); }}>New</button><button title="Reconnect terminal stream" aria-label="Reconnect terminal stream" onclick={() => { retries = 0; connect(true, false, sessionId); }}><RotateCw size={13}/></button><button title="Close terminal panel" onclick={() => window.dispatchEvent(new CustomEvent('atlas:close-terminal', { detail: { panelId: params.panelId } }))}><X size={13}/></button></div></header>
   <div class="terminal-body"><div class="terminal" bind:this={host}></div><aside class="terminal-rail" aria-label="Your terminal sessions"><header class="terminal-rail-heading"><span>TERMINALS</span><button class="new-session" title="New terminal session" aria-label="New terminal session" onclick={()=>{retries=0;connect(true,true)}}>+</button></header><div class="terminal-session-list">{#each sessions as item}<div class="terminal-rail-item"><button class="session-select" class:active={item.id===sessionId} title={`Open ${item.title??item.id}`} onclick={()=>{retries=0;connect(true,false,item.id)}}><span class="session-glyph">›_</span><span class="session-label"><b>{item.title??`Terminal ${item.id.slice(0,8)}`}</b><small>{item.status??'unknown'}</small></span></button></div>{/each}{#if !sessions.length}<small class="empty-copy">No user terminals.</small>{/if}</div></aside></div>
 </section>

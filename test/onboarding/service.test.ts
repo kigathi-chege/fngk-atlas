@@ -47,4 +47,26 @@ describe("desktop FNGK onboarding", () => {
     const controller = new AbortController(); controller.abort();
     await expect(async () => { for await (const _event of service.converge("local", controller.signal)) { /* exhaust */ } }).rejects.toMatchObject({ code: "cancelled" });
   });
+
+  describe("with FNGK profile metadata", () => {
+    const summary = (value: Record<string, unknown> = {}) => ({ name: "local", current: true, mode: "device", paired: true, operatorAuthorized: true, daemon: "running" as const, ...value });
+    const service = (runtime: FngkContextState, profiles: unknown[]) => new BootstrapService({ probe: async () => runtime, install: async () => {}, profiles: async () => ({ profiles: profiles as any }) });
+
+    it("asks to sign in when the profile has no operator login, even for a generic FNGK error", async () => {
+      await expect(service(state({ compatible: false, reason: "process_failed" }), [summary({ operatorAuthorized: false })]).check("local")).resolves.toMatchObject({ state: "login-choice", local: { operatorAuthorized: false } });
+      await expect(service(state({ compatible: false, reason: "process_failed" }), []).check("local")).resolves.toMatchObject({ state: "login-choice" });
+    });
+    it("skips sign-in for a signed-in paired Device and only offers the daemon when it is stopped", async () => {
+      await expect(service(state(), [summary({ daemon: "stopped" })]).check("local")).resolves.toMatchObject({ state: "daemon-install-choice", local: { devicePaired: true, deviceDaemon: "stopped" } });
+      await expect(service(state(), [summary({ operatorAccount: "dev@signal.localhost" })]).check("local")).resolves.toMatchObject({ state: "ready", local: { account: "dev@signal.localhost", operatorAuthorized: true, devicePaired: true } });
+    });
+    it("stays ready for an operator-only profile, such as a machine that operates remote Devices", async () => {
+      await expect(service(state(), [summary({ mode: "unknown", paired: false, daemon: "stopped" })]).check("local")).resolves.toMatchObject({ state: "ready", local: { devicePaired: false } });
+    });
+    it("resolves the FNGK current profile when Atlas has not selected one", async () => {
+      await expect(service(state(), [summary({ name: "work", current: true }), summary({ name: "local", current: false })]).resolveProfile()).resolves.toBe("work");
+      await expect(service(state(), []).resolveProfile()).resolves.toBe("local");
+      await expect(new BootstrapService({ probe: async () => state(), install: async () => {}, profiles: async () => { throw new Error("old fngk"); } }).resolveProfile()).resolves.toBe("local");
+    });
+  });
 });

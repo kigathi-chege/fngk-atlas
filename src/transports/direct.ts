@@ -1,11 +1,17 @@
-import { cp, lstat, mkdir, opendir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, chown, cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { AccessRoute, AccessTarget, Operation } from '../domain/access.js';
-import type { FileSearchMatch, FileSearchOptions } from './file-transport.js';
+import type { FileSearchOptions, SafeWriteOptions } from './file-transport.js';
+import type { FileSearchResult } from '../files/name-search.js';
+import { directSearch } from './direct-search.js';
+import { VERSION_SLOTS, formatVersionMeta, parseVersionMeta, validSlot, versionKey, type FileVersion, type VersionStore } from '../files/versions.js';
 
-export interface DirectTransportOptions { id: string; contextId: string; root?: string; identity?: string; recoveryRoot?:string }
+const sha256 = (content: Uint8Array) => createHash('sha256').update(content).digest('hex');
+const conflict = () => Object.assign(new Error('The file changed after it was opened.'), { code: 'file_conflict' });
+
+export interface DirectTransportOptions { id: string; contextId: string; root?: string; identity?: string; recoveryRoot?:string; versionsRoot?:string }
 export interface TransportEntry { name: string; path: string; type: 'file' | 'directory' | 'symlink' | 'other'; bytes: number; modifiedAt: string; mode: number }
 
 export class DirectTransport implements AccessRoute {
@@ -19,10 +25,14 @@ export class DirectTransport implements AccessRoute {
   readonly operations: Operation[] = ['list', 'stat', 'read', 'write', 'search', 'create', 'move', 'trash', 'restore', 'delete', 'execute', 'processes', 'containers'];
   readonly root: string;
   readonly recoveryRoot:string;
+  readonly versionsRoot:string;
+  #writes=new Map<string,Promise<unknown>>();
 
   constructor(options: DirectTransportOptions) {
     this.id = options.id; this.contextId = options.contextId; this.root = path.resolve(options.root ?? '/');
     this.recoveryRoot=path.resolve(options.recoveryRoot??(this.root==='/'?path.join(process.env.XDG_STATE_HOME??path.join(homedir(),'.local','state'),'fngk-atlas','trash'):path.join(this.root,'.atlas-trash')));
+    // Versions live in Atlas' state directory, never inside the browsed root.
+    this.versionsRoot=path.resolve(options.versionsRoot??path.join(process.env.XDG_STATE_HOME??path.join(homedir(),'.local','state'),'fngk-atlas','versions'));
     this.effectiveIdentity = options.identity ?? (typeof process.getuid === 'function' ? `uid:${process.getuid()}` : process.env.USER ?? 'local');
     this.privilege = typeof process.getuid === 'function' && process.getuid() === 0 ? 'root' : 'user';
   }
@@ -69,38 +79,91 @@ export class DirectTransport implements AccessRoute {
   async stat(logicalPath: string) { const resolved = this.resolve(logicalPath); await this.#ensureContained(resolved); return stat(resolved); }
   async read(logicalPath: string): Promise<Buffer> { const resolved = this.resolve(logicalPath); await this.#ensureContained(resolved); return readFile(resolved); }
 
-  async atomicWrite(logicalPath: string, content: Buffer, mode?: number): Promise<void> {
-    const resolved = this.resolve(logicalPath), parent = path.dirname(resolved); await this.#ensureContained(parent); await mkdir(parent, { recursive: true });
-    const temporary = path.join(parent, `.${path.basename(resolved)}.atlas-${randomUUID()}.tmp`);
-    try { await writeFile(temporary, content, { mode: mode === undefined ? 0o600 : mode & 0o777 }); await rename(temporary, resolved); }
-    finally { await unlink(temporary).catch(() => {}); }
+  async atomicWrite(logicalPath: string, content: Buffer, mode?: number): Promise<void> { await this.safeWrite(logicalPath, content, { mode, keepVersions: false }); }
+
+  /**
+   * Same guarantees as the terminal route: writes are serialized per target in
+   * this process, the fingerprint is checked immediately before the replace,
+   * symlinks are written through, mode and hardlinks are preserved, and the
+   * previous content is rotated into the version vault first.
+   */
+  async safeWrite(logicalPath: string, content: Buffer, options: SafeWriteOptions = {}): Promise<void> {
+    const resolved = this.resolve(logicalPath);
+    let real = resolved;
+    try { if ((await lstat(resolved)).isSymbolicLink()) real = await realpath(resolved); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; if (options.expectedFingerprint !== undefined) throw conflict(); }
+    const parent = path.dirname(real); await mkdir(parent, { recursive: true }); await this.#ensureContained(parent);
+    const previous = this.#writes.get(real) ?? Promise.resolve();
+    const current = previous.catch(() => {}).then(() => this.#replace(logicalPath, real, content, options));
+    this.#writes.set(real, current);
+    try { await current; } finally { if (this.#writes.get(real) === current) this.#writes.delete(real); }
   }
 
-  async search(logicalPath: string, query: string, options: FileSearchOptions = {}): Promise<FileSearchMatch[]> {
-    const root = this.resolve(logicalPath); await this.#ensureContained(root);
-    const mode = options.mode ?? 'all', limit = Math.min(500, Math.max(1, options.limit ?? 200)), maxFileBytes = Math.min(2 * 1024 * 1024, Math.max(1, options.maxFileBytes ?? 1024 * 1024)), maxEntries = Math.min(20_000, Math.max(1, options.maxEntries ?? 5_000)), maxDepth = Math.min(32, Math.max(0, options.maxDepth ?? 12));
-    const cancelled = () => { if (options.signal?.aborted) throw Object.assign(new Error('Filesystem search was cancelled.'), { code: 'cancelled' }); };
-    const wanted = query.toLocaleLowerCase(), matches: FileSearchMatch[] = [], queue = [{ path: logicalPath, depth: 0 }]; let examined = 0;
-    while (queue.length && matches.length < limit) {
-      cancelled(); const current = queue.shift()!;
-      const currentRoot = this.resolve(current.path);
-      let directory;
-      try { await this.#ensureContained(currentRoot); directory = await opendir(currentRoot); }
-      catch { continue; }
-      for await (const value of directory) {
-        cancelled(); if (examined++ >= maxEntries) return matches;
-        const absolute = path.join(currentRoot, value.name); let metadata;
-        try { metadata = await lstat(absolute); } catch { continue; }
-        const entry: TransportEntry = { name: value.name, path: path.posix.join(current.path, value.name), type: metadata.isSymbolicLink() ? 'symlink' : metadata.isDirectory() ? 'directory' : metadata.isFile() ? 'file' : 'other', bytes: metadata.size, modifiedAt: metadata.mtime.toISOString(), mode: metadata.mode };
-        if (entry.type === 'directory' && current.depth < maxDepth) queue.push({ path: entry.path, depth: current.depth + 1 });
-        if (mode !== 'content' && entry.name.toLocaleLowerCase().includes(wanted)) { matches.push({ path: entry.path, type: entry.type === 'directory' ? 'directory' : 'file' }); if (matches.length >= limit) return matches; }
-        if (matches.length >= limit || entry.type !== 'file' || mode === 'name' || entry.bytes > maxFileBytes) continue;
-        let content:Buffer; try { content = await this.read(entry.path); } catch { continue; } if (content.length > maxFileBytes || content.includes(0)) continue;
-        const lines = content.toString('utf8').split(/\r?\n/);
-        for (let index = 0; index < lines.length && matches.length < limit; index++) if (lines[index].toLocaleLowerCase().includes(wanted)) matches.push({ path: entry.path, type: 'file', line: index + 1, preview: lines[index].trim().slice(0, 240) });
-      }
+  async #replace(logicalPath: string, real: string, content: Buffer, options: SafeWriteOptions) {
+    let existing: Buffer | undefined, metadata: import("node:fs").Stats | undefined;
+    try { metadata = await stat(real); if (!metadata.isFile()) throw Object.assign(new Error('Only regular files can be written.'), { code: 'invalid_path' }); existing = await readFile(real); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    if (options.expectedFingerprint !== undefined && (!existing || sha256(existing) !== options.expectedFingerprint)) throw conflict();
+    const temporary = path.join(path.dirname(real), `.${path.basename(real)}.atlas-${randomUUID()}.tmp`);
+    try {
+      await writeFile(temporary, content, { mode: 0o600, flag: 'wx' });
+      await chmod(temporary, metadata ? metadata.mode & 0o7777 : (options.mode ?? 0o600) & 0o7777);
+      if (metadata && typeof process.getuid === 'function' && process.getuid() === 0) await chown(temporary, metadata.uid, metadata.gid).catch(() => {});
+      if (existing && metadata && options.keepVersions !== false) await this.#rotate(this.resolve(logicalPath), existing, metadata.mtime, content);
+      // Re-check right before the replace: anything that changed the file
+      // while the temporary was prepared must surface as a conflict.
+      if (options.expectedFingerprint !== undefined && metadata) { const now = await stat(real).catch(() => undefined); if (!now || now.ino !== metadata.ino || now.size !== metadata.size || now.mtimeMs !== metadata.mtimeMs) { if (!now || sha256(await readFile(real)) !== options.expectedFingerprint) throw conflict(); } }
+      if (metadata && metadata.nlink > 1) { await writeFile(real, content); return; }
+      await rename(temporary, real);
+    } finally { await unlink(temporary).catch(() => {}); }
+  }
+
+  async #versionDirectory(resolved: string, create: boolean) {
+    const directory = path.join(this.versionsRoot, versionKey(resolved));
+    if (create) { await mkdir(directory, { recursive: true, mode: 0o700 }); await chmod(this.versionsRoot, 0o700).catch(() => {}); }
+    const entry = await lstat(directory).catch(() => undefined);
+    if (entry && (!entry.isDirectory() || entry.isSymbolicLink())) throw Object.assign(new Error('Version vault must be a real directory.'), { code: 'path_escape' });
+    return entry ? directory : undefined;
+  }
+
+  async #rotate(resolved: string, previous: Buffer, modifiedAt: Date, next: Buffer) {
+    const fingerprint = sha256(previous); if (fingerprint === sha256(next)) return;
+    const directory = (await this.#versionDirectory(resolved, true))!;
+    await rm(path.join(directory, String(VERSION_SLOTS)), { force: true }); await rm(path.join(directory, `${VERSION_SLOTS}.meta`), { force: true });
+    for (let slot = VERSION_SLOTS - 1; slot >= 1; slot--) {
+      try { await rename(path.join(directory, String(slot)), path.join(directory, String(slot + 1))); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
+      await rename(path.join(directory, `${slot}.meta`), path.join(directory, `${slot + 1}.meta`)).catch(() => rm(path.join(directory, `${slot + 1}.meta`), { force: true }));
     }
-    return matches;
+    await writeFile(path.join(directory, '1.tmp'), previous, { mode: 0o600 }); await rename(path.join(directory, '1.tmp'), path.join(directory, '1'));
+    await writeFile(path.join(directory, '1.meta.tmp'), formatVersionMeta(new Date(), modifiedAt, previous.length, fingerprint), { mode: 0o600 }); await rename(path.join(directory, '1.meta.tmp'), path.join(directory, '1.meta'));
+    await writeFile(path.join(directory, 'path.b64'), Buffer.from(resolved).toString('base64'), { mode: 0o600 });
+  }
+
+  readonly versions: VersionStore = {
+    list: async logicalPath => {
+      const directory = await this.#versionDirectory(this.resolve(logicalPath), false); if (!directory) return [];
+      const values: FileVersion[] = [];
+      for (let slot = 1; slot <= VERSION_SLOTS; slot++) {
+        try { await lstat(path.join(directory, String(slot))); const value = parseVersionMeta(slot, await readFile(path.join(directory, `${slot}.meta`), 'utf8')); if (value) values.push(value); } catch {}
+      }
+      return values;
+    },
+    read: async (logicalPath, slot) => {
+      const directory = await this.#versionDirectory(this.resolve(logicalPath), false);
+      if (!directory) throw Object.assign(new Error('No previous version exists.'), { code: 'path_not_found' });
+      try { return await readFile(path.join(directory, String(validSlot(slot)))); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw Object.assign(new Error('No previous version exists.'), { code: 'path_not_found' }); throw error; }
+    },
+  };
+
+  async home(): Promise<string> {
+    const home = path.resolve(homedir());
+    if (this.root === '/') return home;
+    return home === this.root ? '/' : home.startsWith(`${this.root}${path.sep}`) ? `/${path.relative(this.root, home).split(path.sep).join('/')}` : '/';
+  }
+  async search(logicalPath: string, query: string, options: FileSearchOptions = {}): Promise<FileSearchResult> {
+    const root = this.resolve(logicalPath); await this.#ensureContained(root);
+    return await directSearch({ root, logicalRoot: logicalPath, query, options, contained: this.root === '/' ? undefined : absolute => this.#ensureContained(absolute) });
   }
   async createFile(logicalPath: string, content = Buffer.alloc(0)): Promise<void> { const resolved=this.resolve(logicalPath);await this.#ensureContained(path.dirname(resolved));await writeFile(resolved,content,{flag:'wx',mode:0o600}); }
   async createDirectory(logicalPath: string): Promise<void> { const resolved=this.resolve(logicalPath);await this.#ensureContained(path.dirname(resolved));await mkdir(resolved); }

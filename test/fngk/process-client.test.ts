@@ -23,6 +23,11 @@ describe('FngkProcessClient', () => {
     expect(state.namespace?.devices).toEqual([expect.objectContaining({ id: 'device-1', name: 'kigathi', online: true })]);
   });
 
+  it('keeps the Signal error code FNGK reports instead of a generic failure', async () => {
+    const client = new FngkProcessClient({ binary: fixture, env: { FNGK_FIXTURE_MODE: 'feature-disabled' } });
+    await expect(client.namespace()).rejects.toMatchObject({ code: 'operator_terminal_disabled' });
+  });
+
   it('lists only safe local profile readiness metadata', async () => {
     const profiles = await new FngkProcessClient({ binary: fixture }).profiles();
     expect(profiles).toEqual({
@@ -62,6 +67,9 @@ describe('FngkProcessClient', () => {
     expect(ready).toMatchObject({ protocolVersion: 'fngk.terminal.v1', sessionId: 'session-1' });
     expect(ready.argv).toEqual(['device name; touch /tmp/nope', '--new', '--profile', 'work', '--stdio-json']);
 
+    const queued = once(terminal, 'collaboration');
+    terminal.setMode('queue', 'mode-1');
+    await queued;
     terminal.sendCommand('npm test', 'run-1');
     const [completed] = await once(terminal, 'command_state');
     expect(completed).toMatchObject({ requestId: 'run-1', status: 'succeeded', exitCode: 0 });
@@ -92,6 +100,11 @@ describe('FngkProcessClient', () => {
   it('probes and publishes a managed process without opening a terminal',async()=>{
     const value:any=await new FngkProcessClient({binary:fixture}).managedProcessOperation('process-1','probe',{port:8080,protocol:'http',path:'/'},{profile:'work'});
     expect(value).toMatchObject({input:{port:8080,protocol:'http',path:'/'},argv:['processes','process-1','probe','--json','--profile','work']});
+  });
+
+  it('reports the connection id of a published managed process',async()=>{
+    const value:any=await new FngkProcessClient({binary:fixture}).managedProcessOperation('process-1','publish',{port:8080});
+    expect(value).toMatchObject({connectionId:'connection-1',hostname:'preview.test',url:'https://preview.test'});
   });
 
   it('uses the retained deployment protocol for plans, releases, events, and rollback',async()=>{

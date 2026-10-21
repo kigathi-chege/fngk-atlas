@@ -11,8 +11,9 @@ describe('agent workspace performance instrumentation', () => {
     let handshakes = 0, requests = 0;
     const sessions = new DeviceSessionManager({ idleTtlMs: 60_000, createSession: () => {
       handshakes += 1;
-      const terminal = new EventEmitter() as EventEmitter & { sessionId: string; close(): boolean };
-      terminal.sessionId = 'persistent-session'; terminal.close = () => (terminal.emit('close'), true); queueMicrotask(() => terminal.emit('ready'));
+      const terminal = new EventEmitter() as EventEmitter & { sessionId: string; close(): boolean; setMode(mode: string): boolean };
+      terminal.sessionId = 'persistent-session'; terminal.close = () => (terminal.emit('close'), true);
+      terminal.setMode = mode => (queueMicrotask(() => terminal.emit('collaboration', { type: 'collaboration', eventType: 'mode', mode })), true); queueMicrotask(() => terminal.emit('ready'));
       return terminal as any;
     } });
     const cache = new FilesystemCache({ sessions, service: async value => new FileService([{ id: 'fixture', kind: 'terminal', contextId: `device:${value.deviceId}`, deviceId: value.deviceId, effectiveIdentity: 'fixture', privilege: 'unknown', observedAt: new Date().toISOString(), available: true, operations: ['list', 'stat', 'read', 'write'], covers: () => true, list: async () => { requests += 1; return [{ name: 'readme.md', path: '/readme.md', type: 'file', bytes: 1, modifiedAt: new Date().toISOString(), mode: 0o644 }]; }, stat: async () => ({ size: 1, mode: 0o644 }), read: async () => Buffer.from('x'), atomicWrite: async () => {} }]) });

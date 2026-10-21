@@ -24,6 +24,11 @@ export interface FngkLocalStatus {
   authenticated?: boolean;
   namespaceProtocol?: string;
   terminalProtocol?: string;
+  /** From credential-free profile metadata; absent when FNGK cannot report it. */
+  operatorAuthorized?: boolean;
+  devicePaired?: boolean;
+  deviceDaemon?: "running" | "stopped" | "unknown";
+  account?: string;
 }
 
 export interface FngkRemoteStatus {

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -39,6 +39,48 @@ describe('logical filesystem', () => {
     expect(saved.fingerprint).not.toBe(opened.fingerprint);
     expect((await readdir(root)).filter(name => name.includes('.atlas-'))).toEqual([]);
     await expect(files.write({ contextId: 'host', path: '/edit.txt' }, Buffer.from('stale'), opened.fingerprint)).rejects.toBeInstanceOf(FileConflictError);
+  });
+
+  it('saves locally through symlinks, keeps mode and hardlinks, and rotates exactly three versions', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'atlas-files-')), versionsRoot = await mkdtemp(path.join(tmpdir(), 'atlas-versions-')); directories.push(root, versionsRoot);
+    const transport = new DirectTransport({ id: 'direct-test', contextId: 'host', root, versionsRoot }), files = new FileService([transport]);
+    await writeFile(path.join(root, 'target.txt'), 'v0'); await chmod(path.join(root, 'target.txt'), 0o750); await symlink('target.txt', path.join(root, 'link.txt'));
+    let fingerprint = (await files.read({ contextId: 'host', path: '/link.txt' })).fingerprint!;
+    for (const next of ['v1', 'v2', 'v3', 'v4']) fingerprint = (await files.write({ contextId: 'host', path: '/link.txt' }, Buffer.from(next), fingerprint)).fingerprint;
+    expect((await lstat(path.join(root, 'link.txt'))).isSymbolicLink()).toBe(true);
+    expect(await readFile(path.join(root, 'target.txt'), 'utf8')).toBe('v4');
+    expect((await stat(path.join(root, 'target.txt'))).mode & 0o777).toBe(0o750);
+    const kept = await files.versions({ contextId: 'host', path: '/link.txt' });
+    expect(kept.versions.map(value => value.slot)).toEqual([1, 2, 3]);
+    expect((await files.readVersion({ contextId: 'host', path: '/link.txt' }, 1)).content.toString()).toBe('v3');
+    expect((await files.readVersion({ contextId: 'host', path: '/link.txt' }, 3)).content.toString()).toBe('v1');
+    const restored = await files.restoreVersion({ contextId: 'host', path: '/link.txt' }, { versionFingerprint: kept.versions[2].fingerprint }, fingerprint);
+    expect(await readFile(path.join(root, 'target.txt'), 'utf8')).toBe('v1');
+    expect((await files.readVersion({ contextId: 'host', path: '/link.txt' }, 1)).content.toString()).toBe('v4');
+    await expect(files.write({ contextId: 'host', path: '/link.txt' }, Buffer.from('stale'), fingerprint)).rejects.toBeInstanceOf(FileConflictError);
+    expect(restored.fingerprint).not.toBe(fingerprint);
+    await writeFile(path.join(root, 'hard-a'), 'shared'); await link(path.join(root, 'hard-a'), path.join(root, 'hard-b'));
+    await files.write({ contextId: 'host', path: '/hard-a' }, Buffer.from('both'), (await files.read({ contextId: 'host', path: '/hard-a' })).fingerprint!);
+    expect(await readFile(path.join(root, 'hard-b'), 'utf8')).toBe('both');
+    expect((await readdir(root)).filter(name => name.includes('.atlas-'))).toEqual([]);
+    // Concurrent saves from the same opened fingerprint: exactly one wins.
+    const base = (await files.read({ contextId: 'host', path: '/hard-a' })).fingerprint!;
+    const results = await Promise.allSettled(['one', 'two', 'three'].map(value => files.write({ contextId: 'host', path: '/hard-a' }, Buffer.from(value), base)));
+    expect(results.filter(value => value.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter(value => value.status === 'rejected').every(value => (value as PromiseRejectedResult).reason instanceof FileConflictError)).toBe(true);
+  });
+
+  it('searches with case, regex, whole-word and glob options and reports columns', async () => {
+    const { root, files } = await harness(64 * 1024);
+    await mkdir(path.join(root, 'src')); await mkdir(path.join(root, 'node_modules'));
+    await writeFile(path.join(root, 'src', 'a.ts'), 'const foo = 1;\nconst fooBar = Foo;\n'); await writeFile(path.join(root, 'src', 'b.js'), 'foo\n'); await writeFile(path.join(root, 'node_modules', 'c.ts'), 'foo\n');
+    const search = (query: string, options: Record<string, unknown>) => files.search({ contextId: 'host', path: '/' }, query, { mode: 'content', ...options }).then(value => value.matches.map(match => `${match.path}:${match.line}:${match.column}`).sort());
+    expect(await search('foo', { wholeWord: true, caseSensitive: true, include: ['*.ts'], exclude: ['node_modules'] })).toEqual(['/src/a.ts:1:7']);
+    expect(await search('foo', { wholeWord: true, caseSensitive: false, include: ['src/**'], exclude: ['node_modules'] })).toEqual(['/src/a.ts:1:7', '/src/a.ts:2:16', '/src/b.js:1:1']);
+    expect(await search(String.raw`foo\w+`, { regex: true, caseSensitive: true, exclude: ['node_modules'] })).toEqual(['/src/a.ts:2:7']);
+    // node_modules is pruned by default; an empty prune list searches it.
+    expect((await files.search({ contextId: 'host', path: '/' }, 'foo', { mode: 'content', filesOnly: true, caseSensitive: true })).matches.map(match => match.path).sort()).toEqual(['/src/a.ts', '/src/b.js']);
+    expect((await files.search({ contextId: 'host', path: '/' }, 'foo', { mode: 'content', filesOnly: true, caseSensitive: true, pruneNames: [] })).matches.map(match => match.path).sort()).toEqual(['/node_modules/c.ts', '/src/a.ts', '/src/b.js']);
   });
 
   it('returns metadata rather than loading files over the configured limit', async () => {
@@ -137,5 +179,13 @@ describe('logical filesystem', () => {
     const adapter = { ...base, id: 'adapter', kind: 'adapter' as const, list: async () => { throw Object.assign(new Error('outside binding'), { code: 'binding_denied' }); }, stat: (value: string) => direct.stat(value), read: (value: string) => direct.read(value), atomicWrite: (value: string, content: Buffer, mode?: number) => direct.atomicWrite(value, content, mode) } as FileTransport;
     const terminal = { ...base, id: 'terminal', kind: 'terminal' as const, list: (value: string) => direct.list(value), stat: (value: string) => direct.stat(value), read: (value: string) => direct.read(value), atomicWrite: (value: string, content: Buffer, mode?: number) => direct.atomicWrite(value, content, mode) } as FileTransport;
     expect(await new FileService([adapter, terminal]).list({ contextId: 'remote', path: '/' })).toMatchObject({ route: { kind: 'terminal' }, items: [expect.objectContaining({ name: 'visible.txt' })] });
+  });
+
+  it('reports a missing path as not found only when every route agrees', async () => {
+    const base = { contextId: 'remote', deviceId: 'device-1', effectiveIdentity: 'remote', privilege: 'user' as const, observedAt: new Date().toISOString(), available: true, operations: ['list', 'stat', 'read', 'write'] as const, stat: async () => ({ size: 0, mode: 0o644 }), read: async () => Buffer.alloc(0), atomicWrite: async () => {} };
+    const missing = (id: string) => ({ ...base, id, kind: 'terminal' as const, list: async () => { throw Object.assign(new Error('missing'), { code: 'path_not_found' }); } }) as FileTransport;
+    const broken = { ...base, id: 'adapter', kind: 'adapter' as const, list: async () => { throw Object.assign(new Error('adapter down'), { code: 'adapter_failed' }); } } as FileTransport;
+    await expect(new FileService([missing('a'), missing('b')]).list({ contextId: 'remote', path: '/gone' })).rejects.toMatchObject({ code: 'path_not_found' });
+    await expect(new FileService([broken, missing('b')]).list({ contextId: 'remote', path: '/gone' })).rejects.toMatchObject({ code: 'route_unavailable' });
   });
 });

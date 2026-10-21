@@ -15,6 +15,21 @@ class FakeTerminalSession extends EventEmitter {
   closed = false;
   sessionId?: string;
   closeReasons: string[] = [];
+  modes: string[] = [];
+  stops: string[] = [];
+
+  stop(reason = 'stopped'): boolean {
+    if (this.closed) return false;
+    this.stops.push(reason);
+    return this.close(reason);
+  }
+
+  setMode(mode: string, requestId?: string): boolean {
+    if (this.closed) return false;
+    this.modes.push(mode);
+    queueMicrotask(() => this.emit('collaboration', { type: 'collaboration', eventType: 'mode', mode, requestId }));
+    return true;
+  }
 
   close(reason = 'closed'): boolean {
     if (this.closed) return false;
@@ -85,6 +100,33 @@ describe('DeviceSessionManager', () => {
     second.release();
   });
 
+  it('switches each Device Session to command queue mode before reporting ready', async () => {
+    const connection = factory();
+    const manager = new DeviceSessionManager({ createSession: connection.factory, idleTtlMs: 1_000 });
+    managers.push(manager);
+
+    const lease = await manager.acquire(scope);
+
+    expect(connection.sessions[0].modes).toEqual(['queue']);
+    expect(manager.snapshot(scope)).toMatchObject({ state: 'ready' });
+    lease.release();
+  });
+
+  it('fails the lease instead of timing out commands when queue mode is refused', async () => {
+    const connection = factory(session => {
+      session.setMode = (mode: string, requestId?: string) => {
+        queueMicrotask(() => session.emit('terminal_error', { type: 'error', code: 'control_required', requestId }));
+        return true;
+      };
+      queueMicrotask(() => { session.sessionId = 'fake-session'; session.emit('ready', { type: 'ready' }); });
+    });
+    const manager = new DeviceSessionManager({ createSession: connection.factory, idleTtlMs: 1_000 });
+    managers.push(manager);
+
+    await expect(manager.acquire(scope)).rejects.toMatchObject({ code: 'control_required' });
+    expect(connection.sessions[0].closed).toBe(true);
+  });
+
   it('never shares a connection across profile, team, project, or device scopes', async () => {
     const connection = factory();
     const manager = new DeviceSessionManager({ createSession: connection.factory, idleTtlMs: 1_000 });
@@ -119,6 +161,7 @@ describe('DeviceSessionManager', () => {
     await new Promise(resolve => setTimeout(resolve, 40));
 
     expect(connection.sessions[0].closed).toBe(true);
+    expect(connection.sessions[0].stops).toEqual(['atlas-device-session:idle_ttl']);
     expect(manager.snapshot(scope)).toBeUndefined();
   });
 

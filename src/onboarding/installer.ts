@@ -20,26 +20,39 @@ export interface InstallOptions {
 
 export async function installFngk(artifact: VerifiedArtifact, scope: "user" | "system", progress: (event: BootstrapProgress) => void, options: InstallOptions = {}): Promise<InstallResult> {
   const installDir = await targetDirectory(scope, options);
-  await mkdir(installDir, { recursive: true, mode: 0o700 });
   const staging = await mkdtemp(path.join(tmpdir(), "atlas-fngk-install-"));
-  const target = path.join(installDir, process.platform === "win32" ? "fngk.exe" : "fngk"), backup = `${target}.atlas-backup`, temporary = path.join(installDir, `.fngk-${randomUUID()}.new`);
   try {
     emit(progress, "verifying", 10, "Validating the FNGK archive.");
     const entries = await (options.extract ?? extractTarGzip)(artifact.archive, staging);
     validateEntries(entries);
     const source = path.join(staging, "fngk");
     if (!(await regularFile(source))) throw onboardingError("FNGK archive does not contain a safe executable.", "artifact_executable_missing");
+    const result = await installExecutable(source, path.join(installDir, process.platform === "win32" ? "fngk.exe" : "fngk"), progress, options);
+    return { ...result, version: artifact.version };
+  } finally { await rm(staging, { recursive: true, force: true }); }
+}
+
+/**
+ * Replaces `target` with `source` atomically, keeping the previous binary at
+ * `<target>.atlas-backup` for `rollbackFngk`. The caller has already verified
+ * `source` (signature/checksum).
+ */
+export async function installExecutable(source: string, target: string, progress: (event: BootstrapProgress) => void, options: Pick<InstallOptions, "replace"> = {}): Promise<InstallResult & { backupPath?: string }> {
+  await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+  const backup = `${target}.atlas-backup`, temporary = path.join(path.dirname(target), `.fngk-${randomUUID()}.new`);
+  try {
     emit(progress, "installing", 65, "Installing FNGK.");
-    if (await regularFile(target)) await copyFile(target, backup);
+    const hadPrevious = await regularFile(target);
+    if (hadPrevious) await copyFile(target, backup);
     await copyFile(source, temporary); await chmod(temporary, 0o755);
     await (options.replace ?? atomicReplace)(temporary, target);
     emit(progress, "complete", 100, "FNGK is installed.");
-    return { protocolVersion: "atlas.desktop-bootstrap.v1", state: "checking", message: "FNGK installation completed.", installedPath: target, version: artifact.artifact ? undefined : undefined, rolledBack: false };
+    return { protocolVersion: "atlas.desktop-bootstrap.v1", state: "checking", message: "FNGK installation completed.", installedPath: target, rolledBack: false, ...(hadPrevious ? { backupPath: backup } : {}) };
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => {});
     if ((error as { code?: string }).code) throw error;
     throw onboardingError("FNGK installation could not safely replace the existing binary.", "artifact_install_failed");
-  } finally { await rm(staging, { recursive: true, force: true }); }
+  }
 }
 
 export async function rollbackFngk(input: { backupPath: string; targetPath: string }): Promise<void> {
@@ -54,7 +67,7 @@ async function targetDirectory(scope: "user" | "system", options: InstallOptions
   return (await options.elevate()).installDir;
 }
 
-function userBinDirectory(): string {
+export function userBinDirectory(): string {
   if (process.platform === "win32") return path.join(process.env.LOCALAPPDATA ?? homedir(), "Atlas", "bin");
   if (process.platform === "darwin") return path.join(homedir(), "Library", "Application Support", "Atlas", "bin");
   return path.join(homedir(), ".local", "bin");

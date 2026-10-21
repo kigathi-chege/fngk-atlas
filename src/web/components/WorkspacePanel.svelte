@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DeviceChip from './DeviceChip.svelte';
   import FolderOpen from '@lucide/svelte/icons/folder-open';
   import SquareTerminal from '@lucide/svelte/icons/square-terminal';
   import Search from '@lucide/svelte/icons/search';
@@ -25,5 +26,5 @@
     <button onclick={() => dispatch('atlas:focus-search')}><Search size={16}/><span><b>Search workspace</b><small>Find files, symbols, and commands</small></span></button>
     <button aria-label="Open Device Atlas" onclick={() => dispatch('atlas:open-device-atlas')}><Network size={16}/><span><b>Open Device Atlas</b><small>Inspect the selected Device</small></span></button>
   </div>
-  <footer><span>Context</span><b>{snapshot.contextId}</b><span>·</span><span>{snapshot.connection.profile ?? 'default'} profile</span></footer>
+  <footer><span>Context</span><DeviceChip contextId={snapshot.contextId}/><span>·</span><span>{snapshot.connection.profile ?? 'default'} profile</span></footer>
 </section>

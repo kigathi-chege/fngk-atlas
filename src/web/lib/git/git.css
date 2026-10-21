@@ -1,0 +1,19 @@
+/* Git decorations shared by the filesystem tree, the editor gutter and Source Control. */
+:root{--git-added:#73c991;--git-modified:#e2c08d;--git-deleted:#f48771;--git-untracked:#73c991;--git-renamed:#62d9cc;--git-conflict:#ff6b9a}
+.atlas-light{--git-added:#2f8132;--git-modified:#8a6100;--git-deleted:#b3261e;--git-untracked:#2f8132;--git-renamed:#087a72;--git-conflict:#ad1457}
+
+.tree-row[data-git] b{color:var(--git-tone)}
+[data-git=added]{--git-tone:var(--git-added)}[data-git=modified]{--git-tone:var(--git-modified)}[data-git=deleted]{--git-tone:var(--git-deleted)}
+[data-git=untracked]{--git-tone:var(--git-untracked)}[data-git=renamed]{--git-tone:var(--git-renamed)}[data-git=conflict]{--git-tone:var(--git-conflict)}
+.git-tree-letter{margin-left:auto;padding-left:6px;flex:none;font:600 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--git-tone)}
+.git-tree-letter.folder{font-size:12px;opacity:.85}
+.tree-row[data-git] small:not(:empty){margin-left:auto}
+.tree-row[data-git] small:not(:empty)~.git-tree-letter{margin-left:0}
+
+/* Editor gutter: thin bars beside the line numbers. */
+.cm-git-gutter{width:4px;padding:0 1px}
+.cm-git-gutter .cm-gutterElement{padding:0}
+.cm-git-marker{display:block;width:3px;height:100%}
+.cm-git-marker.added{background:var(--git-added)}
+.cm-git-marker.modified{background:var(--git-modified)}
+.cm-git-marker.deleted{height:0;width:0;border-left:4px solid var(--git-deleted);border-top:4px solid transparent;border-bottom:4px solid transparent;margin-top:-4px}

@@ -15,6 +15,10 @@
   --atlas-cyan: #62d9cc;
   --atlas-danger: #ff8d86;
   --atlas-warning: #f3c76b;
+  --atlas-success: #4ade80;
+  --atlas-surface: var(--atlas-surface-1);
+  --atlas-panel: var(--atlas-surface-1);
+  --atlas-hover: var(--atlas-surface-2);
   --atlas-focus: #8ab4f8;
   --atlas-radius-sm: 4px;
   --atlas-radius-md: 7px;
@@ -45,6 +49,10 @@
   --atlas-cyan: #087a72;
   --atlas-danger: #b3261e;
   --atlas-warning: #8a5900;
+  --atlas-success: #16a34a;
+  --atlas-surface: var(--atlas-surface-1);
+  --atlas-panel: var(--atlas-surface-1);
+  --atlas-hover: var(--atlas-surface-2);
   --atlas-focus: #155bb0;
   --atlas-shadow-popover: 0 18px 60px #23384b22;
   --atlas-shadow-float: 0 24px 90px #23384b2e;

@@ -1,9 +1,10 @@
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly body: Record<string, unknown> = {}) { super(message); }
 }
+/** Headers every Atlas API call carries: the selected profile and, in the desktop app, its launch capability. */
+export function atlasRequestHeaders(): Record<string,string> { const capability=desktopCapability(),profile=selectedProfile(); return { ...(profile?{'x-atlas-profile':profile}:{}), ...(capability?{'x-atlas-capability':capability}:{}) }; }
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const capability=desktopCapability(),profile=selectedProfile();
-  const response = await fetch(url, { ...init, headers: { accept: 'application/json', ...(profile?{'x-atlas-profile':profile}:{}), ...(capability?{'x-atlas-capability':capability}:{}), ...(init?.body ? { 'content-type': 'application/json' } : {}), ...init?.headers } });
+  const response = await fetch(url, { ...init, headers: { accept: 'application/json', ...atlasRequestHeaders(), ...(init?.body ? { 'content-type': 'application/json' } : {}), ...init?.headers } });
   const text = await response.text(); let value: any = {};
   try { value = text ? JSON.parse(text) : {}; } catch { value = { message: text }; }
   if (!response.ok) {

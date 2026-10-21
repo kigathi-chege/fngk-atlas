@@ -7,12 +7,27 @@ class TerminalDouble extends EventEmitter {
   constructor(){super();queueMicrotask(()=>this.emit('ready',{type:'ready',sessionId:this.sessionId}));}
   setMode(){queueMicrotask(()=>this.emit('event',{type:'collaboration',eventType:'mode',mode:'queue'}));return true;}
   sendCommand(){return false;}
-  detach(){return true;}
-  stop(){return true;}
+  calls:string[]=[];
+  detach(reason?:string){this.calls.push(`detach:${reason}`);return true;}
+  stop(reason?:string){this.calls.push(`stop:${reason}`);return true;}
   interrupt(){return true;}
 }
 
 describe('effective context route lifecycle',()=>{
+  it('stops remote filesystem sessions on shutdown instead of leaving them live',async()=>{
+    const terminals:TerminalDouble[]=[];
+    const fngk={
+      probe:async(profile:string)=>({compatible:true,profile,namespace:{devices:[]}}),
+      fileBindings:async(profile:string)=>({profile:{name:profile},bindings:[]}),
+      namespace:async()=>({devices:[{id:'online',online:true}]}),
+      openTerminal:()=>{const terminal=new TerminalDouble();terminals.push(terminal);return terminal}
+    };
+    const contexts=new EffectiveContextService(fngk as any);
+    await contexts.contexts({profile:'a'});
+    await contexts.route('device:online','a');
+    contexts.close();
+    expect(terminals.flatMap(terminal=>terminal.calls)).toEqual(['stop:atlas-shutdown']);
+  });
   it('isolates simultaneous profile discovery and remote routes',async()=>{
     const probes:string[]=[],opened:string[]=[],namespaces:string[]=[];
     const fngk={

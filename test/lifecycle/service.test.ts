@@ -38,4 +38,21 @@ describe('DeviceLifecycleService', () => {
     await expect(new DeviceLifecycleService(source({ profiles: async () => ({ profiles: [{ name: 'local', current: true, mode: 'user', paired: true, operatorAuthorized: false, daemon: 'running' }] }) })).inspect('device:one')).resolves.toMatchObject({ state: 'needs-login' });
     await expect(new DeviceLifecycleService(source({ profiles: async () => ({ profiles: [{ name: 'local', current: true, mode: 'user', paired: false, operatorAuthorized: true, daemon: 'stopped' }] }) })).inspect('device:one')).resolves.toMatchObject({ state: 'inspection-unavailable' });
   });
+
+  it('reports a ready remote Device from its agent inspection', async () => {
+    const calls: string[][] = [];
+    const lifecycle = new DeviceLifecycleService(source({ remote: async (deviceId: string, profile: string) => { calls.push([deviceId, profile]); return { state: 'ready', terminal: 'available', daemon: 'running', activeAgentVersion: 'v0.1.4' }; } }));
+    await expect(lifecycle.inspect('device:one')).resolves.toMatchObject({ state: 'ready', diagnostics: [{ code: 'remote_ready' }], capabilities: { disconnect: { available: true } } });
+    expect(calls).toEqual([['one', 'local']]);
+  });
+
+  it('keeps an unanswered remote inspection visible instead of claiming readiness', async () => {
+    const lifecycle = new DeviceLifecycleService(source({ remote: async () => { throw new Error('device timeout'); } }));
+    await expect(lifecycle.inspect('device:one')).resolves.toMatchObject({ state: 'inspection-unavailable', diagnostics: [{ code: 'remote_inspection_failed', message: expect.stringContaining('device timeout') }] });
+  });
+
+  it('asks an outdated agent to update instead of inspecting it', async () => {
+    const lifecycle = new DeviceLifecycleService(source({ remote: async () => { throw Object.assign(new Error('update its FNGK agent'), { code: 'lifecycle_inspection_unsupported' }); } }));
+    await expect(lifecycle.inspect('device:one')).resolves.toMatchObject({ state: 'needs-update', diagnostics: [{ code: 'lifecycle_inspection_unsupported' }] });
+  });
 });

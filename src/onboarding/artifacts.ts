@@ -28,6 +28,7 @@ export interface LocateFngkOptions {
 
 export interface VerifiedArtifact {
   protocolVersion: typeof BOOTSTRAP_PROTOCOL_VERSION;
+  version: string;
   artifact: InstallArtifact;
   archive: Buffer;
   platform: FngkPlatform;
@@ -93,7 +94,7 @@ export async function verifyFngkArtifact(manifest: InstallManifest, archive: Buf
   if (archive.byteLength > maximum) throw onboardingError("FNGK artifact exceeds the allowed size.", "artifact_size_exceeded");
   if (createHash("sha256").update(archive).digest("hex") !== artifact.sha256.toLowerCase()) throw onboardingError("FNGK artifact checksum does not match its manifest.", "artifact_checksum_mismatch");
   if (!options.verifySignature || !(await options.verifySignature(manifestSigningPayload(manifest, artifact), artifact.signature))) throw onboardingError("FNGK artifact signature could not be verified.", "artifact_signature_invalid");
-  return { protocolVersion: BOOTSTRAP_PROTOCOL_VERSION, artifact, archive, platform, architecture };
+  return { protocolVersion: BOOTSTRAP_PROTOCOL_VERSION, version: manifest.version, artifact, archive, platform, architecture };
 }
 
 export function manifestSigningPayload(manifest: InstallManifest, artifact: InstallArtifact): Buffer {

@@ -31,6 +31,8 @@ export interface FngkProfileSummary {
   paired: boolean;
   operatorAuthorized: boolean;
   daemon: 'running' | 'stopped' | 'unknown';
+  /** The signed-in account, for display only. */
+  operatorAccount?: string;
 }
 
 export interface FngkProfilesDocument {
@@ -44,6 +46,9 @@ export class FngkProcessError extends Error {
     this.name = 'FngkProcessError';
   }
 }
+
+/** FNGK reports Signal API failures as `fngk: <code>: <message>`; keep the code. */
+function reportedCode(stderr:string):string|undefined{return /^fngk: ([a-z][a-z0-9_]{2,63})(?::|\s*$)/m.exec(stderr)?.[1]}
 
 export class FngkProcessClient {
   #profileProvider:()=>string|undefined=()=>undefined;
@@ -84,9 +89,9 @@ export class FngkProcessClient {
       child.on('close', code => {
         if (code === 0) return finish();
         const normalized = stderr.toLowerCase();
-        const failure = normalized.includes('authentication_required') || normalized.includes('authentication required') ? 'authentication_required'
+        const failure = normalized.includes('authentication_required') || normalized.includes('authentication required') || normalized.includes('operator login required') ? 'authentication_required'
           : normalized.includes('daemon') && (normalized.includes('unavailable') || normalized.includes('not running')) ? 'daemon_unavailable'
-            : 'process_failed';
+            : reportedCode(stderr) ?? 'process_failed';
         finish(new FngkProcessError(failure, stderr || `FNGK exited with code ${code}.`, code));
       });
       if(input!==undefined){child.stdin!.end(input);}
@@ -116,7 +121,7 @@ export class FngkProcessClient {
     )) throw new FngkProcessError('unsupported_protocol', 'FNGK returned an unsupported profile protocol.');
     return {
       protocolVersion: 'fngk.profiles.v1',
-      profiles: document.profiles.map(profile => ({ name: profile.name, current: profile.current, mode: profile.mode, paired: profile.paired, operatorAuthorized: profile.operatorAuthorized, daemon: profile.daemon })),
+      profiles: document.profiles.map(profile => ({ name: profile.name, current: profile.current, mode: profile.mode, paired: profile.paired, operatorAuthorized: profile.operatorAuthorized, daemon: profile.daemon, ...(typeof profile.operatorAccount === 'string' && profile.operatorAccount ? { operatorAccount: profile.operatorAccount.slice(0, 254) } : {}) })),
     } as FngkProfilesDocument;
   }
 
@@ -135,14 +140,20 @@ export class FngkProcessClient {
     const value=JSON.parse((await this.#run(args,options.signal)).trim());if(value.protocolVersion!==SESSION_PROTOCOL)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported terminal session protocol.');return value;
   }
 
+  async deviceLifecycle(deviceId:string,options:{profile?:string;signal?:AbortSignal}={}):Promise<{protocolVersion:'fngk.device-lifecycle.v1';state:string;terminal?:string;daemon?:string;activeAgentVersion?:string;paired?:boolean}>{const args=['devices',deviceId,'lifecycle','--json'];if(options.profile)args.push('--profile',options.profile);const value=JSON.parse((await this.#run(args,options.signal)).trim());if(value.protocolVersion!=='fngk.device-lifecycle.v1')throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported Device lifecycle protocol.');return value}
+
   async managedProcesses(deviceId:string,profile?:string,signal?:AbortSignal):Promise<ManagedProcess[]> { const args=['processes',deviceId,'list','--json']; if(profile)args.push('--profile',profile); const value=JSON.parse((await this.#run(args,signal)).trim()); if(value.protocolVersion!==PROCESS_PROTOCOL||!Array.isArray(value.result))throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported process protocol.'); return value.result; }
   async createManagedProcess(deviceId:string,definition:Record<string,unknown>,options:{profile?:string;signal?:AbortSignal}={}):Promise<ManagedProcess> { const args=['processes',deviceId,'create','--json']; if(options.profile)args.push('--profile',options.profile); const value=JSON.parse((await this.#run(args,options.signal,JSON.stringify(definition))).trim()); if(value.protocolVersion!==PROCESS_PROTOCOL||!value.result?.id)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported process protocol.'); return value.result; }
   async managedProcessAction(processId:string,action:'start'|'stop'|'restart',options:{profile?:string;signal?:AbortSignal}={}):Promise<unknown> { const args=['processes',processId,action,'--json']; if(options.profile)args.push('--profile',options.profile); const value=JSON.parse((await this.#run(args,options.signal)).trim()); if(value.protocolVersion!==PROCESS_PROTOCOL)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported process protocol.'); return value.result; }
-  async managedProcessOperation(processId:string,action:'probe'|'publish'|'unpublish',input:Record<string,unknown>,options:{profile?:string;signal?:AbortSignal}={}):Promise<any>{const args=['processes',processId,action,'--json'];if(options.profile)args.push('--profile',options.profile);const value=JSON.parse((await this.#run(args,options.signal,JSON.stringify(input))).trim());if(value.protocolVersion!==PROCESS_PROTOCOL||value.result===undefined)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported process operation protocol.');return value.result}
+  async managedProcessOperation(processId:string,action:'probe'|'publish'|'unpublish',input:Record<string,unknown>,options:{profile?:string;signal?:AbortSignal}={}):Promise<any>{const args=['processes',processId,action,'--json'];if(options.profile)args.push('--profile',options.profile);const value=JSON.parse((await this.#run(args,options.signal,JSON.stringify(input))).trim());if(value.protocolVersion!==PROCESS_PROTOCOL||value.result===undefined)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported process operation protocol.');const result=value.result;
+    // Signal before connectionId was added returns the Connection row, whose id is the connection id.
+    if(action==='publish'&&result&&typeof result==='object'&&result.connectionId===undefined&&typeof result.id==='string')return{...result,connectionId:result.id};
+    return result}
   async managedProcessLogs(processId:string,options:{profile?:string;runId?:string;after?:number;limit?:number;signal?:AbortSignal}={}):Promise<ManagedProcessLogs> { const args=['processes',processId,'logs','--json']; if(options.runId)args.push('--run-id',options.runId); if(options.after!==undefined)args.push('--after',String(options.after)); if(options.limit!==undefined)args.push('--limit',String(options.limit)); if(options.profile)args.push('--profile',options.profile); const value=JSON.parse((await this.#run(args,options.signal)).trim()); if(value.protocolVersion!==PROCESS_PROTOCOL||!value.result)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported process protocol.'); return value.result; }
 
-  async #deployment(target:string,action:'list'|'create'|'inspect'|'release'|'event'|'approve'|'execute'|'cancel'|'retry'|'rollback'|'source-snapshot'|'secret-key'|'secret-store'|'secret-rotate'|'secret-delete',input?:Record<string,unknown>,options:{profile?:string;signal?:AbortSignal;bindingId?:string}={}):Promise<any>{const args=['deployments',target,action,'--json'];if(options.bindingId)args.push('--binding',options.bindingId);if(options.profile)args.push('--profile',options.profile);const value=JSON.parse((await this.#run(args,options.signal,input===undefined?undefined:JSON.stringify(input))).trim());if(![DEPLOYMENT_PROTOCOL,DEPLOYMENT_PROTOCOL_V2].includes(value.protocolVersion)||value.result===undefined)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported deployment protocol.');return value.result}
+  async #deployment(target:string,action:'list'|'create'|'inspect'|'revise'|'release'|'event'|'approve'|'execute'|'cancel'|'retry'|'rollback'|'source-snapshot'|'secret-key'|'secret-store'|'secret-rotate'|'secret-delete',input?:Record<string,unknown>,options:{profile?:string;signal?:AbortSignal;bindingId?:string}={}):Promise<any>{const args=['deployments',target,action,'--json'];if(options.bindingId)args.push('--binding',options.bindingId);if(options.profile)args.push('--profile',options.profile);const value=JSON.parse((await this.#run(args,options.signal,input===undefined?undefined:JSON.stringify(input))).trim());if(![DEPLOYMENT_PROTOCOL,DEPLOYMENT_PROTOCOL_V2].includes(value.protocolVersion)||value.result===undefined)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported deployment protocol.');return value.result}
   async createDeployment(deviceId:string,input:Record<string,unknown>,options:{profile?:string;signal?:AbortSignal}={}){return this.#deployment(deviceId,'create',input,options)}
+  async reviseDeployment(deploymentId:string,input:Record<string,unknown>,options:{profile?:string;signal?:AbortSignal}={}){return this.#deployment(deploymentId,'revise',input,options)}
   async deployments(deviceId:string,options:{profile?:string;signal?:AbortSignal}={}){return this.#deployment(deviceId,'list',undefined,options)}
   async deployment(deploymentId:string,options:{profile?:string;signal?:AbortSignal}={}){return this.#deployment(deploymentId,'inspect',undefined,options)}
   async createDeploymentRelease(deploymentId:string,input:Record<string,unknown>,options:{profile?:string;signal?:AbortSignal}={}){return this.#deployment(deploymentId,'release',input,options)}
@@ -199,6 +210,15 @@ export class FngkProcessClient {
 
   async install(profile: string, signal?: AbortSignal): Promise<void> {
     await this.#run(['install', '--profile', profile], signal);
+  }
+
+  /** Forget only the operator login; a Device pairing in the profile stays. */
+  async logoutOperator(profile: string, signal?: AbortSignal): Promise<void> {
+    await this.#run(['logout', '--operator', '--profile', profile], signal);
+  }
+
+  async pair(pairingUrl: string, profile: string, signal?: AbortSignal): Promise<void> {
+    await this.#run(['pair', pairingUrl, '--profile', profile], signal);
   }
 
   openTerminal(target: string, options: { newSession?: boolean; sessionId?: string; profile?: string; signal?: AbortSignal; owner?:TerminalOwner; purpose?:TerminalPurpose } = {}): TerminalSession {

@@ -1,3 +1,4 @@
+import { atlasRequestHeaders } from './api.js';
 export type AgentReferenceKind = 'device' | 'file' | 'terminal' | 'deployment' | 'port';
 export interface AgentReference { kind: AgentReferenceKind; id: string; label: string; }
 export interface AgentChatSnapshot { conversationId?: string; cursor?: string; references: AgentReference[]; }
@@ -35,9 +36,33 @@ export interface ConversationTransport {
   stream(conversationId: string, cursor: string | undefined, onEvent: (event: ConversationEvent) => void, onError: (error: Error) => void): () => void;
 }
 
-export function createAtlasConversationTransport(fetcher: typeof fetch = fetch, events = (url: string) => new EventSource(url)): ConversationTransport {
+/** Parses a text/event-stream body into named events (`event:`), ignoring comments and heartbeats. */
+export async function readServerSentEvents(body: ReadableStream<Uint8Array>, onEvent: (name: string, data: string) => boolean | void, signal?: AbortSignal): Promise<void> {
+  const reader = body.getReader(), decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (!signal?.aborted) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true }).replaceAll('\r\n', '\n');
+      let boundary: number;
+      while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2);
+        let name = 'message'; const data: string[] = [];
+        for (const line of frame.split('\n')) {
+          if (line.startsWith(':')) continue;
+          const colon = line.indexOf(':'), field = colon < 0 ? line : line.slice(0, colon), text = colon < 0 ? '' : line.slice(colon + 1).replace(/^ /, '');
+          if (field === 'event') name = text; else if (field === 'data') data.push(text);
+        }
+        if (data.length && onEvent(name, data.join('\n')) === false) return;
+      }
+    }
+  } finally { reader.cancel().catch(() => {}); }
+}
+
+export function createAtlasConversationTransport(fetcher: typeof fetch = fetch, headers: () => Record<string, string> = atlasRequestHeaders): ConversationTransport {
   const request = async (url: string, method: string, body?: unknown) => {
-    const response = await fetcher(url, { method, headers: { 'content-type': 'application/json', accept: 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const response = await fetcher(url, { method, headers: { ...headers(), 'content-type': 'application/json', accept: 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     if (!response.ok) { const value = await response.json().catch(() => ({})) as { message?: string }; throw new Error(value.message ?? `Calculator conversation request failed (${response.status}).`); }
     return response.json().catch(() => ({}));
   };
@@ -46,6 +71,24 @@ export function createAtlasConversationTransport(fetcher: typeof fetch = fetch, 
     async send(conversationId, input) { await request(`/api/agent-chat/conversations/${encodeURIComponent(conversationId)}/messages`, 'POST', input); },
     async cancel(conversationId) { await request(`/api/agent-chat/conversations/${encodeURIComponent(conversationId)}/cancel`, 'POST'); },
     async steer(conversationId, input) { await request(`/api/agent-chat/conversations/${encodeURIComponent(conversationId)}/steer`, 'POST', input); },
-    stream(conversationId, cursor, onEvent, onError) { const url = new URL(`/api/agent-chat/conversations/${encodeURIComponent(conversationId)}/events`, location.origin); if (cursor) url.searchParams.set('cursor', cursor); const source = events(url.toString()); source.onmessage = event => { try { onEvent(JSON.parse(event.data) as ConversationEvent); } catch { onError(new Error('Calculator returned an invalid conversation event.')); } }; source.onerror = () => onError(new Error('Conversation stream disconnected; Atlas will resume it when the panel is restored.')); return () => source.close(); }
+    // EventSource cannot send headers (the desktop capability) and only
+    // surfaces unnamed events, while Calculator names them `conversation` and
+    // ends a stream with `terminal`; read the stream with fetch instead.
+    stream(conversationId, cursor, onEvent, onError) {
+      const controller = new AbortController(), url = new URL(`/api/agent-chat/conversations/${encodeURIComponent(conversationId)}/events`, location.origin);
+      if (cursor) url.searchParams.set('cursor', cursor);
+      void (async () => {
+        const response = await fetcher(url.toString(), { headers: { ...headers(), accept: 'text/event-stream' }, signal: controller.signal });
+        if (!response.ok || !response.body) throw new Error(`Calculator event stream returned ${response.status}.`);
+        let ended = false;
+        await readServerSentEvents(response.body, (name, data) => {
+          if (name === 'terminal') { ended = true; return false; }
+          if (name !== 'conversation' && name !== 'message') return;
+          try { onEvent(JSON.parse(data) as ConversationEvent); } catch { onError(new Error('Calculator returned an invalid conversation event.')); }
+        }, controller.signal);
+        if (!ended && !controller.signal.aborted) throw new Error('Conversation stream disconnected; Atlas will resume it when the panel is restored.');
+      })().catch(error => { if (!controller.signal.aborted) onError(error instanceof Error ? error : new Error(String(error))); });
+      return () => controller.abort();
+    }
   };
 }

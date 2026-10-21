@@ -3,6 +3,39 @@ import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
 const mode = process.env.FNGK_FIXTURE_MODE ?? 'ok';
+const profileArg = () => args.includes('--profile') ? args[args.indexOf('--profile') + 1] : 'local';
+
+// "onboarding": a stateful machine that starts signed out. `login --pair` waits
+// for the test to drop an "approved" (or "denied") file into FNGK_FIXTURE_STATE,
+// then reports a signed-in operator and a paired Device.
+if (mode === 'onboarding') {
+  const { existsSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const state = process.env.FNGK_FIXTURE_STATE; mkdirSync(state, { recursive: true });
+  const has = name => existsSync(join(state, name)), mark = name => writeFileSync(join(state, name), '1');
+  const emit = value => process.stdout.write(JSON.stringify({ protocolVersion: 'fngk.login.v1', ...value }) + '\n');
+  if (args[0] === 'profiles') {
+    process.stdout.write(JSON.stringify({ protocolVersion: 'fngk.profiles.v1', profiles: has('signed-in') ? [{ name: 'local', current: true, mode: has('paired') ? 'device' : 'unknown', paired: has('paired'), operatorAuthorized: true, daemon: has('daemon') ? 'running' : 'stopped', executable: '/fixture/fngk', agentVersion: 'v1.4.0', operatorAccount: 'dev@signal.localhost' }] : [] }) + '\n');
+    process.exit(0);
+  }
+  if (args[0] === 'status' && !has('signed-in')) { process.stderr.write('fngk: operator login required: run fngk login (or fngk login <signal-url> for a self-hosted Signal)\n'); process.exit(1); }
+  if (args[0] === 'install') { mark('daemon'); process.stdout.write('Signal installed as signal-local (user scope).\n'); process.exit(0); }
+  if (args[0] === 'logout') { const { rmSync } = await import('node:fs'); rmSync(join(state, 'signed-in'), { force: true }); process.exit(0); }
+  if (args[0] === 'login') {
+    const explicit = args[1] && !args[1].startsWith('--') ? args[1] : undefined;
+    const signal = new URL(explicit ?? process.env.FNGK_SIGNAL_URL ?? 'https://signal.nipate.africa').origin;
+    emit({ state: 'authorization-required', authorizationUrl: `${signal}/cli-authorize?code=A1B2C3D4E5F6`, stateId: 'fixture-pairing-state-0001', expiresAt: new Date(Date.now() + 600_000).toISOString(), profile: profileArg(), userCode: 'A1B2C3D4E5F6', signalUrl: signal, pairing: true });
+    const timer = setInterval(() => {
+      if (has('denied')) { process.stderr.write('fngk: authorization failed (403): {"error":"authorization_denied"}\n'); process.exit(1); }
+      if (!has('approved')) return;
+      clearInterval(timer); mark('signed-in'); mark('paired');
+      emit({ state: 'authenticated', profile: profileArg(), account: 'dev@signal.localhost' });
+      emit({ state: 'paired', profile: profileArg(), deviceId: 'device-fixture-1', deviceName: 'atlas-fixture' });
+      process.exit(0);
+    }, 50);
+    setTimeout(() => process.exit(3), 30_000);
+  }
+}
 
 if (args[0] === 'version') {
   if (mode === 'missing-version') process.exit(17);
@@ -12,7 +45,10 @@ if (args[0] === 'version') {
 } else if (args[0] === 'status' && args.includes('--json')) {
   if (mode === 'timeout') setTimeout(() => {}, 60_000);
   else if (mode === 'invalid') process.stdout.write('not json\n');
-  else if (mode === 'secret-error') {
+  else if (mode === 'feature-disabled') {
+    process.stderr.write('fngk: operator_terminal_disabled\n');
+    process.exit(1);
+  } else if (mode === 'secret-error') {
     process.stderr.write('Authorization: Bearer operator-secret Cookie: session=browser-secret ticket=terminal-secret\n');
     process.exit(9);
   } else {
@@ -40,7 +76,9 @@ if (args[0] === 'version') {
 } else if (args[0] === 'processes' && args[2] === 'logs' && args.includes('--json')) {
   process.stdout.write(JSON.stringify({protocolVersion:'fngk.process.v1',action:'logs',result:{run:{id:'run-1',status:'running'},items:[],nextCursor:7,hasMore:false,argv:args}})+'\n');
 } else if (args[0] === 'processes' && ['probe','publish','unpublish'].includes(args[2]) && args.includes('--json')) {
-  let raw='';process.stdin.setEncoding('utf8');process.stdin.on('data',value=>raw+=value);process.stdin.on('end',()=>process.stdout.write(JSON.stringify({protocolVersion:'fngk.process.v1',action:args[2],result:{argv:args,input:raw?JSON.parse(raw):{},...(args[2]==='publish'?{hostname:'preview.test'}:{ready:true})}})+'\n'));
+  let raw='';process.stdin.setEncoding('utf8');process.stdin.on('data',value=>raw+=value);process.stdin.on('end',()=>process.stdout.write(JSON.stringify({protocolVersion:'fngk.process.v1',action:args[2],result:{argv:args,input:raw?JSON.parse(raw):{},...(args[2]==='publish'?{id:'connection-1',hostname:'preview.test',url:'https://preview.test'}:{ready:true})}})+'\n'));
+} else if (args[0] === 'devices' && args[2] === 'lifecycle' && args.includes('--json')) {
+  process.stdout.write(JSON.stringify({ protocolVersion: 'fngk.device-lifecycle.v1', deviceId: args[1], state: 'ready', terminal: 'available', daemon: 'running', activeAgentVersion: 'v0.1.0-fixture', paired: true }) + '\n');
 } else if (args[0] === 'deployments' && args.includes('--json')) {
   let raw='';process.stdin.setEncoding('utf8');process.stdin.on('data',value=>raw+=value);process.stdin.on('end',()=>{const action=args[2];const base={argv:args,input:raw?JSON.parse(raw):undefined};const result=action==='create'?{...base,deployment:{id:'deployment-1'},release:{id:'release-1'}}:action==='rollback'?{...base,target:{id:'release-1'}}:action==='inspect'?{...base,deployment:{id:args[1]},releases:[],events:[]}:action==='list'?{...base,deployments:[]}:action==='source-snapshot'?{...base,protocolVersion:'fngk.source.v1',kind:'device-directory',locator:'device-cache:sha256:'+'a'.repeat(64),digest:'sha256:'+'a'.repeat(64),bytes:12,files:1,ignoreFiles:['.gitignore'],createdBy:'user-1',createdAt:'2026-09-18T00:00:00.000Z',verified:true}:action==='secret-key'?{...base,credentialPublicKey:'device-public-key'}:action==='secret-store'?{...base,vaultBindingId:'deployment-vault:reference'}:['approve','execute','cancel','retry','secret-rotate','secret-delete'].includes(action)?base:{...base,release:{id:action==='event'?args[1]:'release-2'}};process.stdout.write(JSON.stringify({protocolVersion:process.env.FNGK_FIXTURE_DEPLOYMENT_PROTOCOL??'fngk.deployment.v1',action,result})+'\n')});
 } else if (args[0] === 'resources' && args.includes('--json')) {
@@ -50,6 +88,17 @@ if (args[0] === 'version') {
 } else if (args[0] === 'tcp' && args.includes('--stdio-json')) {
   process.stdout.write(mode==='human-tcp'?'Signal TCP relay listening on 127.0.0.1:39153\n':JSON.stringify({protocolVersion:'fngk.tcp.v1',type:'ready',listenHost:'127.0.0.1',listenPort:32123,target:args[1],targetPort:Number(args[2]),argv:args})+'\n');
   setInterval(()=>{},60_000);
+} else if (mode === 'onboarding' && args[0] === 'login') {
+  // handled above; keep the process alive while it waits for approval
+} else if (args[0] === 'login' && args.includes('--pair') && args.includes('--json')) {
+  const explicit = args[1] && !args[1].startsWith('--') ? args[1] : undefined, signal = new URL(explicit ?? process.env.FNGK_SIGNAL_URL ?? 'https://signal.nipate.africa').origin;
+  process.stdout.write(JSON.stringify({protocolVersion:'fngk.login.v1',state:'authorization-required',authorizationUrl:`${signal}/cli-authorize?code=A1B2C3D4E5F6`,stateId:'fixture-pairing-state-0001',expiresAt:'2030-01-01T00:00:00.000Z',profile:profileArg(),userCode:'A1B2C3D4E5F6',signalUrl:signal,pairing:mode!=='old-signal'})+'\n');
+  process.stdout.write(JSON.stringify({protocolVersion:'fngk.login.v1',state:'authenticated',profile:profileArg(),account:'dev@signal.localhost'})+'\n');
+  process.stdout.write(JSON.stringify(mode==='old-signal'?{protocolVersion:'fngk.login.v1',state:'pairing-unavailable',profile:profileArg(),reason:'signal_pairing_unsupported'}:{protocolVersion:'fngk.login.v1',state:'paired',profile:profileArg(),deviceId:'device-fixture-1',deviceName:'atlas-fixture'})+'\n');
+} else if (args[0] === 'logout' && args.includes('--operator')) {
+  process.stdout.write('Removed the operator login.\n');
+} else if (args[0] === 'pair') {
+  process.stdout.write('Paired device profile.\n');
 } else if (args[0] === 'login' && args.includes('--json')) {
   process.stdout.write(JSON.stringify({protocolVersion:'fngk.login.v1',state:'authorization-required',authorizationUrl:'https://signal.example.test/authorize',stateId:'fixture-login-state',expiresAt:'2030-01-01T00:00:00.000Z',profile:args[args.indexOf('--profile')+1]??'local'})+'\n');
   process.stdout.write(JSON.stringify({protocolVersion:'fngk.login.v1',state:'authenticated',profile:args[args.indexOf('--profile')+1]??'local'})+'\n');
@@ -58,9 +107,13 @@ if (args[0] === 'version') {
 } else if (args.includes('--stdio-json')) {
   process.stdout.write(JSON.stringify({ type: 'ready', protocolVersion: 'fngk.terminal.v1', sessionId: 'session-1', argv: args }) + '\n');
   const lines = createInterface({ input: process.stdin });
+  // Signal starts sessions exclusive and rejects commands until queue mode is set.
+  let collaborationMode = 'exclusive';
   lines.on('line', line => {
     const message = JSON.parse(line);
-    if (message.type === 'command') {
+    if (message.type === 'command' && collaborationMode !== 'queue') {
+      process.stdout.write(JSON.stringify({ type: 'error', protocolVersion: 'fngk.terminal.v1', code: 'queue_unavailable', message: 'queue_unavailable', requestId: message.requestId }) + '\n');
+    } else if (message.type === 'command') {
       const frame = message.command.match(/__ATLAS_BEGIN_([A-Za-z0-9_]+)__/i)?.[1];
       const completed = () => process.stdout.write(JSON.stringify({ type: 'command_state', protocolVersion: 'fngk.terminal.v1', requestId: message.requestId, status: 'succeeded', exitCode: 0 }) + '\n');
       if (mode === 'terminal-reordered') completed();
@@ -73,7 +126,11 @@ if (args[0] === 'version') {
       }
       if (mode !== 'terminal-reordered') completed();
     } else if (message.type === 'mode') {
+      collaborationMode = message.mode;
       process.stdout.write(JSON.stringify({ type: 'collaboration', protocolVersion: 'fngk.terminal.v1', eventType: 'mode', mode: message.mode, requestId: message.requestId }) + '\n');
+    } else if (message.type === 'stop') {
+      process.stdout.write(JSON.stringify({ type: 'exit', protocolVersion: 'fngk.terminal.v1', requestId: message.requestId, exitCode: 0 }) + '\n');
+      process.exit(0);
     } else if (message.type === 'detach') {
       process.stdout.write(JSON.stringify({ type: 'detached', protocolVersion: 'fngk.terminal.v1', requestId: message.requestId }) + '\n');
       process.exit(0);

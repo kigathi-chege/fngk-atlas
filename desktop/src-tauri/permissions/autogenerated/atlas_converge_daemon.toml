@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-atlas-converge-daemon"
+description = "Enables the atlas_converge_daemon command without any pre-configured scope."
+commands.allow = ["atlas_converge_daemon"]
+
+[[permission]]
+identifier = "deny-atlas-converge-daemon"
+description = "Denies the atlas_converge_daemon command without any pre-configured scope."
+commands.deny = ["atlas_converge_daemon"]
