@@ -17,6 +17,8 @@ export interface FngkLocalStatus {
   state: BootstrapState;
   message: string;
   errorCode?: string;
+  /** Why FNGK needs attention, as FNGK reported it (redacted). */
+  detail?: string;
   executable?: string;
   version?: string;
   profile?: string;

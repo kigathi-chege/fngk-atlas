@@ -21,6 +21,8 @@ export interface FngkContextState {
   daemon: 'reachable' | 'unknown';
   login: 'authenticated' | 'required' | 'unknown';
   reason?: string;
+  /** What FNGK said when the probe failed, already redacted. */
+  detail?: string;
   namespace?: NamespaceSnapshot;
 }
 
@@ -46,6 +48,8 @@ export class FngkProcessError extends Error {
     this.name = 'FngkProcessError';
   }
 }
+
+function probeDetail(error:unknown):{detail?:string}{const message=error instanceof FngkProcessError?error.message:redact(String((error as {message?:string})?.message??''));const detail=message.replace(/\s+/g,' ').trim().slice(0,240);return detail?{detail}:{}}
 
 /** FNGK reports Signal API failures as `fngk: <code>: <message>`; keep the code. */
 function reportedCode(stderr:string):string|undefined{return /^fngk: ([a-z][a-z0-9_]{2,63})(?::|\s*$)/m.exec(stderr)?.[1]}
@@ -197,14 +201,14 @@ export class FngkProcessClient {
       version = raw.match(/v?(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)/)?.[1] ?? raw.trim();
     } catch (error) {
       const reason = error instanceof FngkProcessError ? error.code : 'probe_failed';
-      return { binary: this.binary, installed: reason !== 'binary_missing', compatible: false, daemon: 'unknown', login: 'unknown', reason };
+      return { binary: this.binary, installed: reason !== 'binary_missing', compatible: false, daemon: 'unknown', login: 'unknown', reason, ...probeDetail(error) };
     }
     try {
       const namespace = await this.namespace(profile, signal);
       return { binary: this.binary, installed: true, compatible: true, version, profile: namespace.profile.name, namespaceProtocol: NAMESPACE_PROTOCOL, terminalProtocol: TERMINAL_PROTOCOL, daemon: 'reachable', login: 'authenticated', namespace };
     } catch (error) {
       const reason = error instanceof FngkProcessError ? error.code : String((error as { code?: string }).code ?? 'namespace_failed');
-      return { binary: this.binary, installed: true, compatible: false, version, profile, daemon: 'unknown', login: reason === 'authentication_required' ? 'required' : 'unknown', reason };
+      return { binary: this.binary, installed: true, compatible: false, version, profile, daemon: 'unknown', login: reason === 'authentication_required' ? 'required' : 'unknown', reason, ...probeDetail(error) };
     }
   }
 

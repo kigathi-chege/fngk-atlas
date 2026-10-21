@@ -79,3 +79,20 @@ test("installs FNGK when this machine has none, then moves on to sign-in", async
   expect(installBody).toEqual({ scope: "user", confirm: true });
   await expect(setup.getByRole("button", { name: "Sign in to Signal" })).toBeVisible();
 });
+
+test("explains why FNGK needs attention and closes once it recovers", async ({ page }) => {
+  let failing = true;
+  await page.route("**/api/onboarding/status", async route => {
+    const response = await route.fetch(), value = await response.json();
+    await route.fulfill({ response, json: failing ? { ...value, state: "recoverable-error", local: { ...value.local, state: "recoverable-error", message: "FNGK needs attention.", errorCode: "signal_unreachable", detail: "Signal at http://signal.localhost did not respond." } } : { ...value, state: "ready", local: { ...value.local, state: "ready", message: "FNGK is ready." } } });
+  });
+  await page.goto("/");
+  const setup = page.getByRole("complementary", { name: "FNGK setup" });
+  await expect(setup.getByText("Signal at http://signal.localhost did not respond.")).toBeVisible();
+  await expect(setup.getByText(/Atlas keeps checking every few seconds/)).toBeVisible();
+  const recheck = page.waitForRequest("**/api/onboarding/status");
+  await setup.getByRole("button", { name: "Try again" }).click();
+  await recheck;
+  failing = false;
+  await expect(page.getByRole("complementary", { name: "FNGK setup" })).toHaveCount(0, { timeout: 8_000 });
+});
