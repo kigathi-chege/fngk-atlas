@@ -3,6 +3,39 @@ import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
 const mode = process.env.FNGK_FIXTURE_MODE ?? 'ok';
+const profileArg = () => args.includes('--profile') ? args[args.indexOf('--profile') + 1] : 'local';
+
+// "onboarding": a stateful machine that starts signed out. `login --pair` waits
+// for the test to drop an "approved" (or "denied") file into FNGK_FIXTURE_STATE,
+// then reports a signed-in operator and a paired Device.
+if (mode === 'onboarding') {
+  const { existsSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const state = process.env.FNGK_FIXTURE_STATE; mkdirSync(state, { recursive: true });
+  const has = name => existsSync(join(state, name)), mark = name => writeFileSync(join(state, name), '1');
+  const emit = value => process.stdout.write(JSON.stringify({ protocolVersion: 'fngk.login.v1', ...value }) + '\n');
+  if (args[0] === 'profiles') {
+    process.stdout.write(JSON.stringify({ protocolVersion: 'fngk.profiles.v1', profiles: has('signed-in') ? [{ name: 'local', current: true, mode: has('paired') ? 'device' : 'unknown', paired: has('paired'), operatorAuthorized: true, daemon: has('daemon') ? 'running' : 'stopped', executable: '/fixture/fngk', agentVersion: 'v1.4.0', operatorAccount: 'dev@signal.localhost' }] : [] }) + '\n');
+    process.exit(0);
+  }
+  if (args[0] === 'status' && !has('signed-in')) { process.stderr.write('fngk: operator login required: run fngk login (or fngk login <signal-url> for a self-hosted Signal)\n'); process.exit(1); }
+  if (args[0] === 'install') { mark('daemon'); process.stdout.write('Signal installed as signal-local (user scope).\n'); process.exit(0); }
+  if (args[0] === 'logout') { const { rmSync } = await import('node:fs'); rmSync(join(state, 'signed-in'), { force: true }); process.exit(0); }
+  if (args[0] === 'login') {
+    const explicit = args[1] && !args[1].startsWith('--') ? args[1] : undefined;
+    const signal = new URL(explicit ?? process.env.FNGK_SIGNAL_URL ?? 'https://signal.nipate.africa').origin;
+    emit({ state: 'authorization-required', authorizationUrl: `${signal}/cli-authorize?code=A1B2C3D4E5F6`, stateId: 'fixture-pairing-state-0001', expiresAt: new Date(Date.now() + 600_000).toISOString(), profile: profileArg(), userCode: 'A1B2C3D4E5F6', signalUrl: signal, pairing: true });
+    const timer = setInterval(() => {
+      if (has('denied')) { process.stderr.write('fngk: authorization failed (403): {"error":"authorization_denied"}\n'); process.exit(1); }
+      if (!has('approved')) return;
+      clearInterval(timer); mark('signed-in'); mark('paired');
+      emit({ state: 'authenticated', profile: profileArg(), account: 'dev@signal.localhost' });
+      emit({ state: 'paired', profile: profileArg(), deviceId: 'device-fixture-1', deviceName: 'atlas-fixture' });
+      process.exit(0);
+    }, 50);
+    setTimeout(() => process.exit(3), 30_000);
+  }
+}
 
 if (args[0] === 'version') {
   if (mode === 'missing-version') process.exit(17);
@@ -55,6 +88,17 @@ if (args[0] === 'version') {
 } else if (args[0] === 'tcp' && args.includes('--stdio-json')) {
   process.stdout.write(mode==='human-tcp'?'Signal TCP relay listening on 127.0.0.1:39153\n':JSON.stringify({protocolVersion:'fngk.tcp.v1',type:'ready',listenHost:'127.0.0.1',listenPort:32123,target:args[1],targetPort:Number(args[2]),argv:args})+'\n');
   setInterval(()=>{},60_000);
+} else if (mode === 'onboarding' && args[0] === 'login') {
+  // handled above; keep the process alive while it waits for approval
+} else if (args[0] === 'login' && args.includes('--pair') && args.includes('--json')) {
+  const explicit = args[1] && !args[1].startsWith('--') ? args[1] : undefined, signal = new URL(explicit ?? process.env.FNGK_SIGNAL_URL ?? 'https://signal.nipate.africa').origin;
+  process.stdout.write(JSON.stringify({protocolVersion:'fngk.login.v1',state:'authorization-required',authorizationUrl:`${signal}/cli-authorize?code=A1B2C3D4E5F6`,stateId:'fixture-pairing-state-0001',expiresAt:'2030-01-01T00:00:00.000Z',profile:profileArg(),userCode:'A1B2C3D4E5F6',signalUrl:signal,pairing:mode!=='old-signal'})+'\n');
+  process.stdout.write(JSON.stringify({protocolVersion:'fngk.login.v1',state:'authenticated',profile:profileArg(),account:'dev@signal.localhost'})+'\n');
+  process.stdout.write(JSON.stringify(mode==='old-signal'?{protocolVersion:'fngk.login.v1',state:'pairing-unavailable',profile:profileArg(),reason:'signal_pairing_unsupported'}:{protocolVersion:'fngk.login.v1',state:'paired',profile:profileArg(),deviceId:'device-fixture-1',deviceName:'atlas-fixture'})+'\n');
+} else if (args[0] === 'logout' && args.includes('--operator')) {
+  process.stdout.write('Removed the operator login.\n');
+} else if (args[0] === 'pair') {
+  process.stdout.write('Paired device profile.\n');
 } else if (args[0] === 'login' && args.includes('--json')) {
   process.stdout.write(JSON.stringify({protocolVersion:'fngk.login.v1',state:'authorization-required',authorizationUrl:'https://signal.example.test/authorize',stateId:'fixture-login-state',expiresAt:'2030-01-01T00:00:00.000Z',profile:args[args.indexOf('--profile')+1]??'local'})+'\n');
   process.stdout.write(JSON.stringify({protocolVersion:'fngk.login.v1',state:'authenticated',profile:args[args.indexOf('--profile')+1]??'local'})+'\n');

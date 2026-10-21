@@ -75,12 +75,31 @@ describe("Atlas FNGK-native server", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ local: { profile: "work" } });
   });
-  it("uses the FNGK JSON login protocol without returning an operator credential", async () => {
+  it("signs in and pairs through fngk login --pair without returning a credential", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fngk-atlas-signin-"));
+    const opened: string[] = [];
+    const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture, env: { FNGK_SIGNAL_URL: "http://signal.localhost" } }), dbPath: path.join(directory, "atlas.db"), openBrowser: async url => { opened.push(url); return true; } });
+    cleanups.push(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
+    expect((await app.inject({ method: "GET", url: "/api/onboarding/status" })).json()).toMatchObject({ signIn: { defaultSignalUrl: "http://signal.localhost", opensBrowser: true } });
+    const started = await app.inject({ method: "POST", url: "/api/onboarding/signin", payload: { profile: "local" } });
+    expect(started.statusCode).toBe(201);
+    expect(started.json()).toMatchObject({ profile: "local", signalUrl: "http://signal.localhost", authorizationUrl: "http://signal.localhost/cli-authorize?code=A1B2C3D4E5F6", userCode: "A1B2C3D4E5F6", pairing: true, browserOpened: true });
+    expect(opened).toEqual(["http://signal.localhost/cli-authorize?code=A1B2C3D4E5F6"]);
+    let view: any;
+    for (let attempt = 0; attempt < 50; attempt++) { view = (await app.inject({ method: "GET", url: `/api/onboarding/signin/${started.json().id}` })).json(); if (view.state === "complete") break; await new Promise(resolve => setTimeout(resolve, 20)); }
+    expect(view).toMatchObject({ state: "complete", account: "dev@signal.localhost", device: { state: "paired" } });
+    expect(JSON.stringify(view)).not.toMatch(/credential|secret/i);
+    expect((await app.inject({ method: "POST", url: `/api/onboarding/signin/${started.json().id}/open` })).json()).toMatchObject({ browserOpened: true });
+    expect(opened).toHaveLength(2);
+    expect((await app.inject({ method: "GET", url: "/api/onboarding/signin/unknown" })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/api/onboarding/signin", payload: { profile: "local", signalUrl: "http://evil.example" } })).json()).toMatchObject({ error: "signal_url_invalid" });
+  });
+  it("signs out only after confirmation and validates fallback pairing links", async () => {
     const app = await harness();
-    const started = await app.inject({ method: "POST", url: "/api/onboarding/login/begin", payload: { profile: "local", origin: "https://signal.example.test" } });
-    expect(started.statusCode).toBe(201); expect(started.json()).toMatchObject({ stateId: "fixture-login-state", authorizationUrl: "https://signal.example.test/authorize" });
-    const completed = await app.inject({ method: "POST", url: "/api/onboarding/login/complete", payload: { stateId: "fixture-login-state", origin: "https://signal.example.test", receivedAt: new Date().toISOString() } });
-    expect(completed.json()).toEqual({ profile: "local", authenticated: true }); expect(completed.body).not.toMatch(/credential|secret/i);
+    expect((await app.inject({ method: "POST", url: "/api/onboarding/signout", payload: { profile: "local" } })).statusCode).toBe(409);
+    expect((await app.inject({ method: "POST", url: "/api/onboarding/signout", payload: { profile: "local", confirm: true } })).json()).toEqual({ signedOut: true, profile: "local" });
+    expect((await app.inject({ method: "POST", url: "/api/onboarding/pair", payload: { profile: "local", pairingUrl: "https://evil.example/steal" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url: "/api/onboarding/pair", payload: { profile: "local", pairingUrl: "https://signal.example.test/device-pair/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG" } })).json()).toEqual({ paired: true, profile: "local" });
   });
   it('requires confirmation and retains correction provenance without rewriting evidence',async()=>{
     const app=await harness();

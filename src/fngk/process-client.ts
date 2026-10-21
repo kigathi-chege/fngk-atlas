@@ -31,6 +31,8 @@ export interface FngkProfileSummary {
   paired: boolean;
   operatorAuthorized: boolean;
   daemon: 'running' | 'stopped' | 'unknown';
+  /** The signed-in account, for display only. */
+  operatorAccount?: string;
 }
 
 export interface FngkProfilesDocument {
@@ -87,7 +89,7 @@ export class FngkProcessClient {
       child.on('close', code => {
         if (code === 0) return finish();
         const normalized = stderr.toLowerCase();
-        const failure = normalized.includes('authentication_required') || normalized.includes('authentication required') ? 'authentication_required'
+        const failure = normalized.includes('authentication_required') || normalized.includes('authentication required') || normalized.includes('operator login required') ? 'authentication_required'
           : normalized.includes('daemon') && (normalized.includes('unavailable') || normalized.includes('not running')) ? 'daemon_unavailable'
             : reportedCode(stderr) ?? 'process_failed';
         finish(new FngkProcessError(failure, stderr || `FNGK exited with code ${code}.`, code));
@@ -119,7 +121,7 @@ export class FngkProcessClient {
     )) throw new FngkProcessError('unsupported_protocol', 'FNGK returned an unsupported profile protocol.');
     return {
       protocolVersion: 'fngk.profiles.v1',
-      profiles: document.profiles.map(profile => ({ name: profile.name, current: profile.current, mode: profile.mode, paired: profile.paired, operatorAuthorized: profile.operatorAuthorized, daemon: profile.daemon })),
+      profiles: document.profiles.map(profile => ({ name: profile.name, current: profile.current, mode: profile.mode, paired: profile.paired, operatorAuthorized: profile.operatorAuthorized, daemon: profile.daemon, ...(typeof profile.operatorAccount === 'string' && profile.operatorAccount ? { operatorAccount: profile.operatorAccount.slice(0, 254) } : {}) })),
     } as FngkProfilesDocument;
   }
 
@@ -208,6 +210,15 @@ export class FngkProcessClient {
 
   async install(profile: string, signal?: AbortSignal): Promise<void> {
     await this.#run(['install', '--profile', profile], signal);
+  }
+
+  /** Forget only the operator login; a Device pairing in the profile stays. */
+  async logoutOperator(profile: string, signal?: AbortSignal): Promise<void> {
+    await this.#run(['logout', '--operator', '--profile', profile], signal);
+  }
+
+  async pair(pairingUrl: string, profile: string, signal?: AbortSignal): Promise<void> {
+    await this.#run(['pair', pairingUrl, '--profile', profile], signal);
   }
 
   openTerminal(target: string, options: { newSession?: boolean; sessionId?: string; profile?: string; signal?: AbortSignal; owner?:TerminalOwner; purpose?:TerminalPurpose } = {}): TerminalSession {
