@@ -83,9 +83,10 @@ jobs:
           workspaces: desktop/src-tauri
       - run: npm ci
       - name: Fetch and verify the tagged FNGK release
+        # From the public downloads host, verified against the signed manifest:
+        # the Signal repo is private to this repo's token and has no attestations.
         env:
-          GH_TOKEN: ${{ secrets.FNGK_RELEASE_TOKEN || github.token }}
-          FNGK_VERIFY_ATTESTATION: "1"
+          FNGK_RELEASE_SOURCE: downloads
           FNGK_VERSION: ${{ inputs.fngk_version }}
         run: bash scripts/fetch-fngk-release.sh
       - name: Build AppImage and deb
@@ -164,9 +165,10 @@ jobs:
           rustup default "$RUST_VERSION"
       - run: npm ci
       - name: Fetch and verify the tagged FNGK release
+        # From the public downloads host, verified against the signed manifest:
+        # the Signal repo is private to this repo's token and has no attestations.
         env:
-          GH_TOKEN: ${{ secrets.FNGK_RELEASE_TOKEN || github.token }}
-          FNGK_VERIFY_ATTESTATION: "1"
+          FNGK_RELEASE_SOURCE: downloads
           FNGK_VERSION: ${{ inputs.fngk_version }}
         run: bash scripts/fetch-fngk-release.sh
       - name: Build, sign and notarize the app and dmg
