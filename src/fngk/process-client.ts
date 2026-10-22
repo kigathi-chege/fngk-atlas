@@ -10,6 +10,10 @@ export interface FngkProcessClientOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+export interface DeviceAvailabilityEvent { id:string; state:'online'|'offline'; reason:string|null; closeCode:number|null; detail:Record<string,unknown>; agentReport:Record<string,unknown>|null; durationMs:number|null; occurredAt:string }
+export interface DeviceAvailabilityWindow { uptimePercent:number|null; observedMs:number; onlineMs:number; drops:number; longestOutageMs:number }
+export interface DeviceAvailability { protocolVersion:'fngk.device-availability.v1'; deviceId:string; deviceName:string|null; connected:boolean; state:'online'|'offline'|'unknown'; since:string|null; summary:{ windows:Record<string,DeviceAvailabilityWindow>; lastDrop:DeviceAvailabilityEvent|null; retentionDays:number }; events:DeviceAvailabilityEvent[]; nextBefore:string|null }
+
 export interface FngkContextState {
   binary: string;
   installed: boolean;
@@ -143,6 +147,9 @@ export class FngkProcessClient {
     const args=['sessions',sessionId,action,'--json'];if(options.profile)args.push('--profile',options.profile);if(options.title)args.push('--title',options.title);if(options.confirm)args.push('--yes');
     const value=JSON.parse((await this.#run(args,options.signal)).trim());if(value.protocolVersion!==SESSION_PROTOCOL)throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported terminal session protocol.');return value;
   }
+
+  /** fngk devices ID availability --json (fngk.device-availability.v1): online/offline transitions with Signal and agent drop reasons. */
+  async deviceAvailability(deviceId:string,options:{profile?:string;limit?:number;signal?:AbortSignal}={}):Promise<DeviceAvailability>{const args=['devices',deviceId,'availability','--json'];if(options.limit)args.push('--limit',String(Math.max(1,Math.min(500,Math.floor(options.limit)))));if(options.profile)args.push('--profile',options.profile);const value=JSON.parse((await this.#run(args,options.signal)).trim());if(value.protocolVersion!=='fngk.device-availability.v1')throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported Device availability protocol.');return value}
 
   async deviceLifecycle(deviceId:string,options:{profile?:string;signal?:AbortSignal}={}):Promise<{protocolVersion:'fngk.device-lifecycle.v1';state:string;terminal?:string;daemon?:string;activeAgentVersion?:string;paired?:boolean}>{const args=['devices',deviceId,'lifecycle','--json'];if(options.profile)args.push('--profile',options.profile);const value=JSON.parse((await this.#run(args,options.signal)).trim());if(value.protocolVersion!=='fngk.device-lifecycle.v1')throw new FngkProcessError('unsupported_protocol','FNGK returned an unsupported Device lifecycle protocol.');return value}
 

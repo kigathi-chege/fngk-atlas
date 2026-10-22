@@ -51,6 +51,12 @@ describe("Atlas FNGK-native server", () => {
     expect((await app.inject({method:'DELETE',url:'/api/device-lifecycle/device',payload:{contextId:'device:device-1',confirm:true}})).statusCode).toBe(409);
     expect((await app.inject({method:'POST',url:'/api/device-lifecycle/retire',payload:{contextId:'device:device-1',confirm:true}})).statusCode).toBe(409);
   });
+  it('serves a Device availability timeline through the installed FNGK CLI',async()=>{
+    const app=await harness();
+    const response=await app.inject({method:'GET',url:'/api/device-availability?deviceId=device-1&limit=5'});
+    expect(response.statusCode,response.body).toBe(200);expect(response.json()).toMatchObject({protocolVersion:'fngk.device-availability.v1',deviceId:'device-1',summary:{windows:{'24h':{drops:1}}}});expect(response.json().argv).toContain('5');
+    expect((await app.inject({method:'GET',url:'/api/device-availability?deviceId=../x'})).statusCode).toBe(400);
+  });
   it('keeps unowned FNGK namespace sessions outside Atlas terminal history and actions',async()=>{
     const app=await harness();
     expect((await app.inject({method:'GET',url:'/api/fngk/sessions?deviceId=device-1'})).json().sessions).toEqual([]);
