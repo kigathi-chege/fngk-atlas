@@ -8,7 +8,9 @@
 # reads with FNGK_ARTIFACT_DIR=output/fngk-release.
 #
 #   FNGK_RELEASE_SOURCE   github (default; needs `gh` and GH_TOKEN for a private repo)
-#                         or downloads (https://downloads.signol.org/fngk/<version>/)
+#                         or downloads (https://downloads.signol.org/fngk/<version>/);
+#                         downloads also verifies every archive against the signed
+#                         latest.json with the manifest key Atlas pins at runtime
 #   FNGK_DOWNLOADS_BASE   base URL for the downloads source
 #   FNGK_VERIFY_ATTESTATION=1  also run `gh attestation verify` on every archive
 set -euo pipefail
@@ -38,6 +40,24 @@ case "$source" in
     for file in "${archives[@]}" checksums.txt version.txt; do
       curl --proto '=https' --tlsv1.2 -fsSL "$base/$version/$file" -o "$output/$file"
     done
+    curl --proto '=https' --tlsv1.2 -fsSL "$base/latest.json" -o "$output/latest.json"
+    # Same payload and key as src/onboarding/{artifacts,manifest-trust}.ts.
+    node - "$output" "$version" "$atlas_root/src/onboarding/manifest-trust.ts" <<'NODE'
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const [output,version,trust]=process.argv.slice(2);
+const keys=(process.env.ATLAS_FNGK_MANIFEST_PUBLIC_KEY?.split(';').map(x=>x.trim()).filter(Boolean)??[...fs.readFileSync(trust,'utf8').matchAll(/"(-----BEGIN PUBLIC KEY-----\\n[^"]+-----END PUBLIC KEY-----)"/g)].map(m=>m[1].replace(/\\n/g,'\n'))).map(pem=>crypto.createPublicKey(pem));
+if(!keys.length)throw new Error('No FNGK manifest public key found.');
+const manifest=JSON.parse(fs.readFileSync(path.join(output,'latest.json'),'utf8'));
+if(manifest.version!==version)throw new Error(`downloads latest.json is ${manifest.version}, not the pinned ${version}; pin the latest FNGK release.`);
+const sums=new Map(fs.readFileSync(path.join(output,'checksums.txt'),'utf8').trim().split('\n').map(line=>{const [sum,name]=line.trim().split(/\s+/);return [name.replace(/^[*.\/]+/,''),sum]}));
+for(const a of manifest.artifacts){
+  const name=path.basename(new URL(a.url).pathname),payload=Buffer.from(JSON.stringify({protocolVersion:manifest.protocolVersion,version:manifest.version,platform:a.platform,architecture:a.architecture,url:a.url,sha256:a.sha256,bytes:a.bytes}));
+  if(!keys.some(key=>crypto.verify(null,payload,key,Buffer.from(a.signature,'base64'))))throw new Error(`Bad manifest signature for ${name}.`);
+  if(sums.get(name)!==a.sha256)throw new Error(`${name} in checksums.txt does not match the signed manifest.`);
+}
+console.log(`Signed manifest verified for ${manifest.artifacts.length} archives.`);
+NODE
+    rm "$output/latest.json"
     ;;
   *) echo "Unknown FNGK_RELEASE_SOURCE '$source' (github or downloads)." >&2; exit 2 ;;
 esac

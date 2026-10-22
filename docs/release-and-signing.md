@@ -21,7 +21,7 @@ is moved into place, and `latest.json` is always written after the files it
 points to. Both workflows use the same script, `scripts/publish-downloads.sh`.
 
 Every Atlas and FNGK file is also attached to its GitHub Release, and each one
-has a build-provenance attestation (`actions/attest-build-provenance`).
+has a build-provenance attestation (`actions/attest-build-provenance`) when the GitHub plan allows it; otherwise the signed manifests and `SHA256SUMS` authenticate the release.
 
 ## Repository secrets and variables
 
@@ -34,7 +34,6 @@ has a build-provenance attestation (`actions/attest-build-provenance`).
 | `SSH_HOST`, `SSH_PORT`, `SSH_USER`, `SSH_PRIVATE_KEY` | secrets | **to add** (same values as in NIPATEAFRICA/signal) | Upload to downloads.signol.org. The publish job fails, naming the missing ones, if any is unset |
 | `SSH_KNOWN_HOSTS` | secret | optional, recommended | Pinned host key. Without it the job does one Ed25519 `ssh-keyscan`, like Signal's deploy |
 | `DOWNLOADS_PATH` | variable | **set** (`/srv/nipate/apps/downloads`) | Web root of downloads.signol.org |
-| `FNGK_RELEASE_TOKEN` | secret | optional | A read-only token for NIPATEAFRICA/signal, used to download and verify the bundled FNGK release if `GITHUB_TOKEN` cannot read that repository |
 | `ENABLE_MACOS` | variable | unset | `true` turns on the macOS jobs |
 | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` | secrets | later | Developer ID Application certificate (base64 `.p12`), its password, and the identity name |
 | `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8` | secrets | later | App Store Connect API key ID, issuer ID, and the `.p8` contents. The workflow writes the contents to a file and sets `APPLE_API_KEY_PATH` |
@@ -155,5 +154,5 @@ The `windows` job is only a skeleton, and it fails if it is enabled. To ship Win
 
 1. **FNGK.** Tag NIPATEAFRICA/signal `vX.Y.Z`. `release-cli.yml` builds, attests, attaches the files to the GitHub Release, and publishes `fngk/`.
 2. **Pin it.** Set `desktop/fngk-release.json` in fngk-atlas to that tag.
-3. **Atlas.** Tag fngk-atlas `vA.B.C`. `release-desktop.yml` fetches the pinned FNGK release, checks its checksums and attestations, builds and signs the Linux bundles (and macOS, if enabled), writes `SHA256SUMS` and the attestations, assembles `latest.json`, attaches everything to the Release, and publishes `atlas/`.
+3. **Atlas.** Tag fngk-atlas `vA.B.C`. `release-desktop.yml` fetches the pinned FNGK release from downloads.signol.org (it must be the latest one there) and verifies every archive against the signed `latest.json` with the manifest key Atlas pins, builds and signs the Linux bundles (and macOS, if enabled), writes `SHA256SUMS` and the attestations, assembles `latest.json`, attaches everything to the Release, and publishes `atlas/`.
 4. **Repair.** A `workflow_dispatch` run with the same tag rebuilds a release. Set `publish` to also re-upload.
