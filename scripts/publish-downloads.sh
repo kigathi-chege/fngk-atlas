@@ -61,13 +61,14 @@ q() { printf '%q' "$1"; }
 # 0. A published version is immutable: clients and the CDN cache its files, so
 # replacing them with different bytes breaks checksum verification. Re-publishing
 # identical files is fine; set ALLOW_VERSION_REPLACE=1 only to repair a broken one.
-if [[ -f "$versioned_dir/checksums.txt" && "${ALLOW_VERSION_REPLACE:-}" != 1 ]]; then
-  existing="$(remote "cat $(q "$root/$version/checksums.txt") 2>/dev/null || true")"
-  if [[ -n "$existing" && "$existing" != "$(cat "$versioned_dir/checksums.txt")" ]]; then
+for sums in checksums.txt SHA256SUMS; do
+  [[ -f "$versioned_dir/$sums" && "${ALLOW_VERSION_REPLACE:-}" != 1 ]] || continue
+  existing="$(remote "cat $(q "$root/$version/$sums") 2>/dev/null || true")"
+  if [[ -n "$existing" && "$existing" != "$(cat "$versioned_dir/$sums")" ]]; then
     echo "::error::$product $version is already published with different files. Cut a new version instead." >&2
     exit 1
   fi
-fi
+done
 
 # 1. Versioned files: upload into a staging directory, then swap it in.
 tar -C "$versioned_dir" -cf - . | remote "set -e; mkdir -p $(q "$root/.staging-$stamp"); tar -xf - -C $(q "$root/.staging-$stamp"); \
