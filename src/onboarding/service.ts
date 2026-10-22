@@ -65,6 +65,7 @@ export class BootstrapService {
       state,
       message: localMessage(state),
       ...(runtime.reason ? { errorCode: safeErrorCode(runtime.reason) } : {}),
+      ...(state === "recoverable-error" && runtime.detail ? { detail: runtime.detail } : {}),
       ...(runtime.binary ? { executable: runtime.binary } : {}),
       ...(runtime.version ? { version: runtime.version } : {}),
       ...(runtime.profile ? { profile: runtime.profile } : {}),
