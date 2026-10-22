@@ -39,6 +39,11 @@ describe('FngkProcessClient', () => {
     });
   });
 
+  it('reads the Device availability timeline protocol with bounded argv',async()=>{
+    const value:any=await new FngkProcessClient({binary:fixture}).deviceAvailability('device-1',{profile:'work',limit:9999});
+    expect(value).toMatchObject({protocolVersion:'fngk.device-availability.v1',deviceId:'device-1',summary:{lastDrop:{reason:'heartbeat_timeout'}},events:[{reason:'agent_connected',agentReport:{cause:'local_suspend'}}]});
+    expect(value.argv).toEqual(['devices','device-1','availability','--json','--limit','500','--profile','work']);
+  });
   it('reports unsupported protocols without accepting their data', async () => {
     const client = new FngkProcessClient({ binary: fixture, env: { FNGK_FIXTURE_MODE: 'unsupported' } });
     await expect(client.namespace()).rejects.toMatchObject({ code: 'unsupported_protocol' });

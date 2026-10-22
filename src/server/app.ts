@@ -695,6 +695,17 @@ export async function createApp(
       return reply.code(result.statusCode).send(result.body);
     }
   });
+  app.get("/api/device-availability", async (request, reply) => {
+    const query = request.query as { deviceId?: string; profile?: string; limit?: string };
+    const deviceId = String(query.deviceId ?? "");
+    if (!/^[A-Za-z0-9-]{1,100}$/.test(deviceId)) return reply.code(400).send({ error: "device_required", message: "A Device id is required." });
+    try {
+      return await fngk.deviceAvailability(deviceId, { profile: String(query.profile ?? "") || undefined, limit: Number(query.limit) || 20 });
+    } catch (error) {
+      const result = processError(error);
+      return reply.code(result.statusCode).send(result.body);
+    }
+  });
   app.get("/api/device-lifecycle", async (request, reply) => {
     const query = request.query as { contextId?: string; profile?: string };
     const contextId = String(query.contextId ?? "");
