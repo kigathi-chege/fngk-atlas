@@ -54,7 +54,7 @@ export class FileService {
     const errors: unknown[] = [];
     for (const route of this.#routes(target, 'read')) try {
       const metadata = await route.stat(target.path, { signal: options.signal });
-      if (metadata.size > this.maxReadBytes) return { path: target.path, bytes: metadata.size, tooLarge: true as const, binary: false, fingerprint: undefined, content: undefined, text: undefined, route };
+      if (metadata.size > this.maxReadBytes) return { path: target.path, bytes: metadata.size, limitBytes: this.maxReadBytes, tooLarge: true as const, binary: false, fingerprint: undefined, content: undefined, text: undefined, route };
       const content = await route.read(target.path, { signal: options.signal }), binary = content.includes(0);
       return { path: target.path, bytes: content.length, tooLarge: false as const, binary, fingerprint: fingerprint(content), content: binary ? content : undefined, text: binary ? undefined : content.toString('utf8'), route };
     } catch (error) { if (isCancelled(error, options.signal)) throw error; errors.push(error); }

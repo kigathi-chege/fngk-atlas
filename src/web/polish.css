@@ -40,3 +40,8 @@
 .atlas-popup-floating{position:fixed!important;z-index:2000}
 .atlas-popup .atlas-popup-blank{flex:none;width:14px}
 .atlas-popup .atlas-popup-header{display:flex;align-items:center;gap:8px;min-width:0;padding:6px 8px}
+
+/* A failed listing in the filesystem tree says what failed and offers a retry. */
+.tree-error{display:flex;align-items:center;gap:8px}
+.tree-error>span{flex:1;min-width:0}
+.tree-error>button{flex:none}

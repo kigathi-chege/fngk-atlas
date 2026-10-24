@@ -63,8 +63,12 @@ test('edits, shows gutter markers and tree status, stages, commits and lists the
   // The tree marks the repository folder, then the file once it is visible.
   const tree = page.locator('.tree-explorer');
   // Saving reveals the file's folder; expand it only if it is still closed.
-  if (!(await tree.locator('.tree-row', { hasText: 'notes.txt' }).isVisible())) await tree.locator('.tree-row', { hasText: 'gitrepo' }).click();
-  await expect(tree.locator('.tree-row', { hasText: 'notes.txt' })).toBeVisible();
+  // The reveal can land after a plain visibility check, and clicking then folds the folder shut again.
+  const notes = tree.locator('.tree-row', { hasText: 'notes.txt' });
+  await expect(async () => {
+    if (!(await notes.isVisible())) await tree.locator('.tree-row', { hasText: 'gitrepo' }).click();
+    await expect(notes).toBeVisible({ timeout: 1_500 });
+  }).toPass({ timeout: 10_000 });
   await expect(tree.locator('.tree-row', { hasText: 'notes.txt' }).locator('.git-tree-letter')).toHaveText('M');
   await expect(tree.locator('.tree-row', { hasText: 'notes.txt' })).toHaveAttribute('data-git', 'modified');
 
