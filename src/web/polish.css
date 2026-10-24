@@ -4,7 +4,10 @@
 /* Panel gaps: panels are rounded cards on the window background. The 4px gap (Workbench
    sets dockview's gap) draws nothing; a short pill shows on hover or drag. */
 .atlas-dock,.atlas-dock .dv-shell,.atlas-dock .dv-dockview,.atlas-dock .dv-grid-view{background:var(--atlas-bg)!important}
-.atlas-dock>.dockview-theme-abyss-spaced{--dv-spacing-padding:4px}
+.atlas-dock>.dockview-theme-abyss-spaced{--dv-spacing-padding:4px;--dv-separator-border:transparent}
+/* Dockview draws a straight 1px separator along the edge of every view after the first; with
+   rounded panels it runs past the corners. The gap is the separator. */
+.atlas-dock .dv-split-view-container .dv-view::before{display:none!important}
 .atlas-dock .dv-groupview{box-shadow:none;background-clip:padding-box}
 .atlas-dock .dv-split-view-container>.dv-sash-container>.dv-sash::after{content:'';width:3px;height:32px;padding:0;border-radius:2px;background:var(--atlas-border-strong);font:0/0 a;letter-spacing:0;text-shadow:none;opacity:0;transform:translate(-50%,-50%);transition:opacity .12s}
 .atlas-dock .dv-split-view-container.dv-horizontal>.dv-sash-container>.dv-sash::after{transform:translate(-50%,-50%)}

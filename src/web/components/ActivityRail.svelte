@@ -9,7 +9,6 @@
 </script>
 <nav class="activity-rail context-rail" aria-label="Atlas activity">
   <div class="activity-rail-top">
-    <button class="rail-brand" title="FNGK Atlas" aria-label="FNGK Atlas"><img src="/brand/fngk-mark.svg" alt=""/></button>
     <button title="Open Devices" aria-label="Open Devices" onclick={()=>window.dispatchEvent(new Event('atlas:context'))}><Network size={17}/></button>
     <button title="Open Device lifecycle" aria-label="Open Device lifecycle" onclick={()=>window.dispatchEvent(new Event('atlas:open-device-lifecycle'))}><Settings2 size={17}/></button>
     <button title="Open Device Sessions" aria-label="Open Device Sessions" onclick={()=>window.dispatchEvent(new Event('atlas:open-device-sessions'))}><MonitorSmartphone size={17}/></button>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import {onMount} from 'svelte';
+  import {onMount,tick} from 'svelte';
   import type {WorkbenchState} from '../lib/workbench-state.js';
   import {loadContextCatalog} from '../lib/context-catalog.js';
   import {api} from '../lib/api.js';
@@ -19,12 +19,17 @@
   const span=(ms:number|null|undefined)=>{if(ms===null||ms===undefined)return '—';const s=Math.floor(ms/1000);return s<60?`${s}s`:s<3600?`${Math.floor(s/60)}m`:s<172800?`${Math.floor(s/3600)}h ${Math.floor(s/60)%60}m`:`${Math.floor(s/86400)}d`};
   async function loadAvailability(){const id=device?.device?.id,profile=state.snapshot().connection.profile??'',key=id?`${id}:${profile}:${device.online}`:'';if(key===availabilityKey)return;availabilityKey=key;if(!id){availability=null;return}try{const value=await api<DeviceAvailability>(`/api/device-availability?${new URLSearchParams({deviceId:id,limit:'5',...(profile?{profile}:{})})}`);if(availabilityKey===key)availability=value}catch{if(availabilityKey===key)availability=null}}
   async function refresh(){const catalog=await loadContextCatalog(false,state.snapshot().connection.profile);device=catalog.contexts.find((item:any)=>item.id===state.snapshot().contextId&&item.kind==='fngk-device');label=device?.device?.id?deviceLabelStore.getLabel(device.device.id)??resolveDeviceIdentity(device.device.id).label:'';void loadAvailability();}
+  // Ask the workbench to size this panel to its content whenever the Device (or its availability) changes,
+  // so the shortcuts sit right under the details instead of below empty space.
+  let section:HTMLElement;let fittedFor='';
+  async function fit(key:string){if(key===fittedFor)return;fittedFor=key;await tick();if(!section)return;const height=[...section.children].reduce((sum,child)=>{const style=getComputedStyle(child);return sum+child.getBoundingClientRect().height+(child.classList.contains('device-shortcuts')?0:parseFloat(style.marginTop)||0)+(parseFloat(style.marginBottom)||0)},0);window.dispatchEvent(new CustomEvent('atlas:fit-panel-height',{detail:{panelId:'atlas.device-details',height:height+2}}))}
+  $: void fit(`${device?.device?.id??''}:${availability?.events?.length??-1}`);
   function save(){if(device?.device?.id)deviceLabelStore.setLabel(device.device.id,label);editing=false;}
   function setColor(color:(typeof atlasDeviceColors)[number]){if(device?.device?.id){deviceAppearanceStore.set(device.device.id,color);appearanceRevision++;}}
   function shortcut(name:'ports'|'deployment'|'database'|'terminal'){if(!device)return;if(name==='ports')window.dispatchEvent(new CustomEvent('atlas:open-ports',{detail:{contextId:device.id}}));else if(name==='deployment')window.dispatchEvent(new CustomEvent('atlas:open-deployment',{detail:{contextId:device.id}}));else if(name==='database')window.dispatchEvent(new CustomEvent('atlas:open-database',{detail:{contextId:device.id}}));else window.dispatchEvent(new CustomEvent('atlas:open-terminal',{detail:{contextId:device.id,target:device.id,title:device.name??'Terminal',newSession:true}}));}
   onMount(()=>{void refresh();const unsubscribe=state.subscribe(()=>void refresh()),appearanceChanged=()=>appearanceRevision++;window.addEventListener('atlas:device-appearance-changed',appearanceChanged);return()=>{unsubscribe();window.removeEventListener('atlas:device-appearance-changed',appearanceChanged)}});
 </script>
-<section class="device-details" aria-label="Device details">
+<section bind:this={section} class="device-details" aria-label="Device details">
   <PermanentPanelHeader title="Device details" subtitle={device?.name??'Select a device'}><button class="collapse" title="Collapse device details" aria-label="Collapse device details" onclick={()=>window.dispatchEvent(new CustomEvent('atlas:toggle-panel-collapse',{detail:{panelId:'atlas.device-details'}}))}>−</button></PermanentPanelHeader>
   {#if device}{@const identity=resolveDeviceIdentity(device.device.id)}{@const color=appearanceRevision>=0?deviceAppearanceStore.get(device.device.id).color??identity.color:identity.color}
     <div class="device-profile"><b class="glyph" style={`--atlas-device-color:var(--atlas-device-${color})`}>{identity.glyph}</b><div><strong>{deviceLabelStore.getLabel(device.device.id)??identity.label}</strong><small>{device.name}</small></div><div class="device-colors" aria-label="Device color">{#each atlasDeviceColors as choice}<button title={`Use ${choice}`} aria-label={`Use ${choice}`} class:chosen={color===choice} style={`--device-choice:var(--atlas-device-${choice})`} onclick={()=>setColor(choice)}></button>{/each}</div></div>
