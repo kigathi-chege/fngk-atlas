@@ -1,3 +1,4 @@
+import { retryTimeout, timedOutFileError } from './file-timeouts.js';
 import {createProfileScope} from './profile-scope.js';
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import websocket from "@fastify/websocket";
@@ -230,6 +231,7 @@ export async function createApp(
     service: scopedFileService,
   });
   const retryableFileFailure=(error:unknown)=>{const value=error as {code?:string;causes?:Array<{code?:string}>};return value.code==='route_unavailable'&&value.causes?.some(cause=>['terminal_closed','timeout','process_error','process_failed','invalid_json','unsupported_protocol'].includes(String(cause.code)))===true};
+  const fileError=(error:unknown,action:string)=>timedOutFileError(error,action)??processError(error);
   const readThroughFiles=async<T>(contextId:string,operation:(service:Awaited<ReturnType<EffectiveContextService['files']>>)=>Promise<T>)=>{try{return await operation(await contexts.files(contextId))}catch(error){if(contextId==='local'||!retryableFileFailure(error))throw error;contexts.release(contextId);return await operation(await contexts.files(contextId))}};
   const evidence = new EvidenceStore(databaseFile);
   let interpreterTrust: Record<string, string> = {};
@@ -1674,11 +1676,11 @@ export async function createApp(
         const page = await readThroughFiles(contextId,service=>service.list({ contextId, path: query.path ?? "/" }, { cursor: query.cursor, limit: Number(query.limit) || 100, signal: requestSignal(request, reply) }));
         return { ...page, route: routeEvidence(page.route) };
       }
-      const scope = await scopeForContext(contextId, profileScope.current(), request, reply, query);
-      const page = await filesystemCache.list(scope, query.path ?? '/', { cursor: query.cursor, limit: Number(query.limit) || 100, force: query.force === '1', signal: requestSignal(request, reply) });
+      const scope = await scopeForContext(contextId, profileScope.current(), request, reply, query), signal = requestSignal(request, reply);
+      const page = await retryTimeout(() => filesystemCache.list(scope, query.path ?? '/', { cursor: query.cursor, limit: Number(query.limit) || 100, force: query.force === '1', signal }), signal);
       return { ...page, route: routeEvidence(page.route), diagnostics: filesystemCache.diagnostics(scope) };
     } catch (error) {
-      const result = processError(error);
+      const result = fileError(error, `Listing ${query.path ?? '/'}`);
       return reply.code(result.statusCode).send(result.body);
     }
   });
@@ -1689,7 +1691,7 @@ export async function createApp(
       const contextId=query.contextId??'local';
       const value = contextId === 'local'
         ? await readThroughFiles(contextId,service=>service.read({ contextId, path: query.path! }, { signal: requestSignal(request, reply) }))
-        : await filesystemCache.read(await scopeForContext(contextId, profileScope.current(), request, reply, query), query.path!, { signal: requestSignal(request, reply) });
+        : await (async () => { const scope = await scopeForContext(contextId, profileScope.current(), request, reply, query), signal = requestSignal(request, reply); return await retryTimeout(() => filesystemCache.read(scope, query.path!, { signal }), signal); })();
       return {
         ...value,
         contentBase64: value.content?.toString("base64"),
@@ -1697,7 +1699,7 @@ export async function createApp(
         route: routeEvidence(value.route),
       };
     } catch (error) {
-      const result = processError(error);
+      const result = fileError(error, `Opening ${query.path}`);
       return reply.code(result.statusCode).send(result.body);
     }
   });

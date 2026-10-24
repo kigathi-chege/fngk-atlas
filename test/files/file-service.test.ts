@@ -86,7 +86,7 @@ describe('logical filesystem', () => {
   it('returns metadata rather than loading files over the configured limit', async () => {
     const { root, files } = await harness(4);
     await writeFile(path.join(root, 'large.txt'), '12345');
-    expect(await files.read({ contextId: 'host', path: '/large.txt' })).toMatchObject({ tooLarge: true, bytes: 5, content: undefined, text: undefined });
+    expect(await files.read({ contextId: 'host', path: '/large.txt' })).toMatchObject({ tooLarge: true, bytes: 5, limitBytes: 4, content: undefined, text: undefined });
   });
 
   it('searches names and contents and performs conflict-safe filesystem mutations', async () => {

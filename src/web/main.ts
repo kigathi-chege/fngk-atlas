@@ -8,6 +8,7 @@ import 'dockview/dist/styles/dockview.css';
 import '@xterm/xterm/css/xterm.css';
 import './workspace.css';
 import './components/ui/form-controls.css';
+import './polish.css';
 
 // After a redeploy an open tab still asks for the old hashed chunks, which 404.
 // Reload once to pick up the new build; the timestamp stops a reload loop.

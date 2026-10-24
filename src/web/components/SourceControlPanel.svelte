@@ -184,7 +184,7 @@
           {:else if branch?.head}<button title="Publish branch" aria-label="Publish branch" disabled={Boolean(busy)} onclick={publish}><CloudUpload size={13}/>Publish</button>{/if}
         {/if}
         <span class="scm-more"><button title="More actions" aria-label="More git actions" onclick={()=>menuOpen=!menuOpen}><Ellipsis size={13}/></button>
-          {#if menuOpen}<div class="scm-menu" role="menu">
+          {#if menuOpen}<div class="scm-menu atlas-popup" role="menu">
             <button role="menuitem" onclick={()=>stash('push')}>Stash changes</button>
             <button role="menuitem" onclick={()=>stash('pop')}>Pop latest stash</button>
             <button role="menuitem" onclick={()=>{menuOpen=false;branchForm=''}}>New branch…</button>

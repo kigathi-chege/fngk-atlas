@@ -76,4 +76,22 @@ describe('AtlasEventStore', () => {
     expect(store.snapshot().map(event => event.id)).toEqual(expect.arrayContaining(['remote', 'pinned']));
     expect(store.snapshot().map(event => event.id)).not.toContain('local');
   });
+
+  it('cancels local work left pending when Atlas last closed, so it never shows as running', () => {
+    const storage = new MemoryStorage();
+    createAtlasEventStore(storage).begin(pending('interrupted') as any);
+    const [event] = createAtlasEventStore(storage).snapshot();
+    expect(event).toMatchObject({id: 'interrupted', state: 'cancelled', message: 'Atlas closed before this finished.'});
+  });
+
+  it('keeps the history bounded, dropping the oldest finished events but never running or pinned ones', () => {
+    const store = createAtlasEventStore();
+    store.begin(pending('still-running') as any);
+    store.begin({...pending('pinned-old'), state: 'success'} as any); store.pin('pinned-old');
+    for (let index = 0; index < 420; index += 1) store.begin({...pending(`done-${index}`), state: 'success'} as any);
+    const ids = store.snapshot().map(event => event.id);
+    expect(ids).toHaveLength(400);
+    expect(ids).toEqual(expect.arrayContaining(['still-running', 'pinned-old', 'done-419']));
+    expect(ids).not.toContain('done-0');
+  });
 });

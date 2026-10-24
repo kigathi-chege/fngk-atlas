@@ -1,0 +1,93 @@
+/* Final layer of Atlas chrome, loaded after every other sheet. The earlier sheets stack
+   overrides on overrides; for panel gaps, the title bar and menus, these rules win. */
+
+/* Panel gaps: panels are rounded cards on the window background. The 4px gap (Workbench
+   sets dockview's gap) draws nothing; a short pill shows on hover or drag. */
+.atlas-dock,.atlas-dock .dv-shell,.atlas-dock .dv-dockview,.atlas-dock .dv-grid-view{background:var(--atlas-bg)!important}
+.atlas-dock>.dockview-theme-abyss-spaced{--dv-spacing-padding:4px;--dv-separator-border:transparent}
+/* Dockview draws a straight 1px separator along the edge of every view after the first; with
+   rounded panels it runs past the corners. The gap is the separator. */
+.atlas-dock .dv-split-view-container .dv-view::before{display:none!important}
+.atlas-dock .dv-groupview{box-shadow:none;background-clip:padding-box}
+.atlas-dock .dv-split-view-container>.dv-sash-container>.dv-sash::after{content:'';width:3px;height:32px;padding:0;border-radius:2px;background:var(--atlas-border-strong);font:0/0 a;letter-spacing:0;text-shadow:none;opacity:0;transform:translate(-50%,-50%);transition:opacity .12s}
+.atlas-dock .dv-split-view-container.dv-horizontal>.dv-sash-container>.dv-sash::after{transform:translate(-50%,-50%)}
+.atlas-dock .dv-split-view-container.dv-vertical>.dv-sash-container>.dv-sash::after{width:32px;height:3px}
+.atlas-dock .dv-split-view-container>.dv-sash-container>.dv-sash:hover::after,.atlas-dock .dv-split-view-container>.dv-sash-container>.dv-sash:active::after{opacity:1;background:var(--atlas-focus)}
+
+/* Title bar: the search sits on the window's centre line. Equal flexible side columns
+   keep it there whenever both sides fit. */
+.atlas-shell>.atlas-command-menu{display:grid;grid-template-columns:minmax(max-content,1fr) minmax(180px,640px) minmax(max-content,1fr);align-items:center;gap:12px}
+.atlas-command-menu>.title-brand{justify-self:start;min-width:0}
+.atlas-command-menu>.unified-search{width:100%;max-width:none;min-width:0;margin:0!important;padding:0!important}
+.atlas-command-menu>.title-actions{justify-self:end;margin:0!important}
+.atlas-command-menu .unified-search-popover{left:0;right:0}
+@media(max-width:760px){.atlas-shell>.atlas-command-menu{grid-template-columns:auto minmax(0,1fr) auto;gap:6px}}
+
+/* Menus: one look for every context menu and dropdown, including dockview's tab menu. */
+.atlas-popup,.dv-context-menu{min-width:200px;max-width:280px;padding:4px!important;border:1px solid var(--atlas-border-strong)!important;border-radius:8px!important;background:var(--atlas-surface-2)!important;color:var(--atlas-text)!important;box-shadow:0 12px 32px #000a!important;font-size:11px}
+.atlas-popup [role=menuitem],.dv-context-menu-item{display:flex;align-items:center;gap:8px;width:100%;height:28px;padding:0 8px!important;border:0;border-radius:5px;background:transparent;color:inherit;font-size:11px!important;text-align:left;white-space:nowrap;cursor:pointer}
+.atlas-popup [role=menuitem]>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.atlas-popup [role=menuitem] svg{flex:none;color:var(--atlas-muted)}
+.atlas-popup [role=menuitem]:hover,.atlas-popup [role=menuitem]:focus-visible,.dv-context-menu-item:hover{background:var(--atlas-surface-3)!important;color:var(--atlas-text);outline:none}
+.atlas-popup [role=menuitem]:hover svg,.atlas-popup [role=menuitem]:focus-visible svg{color:var(--atlas-text)}
+.atlas-popup [role=menuitem].danger,.atlas-popup [role=menuitem].danger svg{color:var(--atlas-danger,#f87171)}
+.atlas-popup [role=menuitem].danger:hover,.atlas-popup [role=menuitem].danger:focus-visible{background:color-mix(in srgb,var(--atlas-danger,#f87171) 16%,transparent)!important}
+.atlas-popup [role=menuitem]:disabled{opacity:.45;cursor:default;background:transparent!important}
+.atlas-popup [role=separator],.dv-context-menu-separator{height:1px;margin:4px 2px!important;background:var(--atlas-border)!important}
+.atlas-popup .atlas-popup-heading{padding:6px 8px 3px;color:var(--atlas-muted);font-size:9px;letter-spacing:.08em;text-transform:uppercase}
+.atlas-popup kbd{color:var(--atlas-muted);font:9px ui-monospace,SFMono-Regular,Consolas,monospace}
+.atlas-popup{display:grid;outline:none}
+.atlas-popup-floating{position:fixed!important;z-index:2000}
+.atlas-popup .atlas-popup-blank{flex:none;width:14px}
+.atlas-popup .atlas-popup-header{display:flex;align-items:center;gap:8px;min-width:0;padding:6px 8px}
+
+/* A failed listing in the filesystem tree says what failed and offers a retry. */
+.tree-error{display:flex;align-items:center;gap:8px}
+.tree-error>span{flex:1;min-width:0}
+.tree-error>button{flex:none}
+
+/* Status bar: connection, the work in flight or the latest problem, and shortcuts. */
+.atlas-shell>footer.status-bar{display:flex;align-items:center;gap:6px;min-width:0;padding:0 6px;font-size:10px;color:var(--atlas-muted);white-space:nowrap}
+.status-bar button{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 6px;border:0;border-radius:4px;background:transparent;color:inherit;font:inherit}
+.status-bar button:hover{background:var(--atlas-surface-2);color:var(--atlas-text)}
+.status-connection span{color:var(--atlas-danger)}.status-connection.ok span{color:var(--accent,#d3fa72)}
+.status-connection b{font-weight:600}
+.status-roundtrip{display:inline-flex;align-items:center;gap:3px}.status-roundtrip.slow{color:var(--atlas-warning,#f5b942)}
+.status-activity{flex:1;min-width:0;justify-content:flex-start}
+.status-activity.failed{color:var(--atlas-danger)}
+.status-activity .status-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.status-activity .muted{color:var(--atlas-muted)}
+.status-activity em{font-style:normal;color:var(--atlas-text-soft)}
+.status-tools{display:inline-flex;align-items:center;gap:1px;flex:none}
+.status-events{position:relative}
+.status-events.has-errors{color:var(--atlas-danger)}
+.status-events i{min-width:14px;padding:0 3px;border-radius:7px;background:var(--atlas-danger);color:#1a0606;font:700 9px/14px ui-monospace,monospace;font-style:normal;text-align:center}
+.spin{animation:atlas-spin 1s linear infinite}
+@keyframes atlas-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin{animation:none}}
+
+.status-drawer{position:fixed;z-index:1800;right:8px;bottom:28px;width:min(460px,calc(100vw - 16px));max-height:min(60vh,520px);display:flex;flex-direction:column;border:1px solid var(--atlas-border-strong);border-radius:8px;background:var(--atlas-surface-1);box-shadow:0 16px 40px #000a;font-size:11px}
+.status-drawer>header{display:flex;align-items:center;gap:6px;padding:6px 6px 6px 10px;border-bottom:1px solid var(--atlas-border)}
+.status-drawer>header strong{margin-right:auto}
+.status-drawer button{display:inline-flex;align-items:center;gap:5px;border:0;border-radius:4px;background:transparent;color:var(--atlas-text-soft);font:inherit;padding:3px 6px}
+.status-drawer button:hover{background:var(--atlas-surface-3);color:var(--atlas-text)}
+.status-filters{display:flex;gap:2px;padding:2px;border-radius:6px;background:var(--atlas-surface-0)}
+.status-filters [aria-selected=true]{background:var(--atlas-surface-3);color:var(--atlas-text)}
+.status-drawer ol{margin:0;padding:4px;list-style:none;overflow:auto}
+.status-drawer li{border-radius:6px}
+.status-drawer li.open{background:var(--atlas-surface-2)}
+.status-event{width:100%;display:grid!important;grid-template-columns:16px minmax(0,1fr) auto;align-items:start!important;gap:8px!important;padding:6px!important;text-align:left}
+.status-drawer li.error .status-event svg{color:var(--atlas-danger)}.status-drawer li.warning .status-event svg{color:var(--atlas-warning,#f5b942)}.status-drawer li.success .status-event svg{color:var(--atlas-success,#84cc16)}
+.status-event-main{min-width:0;display:grid;gap:2px}
+.status-event-main b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:550;color:var(--atlas-text)}
+.status-event-main small{color:var(--atlas-muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.status-drawer li.open .status-event-main small{display:block}
+.status-drawer li.error .status-event-main small{color:var(--atlas-danger)}
+.status-event-meta{display:grid;justify-items:end;gap:2px;color:var(--atlas-muted);font-size:10px}
+.status-event-meta em{font-style:normal}
+.status-event-details{display:grid;gap:6px;padding:0 8px 8px 30px}
+.status-event-details dl{display:grid;gap:3px;margin:0}
+.status-event-details dl div{display:grid;grid-template-columns:80px minmax(0,1fr);gap:6px}
+.status-event-details dt{color:var(--atlas-muted)}.status-event-details dd{margin:0;overflow:hidden;text-overflow:ellipsis}
+.status-event-details>button{justify-self:start}
+.status-empty{padding:18px;color:var(--atlas-muted);text-align:center}

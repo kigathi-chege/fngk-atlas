@@ -2,6 +2,8 @@ import type {DockviewApi} from 'dockview';
 
 export const permanentPanelIds=['atlas.devices','atlas.device-details','atlas.filesystem','atlas.inspector','atlas.operations'] as const;
 export function clampSidebarWidth(width:number|undefined,availableWidth:number){const preferred=Math.round(availableWidth/5);return Math.max(240,Math.min(420,Math.round(width??preferred)))}
+/** A lower panel sized to its content: no taller than half the column, never a sliver. */
+export function fitLowerPanelHeight(contentHeight:number,sidebarHeight:number){return Math.max(140,Math.min(Math.round(sidebarHeight/2),Math.ceil(contentHeight)))}
 export function clampLowerPanelHeight(height:number|undefined,sidebarHeight:number){const minimum=Math.round(sidebarHeight/3),maximum=Math.round(sidebarHeight/2);return Math.max(minimum,Math.min(maximum,Math.round(height??minimum)))}
 
 /** Add keyboard interaction without replacing Dockview's pointer resizing. */
