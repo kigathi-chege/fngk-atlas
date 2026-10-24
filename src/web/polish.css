@@ -1,0 +1,39 @@
+/* Final layer of Atlas chrome, loaded after every other sheet. The earlier sheets stack
+   overrides on overrides; for panel gaps, the title bar and menus, these rules win. */
+
+/* Panel gaps: panels are rounded cards on the window background. The 4px gap (Workbench
+   sets dockview's gap) draws nothing; a short pill shows on hover or drag. */
+.atlas-dock,.atlas-dock .dv-shell,.atlas-dock .dv-dockview,.atlas-dock .dv-grid-view{background:var(--atlas-bg)!important}
+.atlas-dock>.dockview-theme-abyss-spaced{--dv-spacing-padding:4px}
+.atlas-dock .dv-groupview{box-shadow:none;background-clip:padding-box}
+.atlas-dock .dv-split-view-container>.dv-sash-container>.dv-sash::after{content:'';width:3px;height:32px;padding:0;border-radius:2px;background:var(--atlas-border-strong);font:0/0 a;letter-spacing:0;text-shadow:none;opacity:0;transform:translate(-50%,-50%);transition:opacity .12s}
+.atlas-dock .dv-split-view-container.dv-horizontal>.dv-sash-container>.dv-sash::after{transform:translate(-50%,-50%)}
+.atlas-dock .dv-split-view-container.dv-vertical>.dv-sash-container>.dv-sash::after{width:32px;height:3px}
+.atlas-dock .dv-split-view-container>.dv-sash-container>.dv-sash:hover::after,.atlas-dock .dv-split-view-container>.dv-sash-container>.dv-sash:active::after{opacity:1;background:var(--atlas-focus)}
+
+/* Title bar: the search sits on the window's centre line. Equal flexible side columns
+   keep it there whenever both sides fit. */
+.atlas-shell>.atlas-command-menu{display:grid;grid-template-columns:minmax(max-content,1fr) minmax(180px,640px) minmax(max-content,1fr);align-items:center;gap:12px}
+.atlas-command-menu>.title-brand{justify-self:start;min-width:0}
+.atlas-command-menu>.unified-search{width:100%;max-width:none;min-width:0;margin:0!important;padding:0!important}
+.atlas-command-menu>.title-actions{justify-self:end;margin:0!important}
+.atlas-command-menu .unified-search-popover{left:0;right:0}
+@media(max-width:760px){.atlas-shell>.atlas-command-menu{grid-template-columns:auto minmax(0,1fr) auto;gap:6px}}
+
+/* Menus: one look for every context menu and dropdown, including dockview's tab menu. */
+.atlas-popup,.dv-context-menu{min-width:200px;max-width:280px;padding:4px!important;border:1px solid var(--atlas-border-strong)!important;border-radius:8px!important;background:var(--atlas-surface-2)!important;color:var(--atlas-text)!important;box-shadow:0 12px 32px #000a!important;font-size:11px}
+.atlas-popup [role=menuitem],.dv-context-menu-item{display:flex;align-items:center;gap:8px;width:100%;height:28px;padding:0 8px!important;border:0;border-radius:5px;background:transparent;color:inherit;font-size:11px!important;text-align:left;white-space:nowrap;cursor:pointer}
+.atlas-popup [role=menuitem]>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.atlas-popup [role=menuitem] svg{flex:none;color:var(--atlas-muted)}
+.atlas-popup [role=menuitem]:hover,.atlas-popup [role=menuitem]:focus-visible,.dv-context-menu-item:hover{background:var(--atlas-surface-3)!important;color:var(--atlas-text);outline:none}
+.atlas-popup [role=menuitem]:hover svg,.atlas-popup [role=menuitem]:focus-visible svg{color:var(--atlas-text)}
+.atlas-popup [role=menuitem].danger,.atlas-popup [role=menuitem].danger svg{color:var(--atlas-danger,#f87171)}
+.atlas-popup [role=menuitem].danger:hover,.atlas-popup [role=menuitem].danger:focus-visible{background:color-mix(in srgb,var(--atlas-danger,#f87171) 16%,transparent)!important}
+.atlas-popup [role=menuitem]:disabled{opacity:.45;cursor:default;background:transparent!important}
+.atlas-popup [role=separator],.dv-context-menu-separator{height:1px;margin:4px 2px!important;background:var(--atlas-border)!important}
+.atlas-popup .atlas-popup-heading{padding:6px 8px 3px;color:var(--atlas-muted);font-size:9px;letter-spacing:.08em;text-transform:uppercase}
+.atlas-popup kbd{color:var(--atlas-muted);font:9px ui-monospace,SFMono-Regular,Consolas,monospace}
+.atlas-popup{display:grid;outline:none}
+.atlas-popup-floating{position:fixed!important;z-index:2000}
+.atlas-popup .atlas-popup-blank{flex:none;width:14px}
+.atlas-popup .atlas-popup-header{display:flex;align-items:center;gap:8px;min-width:0;padding:6px 8px}

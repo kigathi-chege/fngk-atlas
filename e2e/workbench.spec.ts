@@ -858,6 +858,7 @@ test("keeps the persistent shell polished and reachable at desktop and narrow wi
       right: right?.width ?? 0,
       center: center?.width ?? 0,
       grip: sash ? getComputedStyle(sash, "::after").content : "",
+      gripOpacity: sash ? getComputedStyle(sash, "::after").opacity : "",
       sashBackground: sash ? getComputedStyle(sash).backgroundColor : "",
       viewPadding: view ? getComputedStyle(view).padding : "",
       groupRadius: group ? getComputedStyle(group).borderRadius : "",
@@ -870,7 +871,9 @@ test("keeps the persistent shell polished and reachable at desktop and narrow wi
   });
   expect(Math.abs(geometry.left - geometry.right)).toBeLessThanOrEqual(16);
   expect(geometry.center).toBeGreaterThan(geometry.left * 1.5);
-  expect(geometry.grip).toContain("•••");
+  // The gap draws nothing until hovered: the grip pill is invisible at rest.
+  expect(geometry.grip).toBe('""');
+  expect(geometry.gripOpacity).toBe("0");
   expect(geometry.sashBackground).toBe("rgba(0, 0, 0, 0)");
   expect(geometry.viewPadding).toBe("0px");
   expect(geometry.groupRadius).toBe("8px");
@@ -926,7 +929,7 @@ test("keeps the persistent shell polished and reachable at desktop and narrow wi
   ).toBeLessThanOrEqual(0);
 });
 
-test("discards the legacy workbench schema and restores a full-height six-pixel canvas", async ({
+test("discards the legacy workbench schema and restores a full-height four-pixel canvas", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -968,12 +971,12 @@ test("discards the legacy workbench schema and restores a full-height six-pixel 
   });
   expect(geometry.legacy).toBeNull();
   expect(geometry.saved?.version).toBe(9);
-  expect(geometry.navigator!.left - geometry.workbench!.left).toBe(6);
-  expect(geometry.deviceDetails!.top - geometry.navigator!.bottom).toBe(6);
-  expect(geometry.workbench!.bottom - geometry.deviceDetails!.bottom).toBe(6);
-  expect(geometry.center!.left - geometry.navigator!.right).toBe(6);
-  expect(geometry.filesystem!.left - geometry.center!.right).toBe(6);
-  expect(geometry.center!.height).toBe(geometry.workbench!.height - 12);
+  expect(geometry.navigator!.left - geometry.workbench!.left).toBe(4);
+  expect(geometry.deviceDetails!.top - geometry.navigator!.bottom).toBe(4);
+  expect(geometry.workbench!.bottom - geometry.deviceDetails!.bottom).toBe(4);
+  expect(geometry.center!.left - geometry.navigator!.right).toBe(4);
+  expect(geometry.filesystem!.left - geometry.center!.right).toBe(4);
+  expect(geometry.center!.height).toBe(geometry.workbench!.height - 8);
 });
 
 test("keeps sidebar widths and the center workspace when central tabs close", async ({

@@ -2,6 +2,9 @@
   import {onMount} from 'svelte';
   import Pin from '@lucide/svelte/icons/pin';
   import FolderTree from '@lucide/svelte/icons/folder-tree';
+  import FolderOpen from '@lucide/svelte/icons/folder-open';
+  import PinOff from '@lucide/svelte/icons/pin-off';
+  import FolderX from '@lucide/svelte/icons/folder-x';
   import MinimizedTray from './MinimizedTray.svelte';
   import WorkbenchContextMenu from './WorkbenchContextMenu.svelte';
   import type {AtlasPanelDescriptor} from '../lib/panel-registry.js';
@@ -31,4 +34,4 @@
   <span class="rail-fill"></span>
   <MinimizedTray items={minimized} visibleCount={7} onrestore={restore} onforget={forget}/>
 </nav>
-{#if menu}<WorkbenchContextMenu x={menu.x} y={menu.y} actions={[{id:'open',label:'Open root'},{id:'remove',label:menu.item.kind==='workspace'?'Remove workspace root':'Unpin folder',danger:true}]} onclose={()=>menu=undefined} onrun={(action)=>action==='open'?open(menu!.item):remove()}/>{/if}
+{#if menu}<WorkbenchContextMenu x={menu.x} y={menu.y} actions={[{id:'open',label:'Open root',icon:FolderOpen},{id:'remove',label:menu.item.kind==='workspace'?'Remove workspace root':'Unpin folder',icon:menu.item.kind==='workspace'?FolderX:PinOff,danger:true}]} onclose={()=>menu=undefined} onrun={(action)=>action==='open'?open(menu!.item):remove()}/>{/if}
