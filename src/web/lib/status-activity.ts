@@ -18,8 +18,12 @@ export function formatDuration(ms:number){
 export function summarize(items:AtlasEvent[],options:{contextId?:string;seenAt?:number}={}):StatusSummary{
   const seenAt=options.seenAt??0,byTime=[...items].sort((a,b)=>stamp(b)-stamp(a));
   const running=byTime.filter(event=>event.state==='pending');
-  const unseenErrors=byTime.filter(event=>event.state==='error'&&stamp(event)>seenAt);
-  const latest=byTime.find(event=>event.state!=='pending');
+  // A failure stops being news once later work in the same context succeeds: a Device that was offline and
+  // now answers should not keep saying it is offline.
+  const resolved=(failure:AtlasEvent)=>byTime.some(event=>event.state==='success'&&event.contextId===failure.contextId&&stamp(event)>stamp(failure));
+  const unseenErrors=byTime.filter(event=>event.state==='error'&&stamp(event)>seenAt&&!resolved(event));
+  // The last finished event for the context on screen (or one with no context), never another Device's.
+  const latest=byTime.find(event=>event.state!=='pending'&&(!event.contextId||!options.contextId||event.contextId===options.contextId));
   // The median of the last few successful reads on this Device; local contexts have no round trip worth showing.
   const samples=options.contextId?.startsWith('device:')?byTime.filter(event=>event.contextId===options.contextId&&event.state==='success'&&roundTripTypes.has(event.type)).slice(0,8).map(event=>eventDurationMs(event)).sort((a,b)=>a-b):[];
   const roundTripMs=samples.length?samples[Math.floor(samples.length/2)]:undefined;

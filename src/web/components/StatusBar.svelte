@@ -19,7 +19,8 @@
 
   let {workbench,snapshot}:{workbench:WorkbenchState;snapshot:WorkbenchSnapshot}=$props();
   const seenKey='atlas.status-seen.v1';
-  const readSeen=()=>{try{return Number(localStorage.getItem(seenKey))||0}catch{return 0}};
+  // The first time the bar runs, history from before it existed counts as seen, not as a flood of new errors.
+  const readSeen=()=>{try{const stored=Number(localStorage.getItem(seenKey));if(stored)return stored;const now=Date.now();localStorage.setItem(seenKey,String(now));return now}catch{return Date.now()}};
   let events=$state<AtlasEvent[]>([]),seenAt=$state(readSeen()),now=$state(Date.now()),open=$state(false),filter=$state<'all'|'errors'|'running'>('all'),expanded=$state(''),copied=$state('');
   let drawer=$state<HTMLElement>(),toggle=$state<HTMLElement>();
   const summary=$derived(summarize(events,{contextId:snapshot.contextId,seenAt}));

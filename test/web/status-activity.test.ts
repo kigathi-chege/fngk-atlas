@@ -13,6 +13,15 @@ describe('status bar summary',()=>{
     expect(summary.unseenErrors.map(item=>item.id)).toEqual(['new-error']);
     expect(summary.latest?.id).toBe('new-error');
   });
+  it('drops a failure from the bar once later work in the same context succeeds',()=>{
+    const items=[
+      event('offline',{state:'error',contextId:'device:1',message:'Device is offline',createdAt:at(0),updatedAt:at(1)}),
+      event('listed',{contextId:'device:1',createdAt:at(5),updatedAt:at(6)}),
+      event('other-device',{state:'error',contextId:'device:2',createdAt:at(2),updatedAt:at(3)}),
+    ];
+    expect(summarize(items).unseenErrors.map(item=>item.id)).toEqual(['other-device']);
+    expect(summarize(items,{contextId:'device:1'}).latest?.id).toBe('listed');
+  });
   it('measures the Device round trip from recent successful reads on that Device only',()=>{
     const items=[
       event('a',{contextId:'device:1',createdAt:at(0),updatedAt:at(2)}),
