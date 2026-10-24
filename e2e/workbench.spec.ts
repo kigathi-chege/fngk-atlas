@@ -1071,5 +1071,6 @@ test('keeps Operations closed until requested and manages a verified HTTP share'
   await page.getByRole('button',{name:'Publish',exact:true}).click();
   await expect(page.getByText('https://fixture.hkmn.test/',{exact:true})).toBeVisible();
   await page.getByTitle('Stop public route').click();
-  await expect(page.locator('footer',{hasText:'Public route stopped'})).toBeVisible();
+  await expect(page.locator('footer:not(.status-bar)',{hasText:'Public route stopped'})).toBeVisible();
+  await expect(page.getByRole('contentinfo',{name:'Status'})).toContainText('Public route stopped');
 });
