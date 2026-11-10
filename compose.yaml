@@ -8,6 +8,9 @@ services:
       ATLAS_HOST: "0.0.0.0"
       ATLAS_PORT: "4317"
       FNGK_BIN: "/usr/local/bin/fngk"
+      ATLAS_INTELLIGENCE_URL: "${ATLAS_INTELLIGENCE_URL:-}"
+      ATLAS_INTELLIGENCE_KEY: "${ATLAS_INTELLIGENCE_KEY:-}"
+      ATLAS_INTELLIGENCE_WORKSPACE: "${ATLAS_INTELLIGENCE_WORKSPACE:-}"
     volumes:
       - ./.atlas:/app/.atlas
       # Mount the installed FNGK executable and its normal process context when
