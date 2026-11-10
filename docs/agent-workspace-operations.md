@@ -24,11 +24,27 @@ Atlas reads `ATLAS_CALCULATOR_URL`, `ATLAS_CALCULATOR_TOKEN`, and optionally `AT
 
 The **Atlas intelligence** panel (`POST /api/intelligence/analyze`) answers explanation-only questions about the selected semantic context through Nipate Intelligence, not Calculator. Atlas sends the bounded context (at most 64 KiB of JSON; the question at most 4000 characters) to Intelligence's `POST /api/intelligence/exec/analyze` with a service key and returns the answer with citations that Intelligence has checked against the ids in that context. Atlas never writes canonical assertions from an answer.
 
-Atlas reads these only in the server process:
+### Connecting a key
 
-- `ATLAS_INTELLIGENCE_KEY`: an Intelligence service-client key (`isc_...`) with scope `agents:execute`. Required; without it the panel reports that Intelligence is not connected. Never put it in browser storage, a workspace snapshot, the repository or a client-side configuration file.
+Each person or team uses their own key; there is no shared key.
+
+1. An Intelligence admin creates a **service client** with scope `agents:execute` in the Intelligence console (one per person or team, so a key can be revoked on its own) and gives the person the `isc_...` key.
+2. In Atlas, open the **Atlas intelligence** panel, paste the key into **Intelligence key** (a password field), and choose **Connect**. *Show advanced* sets the Intelligence URL (HTTPS; HTTP only for localhost) and the workspace id (`[A-Za-z0-9._-]`, 1 to 64 characters).
+3. Atlas first verifies the key with `GET /api/intelligence/exec/models` (no run budget spent) and stores it only if Intelligence accepts it. The panel then shows `Connected, key fingerprint xxxxxxxx` (the first 8 hex characters of the key's SHA-256, never any part of the key). **Disconnect** removes it.
+
+The key is held by Atlas' local service, never by the renderer. It is encrypted with AES-256-GCM in `intelligence-connection.json` in the Atlas data directory (next to the database), using the per-installation owner-only key file `credentials.key` that Calculator's connection also uses (or `ATLAS_CREDENTIAL_KEY` when the host supplies one). Files are mode 0600 and a newly created data directory 0700. Connecting or disconnecting takes effect on the next request without a restart. Local routes (all behind the desktop launch capability): `GET`, `POST` (`{key, origin?, workspaceId?}`, at most 5 attempts per minute) and `DELETE` `/api/intelligence/connection`; responses carry `{configured, source: 'stored'|'environment'|null, origin, workspaceId, keyHint?}` and never the key.
+
+**Never bake a shared key into a build, installer, repository or client-side configuration:** anything shipped to users can be extracted.
+
+### Environment fallback
+
+For headless and development use Atlas reads these in the server process. A stored connection wins over them; they apply when nothing is stored (and after Disconnect):
+
+- `ATLAS_INTELLIGENCE_KEY`: an Intelligence service-client key (`isc_...`) with scope `agents:execute`. The panel says `Using ATLAS_INTELLIGENCE_KEY from the environment` when this is the source.
 - `ATLAS_INTELLIGENCE_URL`: the Intelligence origin. Default `https://intelligence.nipate.africa`.
 - `ATLAS_INTELLIGENCE_WORKSPACE`: the workspace id analysis runs and billing are attributed to. Default `atlas`.
+
+Future work: sign in with Nipate Accounts and call Intelligence with the user's own token instead of a pasted key. That needs an Intelligence route that accepts user tokens.
 
 The panel's health check calls `GET /api/intelligence/exec/models` with the key (no model run, no budget spent). A 401/403 means the key is wrong, revoked or lacks `agents:execute`; 422 `input_too_large` means the context exceeded 64 KiB. The model is whatever the Intelligence platform task agent `task-analyze` is configured to use; Atlas does not choose it. Calculator is still used for Agent Chat conversations (above) and its connection does not affect analysis.
 

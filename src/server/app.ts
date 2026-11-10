@@ -40,7 +40,6 @@ import {
 } from "../world/device-adapter.js";
 import {
   AtlasIntelligenceService,
-  IntelligenceServiceProvider,
   type CalculatorProvider,
 } from "../intelligence/service.js";
 import { DeploymentService } from "../deployments/service.js";
@@ -68,6 +67,7 @@ import { AtlasToolExecutor } from '../agent-tools/executor.js';
 import { GrantStore } from '../agent-tools/grants.js';
 import { HttpCalculatorConversationGateway, type CalculatorConversationGateway } from '../intelligence/conversation-gateway.js';
 import { CalculatorConnectionService } from '../integrations/calculator-connection.js';
+import { IntelligenceConnectionService, IntelligenceConnectionError } from '../integrations/intelligence-connection.js';
 import { registerReplaceRoutes } from "./replace-routes.js";
 import { registerGitRoutes } from './git-routes.js';
 
@@ -264,7 +264,10 @@ export async function createApp(
   const storedCalculatorOrigin = calculatorConnection.status().connection?.origin;
   // Analysis goes to Nipate Intelligence with a server-side service key (ATLAS_INTELLIGENCE_KEY); Calculator is used only
   // for agent-chat conversations (below), so connecting or disconnecting Calculator never changes this provider.
-  const intelligenceProvider = options.intelligenceProvider ?? IntelligenceServiceProvider.fromEnvironment();
+  // The key is resolved per request from the local connection (stored, then ATLAS_INTELLIGENCE_KEY), so connecting or
+  // disconnecting takes effect without a restart.
+  const intelligenceConnection = new IntelligenceConnectionService(databaseFile);
+  const intelligenceProvider = options.intelligenceProvider ?? intelligenceConnection.provider();
   let calculatorConversationGateway = options.calculatorConversationGateway ?? (storedCalculatorOrigin && storedCalculatorToken ? new HttpCalculatorConversationGateway(storedCalculatorOrigin, storedCalculatorToken) : process.env.ATLAS_CALCULATOR_URL ? new HttpCalculatorConversationGateway(process.env.ATLAS_CALCULATOR_URL, process.env.ATLAS_CALCULATOR_TOKEN) : undefined);
   const intelligence = new AtlasIntelligenceService(
       worldStore,
@@ -2203,9 +2206,29 @@ export async function createApp(
   };
   app.get("/api/device-adapters", listDeviceAdapters);
   app.post("/api/device-adapters/:id/run", runRegisteredDeviceAdapter);
-  app.get("/api/intelligence/capabilities", async () =>
-    intelligence.capabilities(),
-  );
+  const currentIntelligenceProvider = () => { intelligence.provider = options.intelligenceProvider ?? intelligenceConnection.provider(); };
+  // Connection routes sit under /api/ and so pass the same launch-capability gate as every other route. The key is only
+  // ever read from the request body here; no response, error or log line carries it.
+  const intelligenceAttempts: number[] = [];
+  app.get("/api/intelligence/connection", async () => intelligenceConnection.status());
+  app.post("/api/intelligence/connection", async (request, reply) => {
+    const now = Date.now();
+    while (intelligenceAttempts.length && now - intelligenceAttempts[0] > 60_000) intelligenceAttempts.shift();
+    if (intelligenceAttempts.length >= 5) return reply.code(429).header("retry-after", "60").send({ error: "rate_limited", message: "Too many connection attempts. Wait a minute and try again." });
+    intelligenceAttempts.push(now);
+    try {
+      const body = (request.body && typeof request.body === "object" ? request.body : {}) as Record<string, unknown>;
+      return await intelligenceConnection.connect({ key: body.key, origin: body.origin, workspaceId: body.workspaceId });
+    } catch (error) {
+      if (error instanceof IntelligenceConnectionError) return reply.code(error.code === "intelligence_connection_invalid" ? 400 : error.code === "intelligence_key_rejected" ? 422 : 502).send({ error: error.code, message: error.message });
+      return reply.code(500).send({ error: "intelligence_connection_failed", message: "Could not save the Intelligence connection." });
+    }
+  });
+  app.delete("/api/intelligence/connection", async () => intelligenceConnection.disconnect());
+  app.get("/api/intelligence/capabilities", async () => {
+    currentIntelligenceProvider();
+    return intelligence.capabilities();
+  });
   app.get("/api/intelligence/context", async (request) => {
     const query = request.query as { contextId?: string; selectionId?: string },
       contextId = String(query.contextId ?? "local");
@@ -2218,6 +2241,7 @@ export async function createApp(
         selectionId?: string;
       },
       contextId = String(body.contextId ?? "local");
+    currentIntelligenceProvider();
     try {
       return await intelligence.analyze(
         String(body.question ?? ""),

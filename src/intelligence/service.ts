@@ -1,6 +1,6 @@
 import type {WorldStore} from '../world/store.js';import type {WorldService} from '../world/service.js';
 export interface CalculatorRequest{question:string;context:{contextId:string;selection?:unknown;projection:unknown;entity?:unknown;assertions:unknown[];tools:Array<{id:string;description:string}>}}
-export interface CalculatorProvider{id:string;health():Promise<{available:boolean;message?:string}>;analyze(request:CalculatorRequest,signal?:AbortSignal):Promise<{answer:string;citations?:Array<{entityId:string;assertionId?:string}>}>}
+export interface CalculatorProvider{id:string;health():Promise<{available:boolean;message?:string;status?:number}>;analyze(request:CalculatorRequest,signal?:AbortSignal):Promise<{answer:string;citations?:Array<{entityId:string;assertionId?:string}>}>}
 export const DEFAULT_INTELLIGENCE_URL='https://intelligence.nipate.africa';
 export const DEFAULT_INTELLIGENCE_WORKSPACE='atlas';
 export type IntelligenceProviderOptions={origin?:string;key:string;workspaceId?:string;timeoutMs?:number};
@@ -25,7 +25,7 @@ export class IntelligenceServiceProvider implements CalculatorProvider{
     // GET /exec/models needs only a valid service key (any run/bind/manage/inspect scope) and spends no run budget.
     try{
       const response=await fetch(new URL('/api/intelligence/exec/models',this.origin),{headers:this.#headers(),signal:AbortSignal.timeout(3000)});
-      return{available:response.ok,message:response.ok?undefined:response.status===401||response.status===403?`Intelligence rejected the Atlas service key (${response.status})`:`Intelligence returned ${response.status}`};
+      return{available:response.ok,status:response.ok?undefined:response.status,message:response.ok?undefined:response.status===401||response.status===403?`Intelligence rejected the Atlas service key (${response.status})`:`Intelligence returned ${response.status}`};
     }catch(error){return{available:false,message:(error as Error).message}}
   }
   async analyze(request:CalculatorRequest,signal?:AbortSignal){
