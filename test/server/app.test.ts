@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { once } from "node:events";
 import WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { createServer, type Server } from "node:http";
+import { Writable } from "node:stream";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../src/server/app.js";
 import { FngkProcessClient } from "../../src/fngk/process-client.js";
 import { DiagnosticRegistry } from "../../src/diagnostics/registry.js";
@@ -1103,5 +1105,88 @@ describe("Atlas FNGK-native server", () => {
         contextId: "local",
       }),
     );
+  });
+});
+
+describe("Intelligence connection routes", () => {
+  const KEY = "isc_abcdefghijklmnopqrstuvwxyz012345";
+  const servers: Server[] = [];
+  afterEach(() => { while (servers.length) servers.pop()!.close(); vi.unstubAllEnvs(); });
+  async function upstream(accepted = KEY) {
+    const calls: Array<{ url?: string; auth?: string }> = [];
+    const server = createServer((request, response) => {
+      calls.push({ url: request.url, auth: request.headers.authorization });
+      const ok = request.headers.authorization === `Bearer ${accepted}`;
+      response.writeHead(ok ? 200 : 401, { "content-type": "application/json" });
+      if (!ok) return response.end('{"error":{"code":"unauthorized"}}');
+      response.end(request.url?.endsWith("/analyze") ? '{"answer":"It is a web service.","citations":[]}' : '{"models":[]}');
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve)); servers.push(server);
+    return { origin: `http://127.0.0.1:${(server.address() as any).port}`, calls };
+  }
+  async function connectionHarness(options: Record<string, unknown> = {}) {
+    const directory = await mkdtemp(path.join(tmpdir(), "fngk-atlas-intel-"));
+    const app = await createApp({ fngk: new FngkProcessClient({ binary: fixture }), dbPath: path.join(directory, "atlas.db"), capability: "cap", ...options });
+    cleanups.push(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
+    return { app, headers: { "x-atlas-capability": "cap" } };
+  }
+  it("requires the launch capability and never returns the key", async () => {
+    vi.stubEnv("ATLAS_INTELLIGENCE_KEY", "");
+    const logs: string[] = [], stream = new Writable({ write(chunk, _e, done) { logs.push(String(chunk)); done(); } });
+    const { app, headers } = await connectionHarness({ logger: { level: "trace", stream } });
+    const fake = await upstream();
+    for (const method of ["GET", "POST", "DELETE"] as const) expect((await app.inject({ method, url: "/api/intelligence/connection", payload: method === "POST" ? { key: KEY } : undefined })).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: "/api/intelligence/connection", headers })).json()).toMatchObject({ configured: false, source: null });
+    const connected = await app.inject({ method: "POST", url: "/api/intelligence/connection", headers, payload: { key: KEY, origin: fake.origin, workspaceId: "team-a" } });
+    expect(connected.statusCode, connected.body).toBe(200);
+    expect(connected.json()).toMatchObject({ configured: true, source: "stored", origin: fake.origin, workspaceId: "team-a" });
+    const status = await app.inject({ method: "GET", url: "/api/intelligence/connection", headers });
+    const capabilities = await app.inject({ method: "GET", url: "/api/intelligence/capabilities", headers });
+    expect(capabilities.json().health.available).toBe(true);
+    const failures = [
+      await app.inject({ method: "POST", url: "/api/intelligence/connection", headers, payload: { key: `${KEY} `, origin: fake.origin } }),
+      await app.inject({ method: "POST", url: "/api/intelligence/connection", headers, payload: { key: KEY, origin: "http://example.org" } }),
+    ];
+    for (const response of [connected, status, capabilities, ...failures]) expect(response.body).not.toContain(KEY);
+    expect(failures.map(value => value.statusCode)).toEqual([400, 400]);
+    expect(logs.join("")).not.toContain(KEY);
+  });
+  it("uses the connected key for analysis immediately and stops after disconnect", async () => {
+    vi.stubEnv("ATLAS_INTELLIGENCE_KEY", "");
+    const { app, headers } = await connectionHarness(), fake = await upstream();
+    const ask = () => app.inject({ method: "POST", url: "/api/intelligence/analyze", headers, payload: { question: "What is this?" } });
+    expect((await ask()).statusCode).toBe(503);
+    expect((await app.inject({ method: "POST", url: "/api/intelligence/connection", headers, payload: { key: KEY, origin: fake.origin } })).statusCode).toBe(200);
+    const answered = await ask();
+    expect(answered.statusCode, answered.body).toBe(200); expect(answered.json().answer).toBe("It is a web service.");
+    expect(fake.calls.at(-1)).toMatchObject({ url: "/api/intelligence/exec/analyze", auth: `Bearer ${KEY}` });
+    const removed = await app.inject({ method: "DELETE", url: "/api/intelligence/connection", headers });
+    expect(removed.json()).toMatchObject({ configured: false, source: null });
+    expect((await ask()).statusCode).toBe(503);
+  });
+  it("does not store a rejected or unreachable key and reports uniform errors", async () => {
+    vi.stubEnv("ATLAS_INTELLIGENCE_KEY", "");
+    const { app, headers } = await connectionHarness(), fake = await upstream("isc_someotherkey000000000");
+    const rejected = await app.inject({ method: "POST", url: "/api/intelligence/connection", headers, payload: { key: KEY, origin: fake.origin } });
+    expect(rejected.statusCode).toBe(422); expect(rejected.json().error).toBe("intelligence_key_rejected");
+    const unreachable = await app.inject({ method: "POST", url: "/api/intelligence/connection", headers, payload: { key: KEY, origin: "http://127.0.0.1:1" } });
+    expect(unreachable.statusCode).toBe(502); expect(unreachable.json().error).toBe("intelligence_unreachable");
+    for (const response of [rejected, unreachable]) expect(response.body).not.toContain(KEY);
+    expect((await app.inject({ method: "GET", url: "/api/intelligence/connection", headers })).json().configured).toBe(false);
+  });
+  it("lets a stored key win over the environment key and falls back after disconnect", async () => {
+    vi.stubEnv("ATLAS_INTELLIGENCE_KEY", "isc_environmentkey00000000000");
+    const { app, headers } = await connectionHarness(), fake = await upstream();
+    expect((await app.inject({ method: "GET", url: "/api/intelligence/connection", headers })).json()).toMatchObject({ configured: true, source: "environment" });
+    await app.inject({ method: "POST", url: "/api/intelligence/connection", headers, payload: { key: KEY, origin: fake.origin } });
+    expect((await app.inject({ method: "GET", url: "/api/intelligence/connection", headers })).json().source).toBe("stored");
+    expect((await app.inject({ method: "DELETE", url: "/api/intelligence/connection", headers })).json().source).toBe("environment");
+  });
+  it("rate limits connection attempts", async () => {
+    vi.stubEnv("ATLAS_INTELLIGENCE_KEY", "");
+    const { app, headers } = await connectionHarness();
+    const codes: number[] = [];
+    for (let attempt = 0; attempt < 7; attempt++) codes.push((await app.inject({ method: "POST", url: "/api/intelligence/connection", headers, payload: { key: "bad" } })).statusCode);
+    expect(codes).toEqual([400, 400, 400, 400, 400, 429, 429]);
   });
 });
