@@ -40,7 +40,7 @@ import {
 } from "../world/device-adapter.js";
 import {
   AtlasIntelligenceService,
-  HttpCalculatorProvider,
+  IntelligenceServiceProvider,
   type CalculatorProvider,
 } from "../intelligence/service.js";
 import { DeploymentService } from "../deployments/service.js";
@@ -95,7 +95,7 @@ interface CreateAppOptions {
   localRoot?: string;
   logger?: boolean;
   diagnosticRegistry?: DiagnosticRegistry;
-  calculatorProvider?: CalculatorProvider;
+  intelligenceProvider?: CalculatorProvider;
   calculatorConversationGateway?: CalculatorConversationGateway;
   deviceAdapters?: RegisteredDeviceAdapter[];
   worldRefreshMode?: 'inline'|'worker';
@@ -262,21 +262,14 @@ export async function createApp(
   const calculatorConnection = new CalculatorConnectionService(databaseFile, callbackOrigin);
   const storedCalculatorToken = calculatorConnection.bearer();
   const storedCalculatorOrigin = calculatorConnection.status().connection?.origin;
-  let calculatorProvider =
-      options.calculatorProvider ??
-      (storedCalculatorOrigin && storedCalculatorToken
-        ? new HttpCalculatorProvider(storedCalculatorOrigin, storedCalculatorToken)
-        : process.env.ATLAS_CALCULATOR_URL
-        ? new HttpCalculatorProvider(
-            process.env.ATLAS_CALCULATOR_URL,
-            process.env.ATLAS_CALCULATOR_TOKEN,
-          )
-        : undefined);
+  // Analysis goes to Nipate Intelligence with a server-side service key (ATLAS_INTELLIGENCE_KEY); Calculator is used only
+  // for agent-chat conversations (below), so connecting or disconnecting Calculator never changes this provider.
+  const intelligenceProvider = options.intelligenceProvider ?? IntelligenceServiceProvider.fromEnvironment();
   let calculatorConversationGateway = options.calculatorConversationGateway ?? (storedCalculatorOrigin && storedCalculatorToken ? new HttpCalculatorConversationGateway(storedCalculatorOrigin, storedCalculatorToken) : process.env.ATLAS_CALCULATOR_URL ? new HttpCalculatorConversationGateway(process.env.ATLAS_CALCULATOR_URL, process.env.ATLAS_CALCULATOR_TOKEN) : undefined);
   const intelligence = new AtlasIntelligenceService(
       worldStore,
       world,
-      calculatorProvider,
+      intelligenceProvider,
     );
   let activeIndex = store.latestIndex();
   const resolveIndex = (indexId?: string, contextId?: string) =>
@@ -631,14 +624,12 @@ export async function createApp(
       const complete=await calculatorConnection.complete(query);
       const connection=complete.connection!;
       const token=calculatorConnection.bearer()!;
-      calculatorProvider=new HttpCalculatorProvider(connection.origin,token);
-      intelligence.provider=calculatorProvider;
       calculatorConversationGateway=new HttpCalculatorConversationGateway(connection.origin,token);
       return reply.type('text/html; charset=utf-8').header('cache-control','no-store').send('<!doctype html><title>Atlas connected</title><body><p>FNGK Atlas is connected to Calculator. You may close this window.</p><script>window.close()</script></body>');
     } catch (error) { return reply.code(400).type('text/html; charset=utf-8').send(`<!doctype html><title>Atlas connection failed</title><body><p>${String((error as Error).message).replace(/[<>&]/g,'')}</p></body>`); }
   });
   app.delete('/api/app-connections', async () => {
-    calculatorProvider=undefined; intelligence.provider=undefined; calculatorConversationGateway=undefined;
+    calculatorConversationGateway=undefined;
     return calculatorConnection.disconnect();
   });
   // Calculator's 4xx answers (for example an invalid reference) are the caller's

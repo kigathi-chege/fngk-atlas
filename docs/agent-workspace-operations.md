@@ -20,6 +20,18 @@ If Calculator is unavailable, the chat panel reports the reason and leaves the r
 
 Atlas reads `ATLAS_CALCULATOR_URL`, `ATLAS_CALCULATOR_TOKEN`, and optionally `ATLAS_CALCULATOR_ENGINE` only in the server process. `ATLAS_CALCULATOR_TOKEN` must be a scoped, expiring Calculator integration credential created at Calculator's `/integrations` page, never an administrator, engine, connector, or Signal token. The renderer talks only to same-origin `/api/agent-chat/*` endpoints. Never place the Calculator token in browser storage, a workspace snapshot, or a client-side configuration file.
 
+## Atlas intelligence (explain this Device)
+
+The **Atlas intelligence** panel (`POST /api/intelligence/analyze`) answers explanation-only questions about the selected semantic context through Nipate Intelligence, not Calculator. Atlas sends the bounded context (at most 64 KiB of JSON; the question at most 4000 characters) to Intelligence's `POST /api/intelligence/exec/analyze` with a service key and returns the answer with citations that Intelligence has checked against the ids in that context. Atlas never writes canonical assertions from an answer.
+
+Atlas reads these only in the server process:
+
+- `ATLAS_INTELLIGENCE_KEY`: an Intelligence service-client key (`isc_...`) with scope `agents:execute`. Required; without it the panel reports that Intelligence is not connected. Never put it in browser storage, a workspace snapshot, the repository or a client-side configuration file.
+- `ATLAS_INTELLIGENCE_URL`: the Intelligence origin. Default `https://intelligence.nipate.africa`.
+- `ATLAS_INTELLIGENCE_WORKSPACE`: the workspace id analysis runs and billing are attributed to. Default `atlas`.
+
+The panel's health check calls `GET /api/intelligence/exec/models` with the key (no model run, no budget spent). A 401/403 means the key is wrong, revoked or lacks `agents:execute`; 422 `input_too_large` means the context exceeded 64 KiB. The model is whatever the Intelligence platform task agent `task-analyze` is configured to use; Atlas does not choose it. Calculator is still used for Agent Chat conversations (above) and its connection does not affect analysis.
+
 ## Tool approvals and grants
 
 Read-only tools are offered as scoped slash commands. Higher-risk actions require an approval card before execution. The card supports:
